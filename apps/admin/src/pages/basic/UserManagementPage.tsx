@@ -371,7 +371,6 @@ export function UserManagementPage() {
   }
 
   const columns: TableColumnsType<UserRecord> = [
-    { title: '员工编号', dataIndex: 'id', width: 110 },
     { title: '员工姓名', dataIndex: 'name', width: 120 },
     { title: '手机号', dataIndex: 'phone', width: 140 },
     {
@@ -472,7 +471,7 @@ export function UserManagementPage() {
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="搜索员工姓名、手机号、员工编号、组织机构、所属部门或角色"
+            placeholder="搜索员工姓名、手机号、组织机构、所属部门或角色"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
             style={{ maxWidth: 520 }}
