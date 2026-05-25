@@ -1,0 +1,51 @@
+.profile-page {
+  padding-top: 32rpx;
+}
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96rpx;
+  height: 96rpx;
+  color: #fff;
+  font-size: 38rpx;
+  font-weight: 700;
+  background: #1d4ed8;
+  border-radius: 28rpx;
+}
+
+.name {
+  margin-bottom: 8rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.menu-card {
+  margin-top: 24rpx;
+}
+
+.menu-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  font-size: 28rpx;
+  border-bottom: 1rpx solid #eef0f4;
+}
+
+.menu-row:last-child {
+  border-bottom: 0;
+}
+
+.logout-button {
+  margin-top: 32rpx;
+  color: #ef4444;
+  background: #fff;
+  border-radius: 16rpx;
+}

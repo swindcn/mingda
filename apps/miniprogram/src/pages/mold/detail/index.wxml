@@ -1,0 +1,74 @@
+<view class="detail-page {{showBottomActions ? 'has-bottom-actions' : ''}}">
+  <view class="detail-content" wx:if="{{mold}}">
+    <view class="card info-card">
+      <view class="card-title">开发信息</view>
+      <view class="divider"></view>
+      <view wx:if="{{!isSupplierEmployee}}" class="info-row"><text class="label">客户名称：</text><text>{{mold.customerName}}</text></view>
+      <view wx:if="{{!isSupplierEmployee}}" class="info-row"><text class="label">产品编号：</text><text>{{mold.productCode}}</text></view>
+      <view class="info-row"><text class="label">产品名称：</text><text>{{mold.productName}}</text></view>
+      <view class="info-row"><text class="label">客户告知时间：</text><text>{{mold.notifiedDate}}</text></view>
+      <view class="info-row"><text class="label">模具类型：</text><text>{{mold.moldType}}</text></view>
+      <view class="info-row"><text class="label">模具供应商：</text><text>{{mold.supplierName}}</text></view>
+      <view class="info-row"><text class="label">期望完成时间：</text><text>{{mold.expectedDate}}</text></view>
+      <view class="info-row"><text class="label">开发状态：</text><text class="state-text">{{mold.status}}</text></view>
+      <view class="info-row"><text class="label">下达时间：</text><text>{{mold.issuedDate}}</text></view>
+      <view class="info-row"><text class="label">备注：</text><text>{{mold.remark}}</text></view>
+    </view>
+
+    <view class="card image-card">
+      <view class="card-title">模具图片</view>
+      <view class="image-list">
+        <image
+          wx:for="{{mold.images}}"
+          wx:key="*this"
+          class="thumb"
+          src="{{item}}"
+          mode="aspectFill"
+          data-src="{{item}}"
+          data-urls="{{mold.images}}"
+          bindtap="previewImage"
+        />
+      </view>
+    </view>
+
+    <view class="card flow-card">
+      <view class="card-title">开发进度流程</view>
+      <view class="divider"></view>
+      <view class="flow-item {{item.done ? 'flow-done' : ''}}" wx:for="{{mold.flowRecords}}" wx:key="key">
+        <view class="flow-dot"></view>
+        <view class="flow-body">
+          <view class="flow-head">
+            <text class="flow-title">{{item.title}}</text>
+            <button wx:if="{{item.key === 'confirm' && canConfirmDrawing}}" class="node-button" bindtap="confirmDrawing">图纸确认</button>
+            <button wx:if="{{item.key === 'shipping' && canShip}}" class="node-button" bindtap="openShipping">发货</button>
+            <button wx:if="{{item.key === 'receive' && canReceive}}" class="node-button" bindtap="openReceive">收货</button>
+          </view>
+          <view wx:if="{{item.done}}" class="flow-record">
+            <view wx:if="{{item.time}}">时间：{{item.time}}</view>
+            <view wx:if="{{item.operator}}">操作人：{{item.operator}}</view>
+            <view wx:if="{{item.trackingNumber}}">快递单号：{{item.trackingNumber}}</view>
+            <view wx:if="{{item.images && item.images.length}}" class="flow-images">
+              <image
+                wx:for="{{item.images}}"
+                wx:for-item="flowImage"
+                wx:key="*this"
+                class="flow-thumb"
+                src="{{flowImage}}"
+                mode="aspectFill"
+                data-src="{{flowImage}}"
+                data-urls="{{item.images}}"
+                bindtap="previewImage"
+              />
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{showBottomActions}}" class="bottom-actions">
+    <button class="bottom-button trial" bindtap="openTrial">试模生产</button>
+    <button class="bottom-button batch" bindtap="openBatch">批量生产</button>
+    <button class="bottom-button eval" bindtap="openEvaluation">模具测评</button>
+  </view>
+</view>

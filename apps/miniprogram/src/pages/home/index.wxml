@@ -1,0 +1,41 @@
+<view class="home-page">
+  <view class="content">
+    <view class="section-head">
+      <text class="section-title">待办事项</text>
+      <text class="more-link" bindtap="goTodos">更多 →</text>
+    </view>
+
+    <scroll-view class="todo-scroll" scroll-y>
+      <view
+        class="todo-card"
+        wx:for="{{todos}}"
+        wx:key="id"
+        bindtap="openTodo"
+        data-id="{{item.moldId}}"
+      >
+        <view class="todo-main">
+          <view class="todo-line">
+            <text class="todo-title">{{item.title}}</text>
+            <text class="priority priority-{{item.priorityTone}}">{{item.priority}}</text>
+            <text class="module-tag">{{item.moduleName}}</text>
+          </view>
+          <view class="todo-meta">
+            <text class="clock">◷</text>
+            <text>{{item.stateText}}</text>
+            <text>·</text>
+            <text>{{item.dueText}}</text>
+          </view>
+        </view>
+        <text class="chevron">›</text>
+      </view>
+    </scroll-view>
+
+    <view class="section-title grid-title">功能入口</view>
+    <view class="feature-grid">
+      <view class="feature-card" bindtap="goMolds">
+        <view class="feature-icon">⌘</view>
+        <view class="feature-text">模具开发</view>
+      </view>
+    </view>
+  </view>
+</view>

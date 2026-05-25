@@ -1,0 +1,41 @@
+<view class="page">
+  <view class="card">
+    <view class="form-title">{{title}}</view>
+
+    <view wx:if="{{type === 'shipping'}}">
+      <text class="label">快递单号</text>
+      <input value="{{trackingNumber}}" placeholder="请输入快递单号" bindinput="onTrackingInput" />
+      <button class="upload-button" bindtap="chooseImages">上传发货图片</button>
+    </view>
+
+    <view wx:elif="{{type === 'receive'}}">
+      <button class="upload-button" bindtap="chooseImages">上传收货图片</button>
+    </view>
+
+    <view wx:elif="{{type === 'evaluation'}}">
+      <text class="label">评判结果</text>
+      <radio-group bindchange="onResultChange">
+        <label><radio value="通过" checked="{{result === '通过'}}" />通过</label>
+        <label><radio value="不通过" checked="{{result === '不通过'}}" />不通过</label>
+      </radio-group>
+      <text class="label">是否开发完成</text>
+      <radio-group bindchange="onCompleteChange">
+        <label><radio value="是" checked="{{isComplete}}" />是</label>
+        <label><radio value="否" checked="{{!isComplete}}" />否</label>
+      </radio-group>
+      <textarea value="{{reason}}" placeholder="请输入评判理由" bindinput="onReasonInput" />
+    </view>
+
+    <view wx:else>
+      <text class="label">填写人</text>
+      <input value="{{operator}}" placeholder="请输入填写人" bindinput="onOperatorInput" />
+      <button class="upload-button" bindtap="chooseImages">上传产品与检测图片</button>
+    </view>
+
+    <view class="image-list" wx:if="{{images.length}}">
+      <image wx:for="{{images}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+    </view>
+
+    <button class="primary-button submit-button" loading="{{submitting}}" bindtap="submit">提交</button>
+  </view>
+</view>

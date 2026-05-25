@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserType {
+  EMPLOYEE
+  SUPPLIER
+  CUSTOMER
+}
+
+enum UserStatus {
+  ENABLED
+  DISABLED
+}
+
+enum LockStatus {
+  NORMAL
+  LOCKED
+}
+
+enum SyncProvider {
+  LOCAL
+  DINGTALK
+  WECHAT_WORK
+  LARK
+}
+
+enum DataScope {
+  ALL
+  OWN
+  OWN_DEPARTMENT
+  OWN_AND_CHILD_DEPARTMENTS
+  CUSTOM_DEPARTMENTS
+}
+
+enum MoldDevelopmentStatus {
+  WAITING_SUPPLIER_CONFIRM
+  SUPPLIER_CONFIRMED
+  MAKING
+  FINISHED_WAITING_SHIPMENT
+  SHIPPED
+  RECEIVED
+  TRIAL_PRODUCTION
+  COMPLETED
+  CANCELLED
+}
+
+enum MoldFlowKey {
+  ISSUE
+  CONFIRM
+  SHIPPING
+  RECEIVE
+}
+
+enum MoldProductionRecordType {
+  TRIAL
+  BATCH
+  EVALUATION
+}
+
+model Department {
+  id                 String       @id @default(cuid())
+  name               String
+  code               String       @unique
+  parentId           String?
+  parent             Department?  @relation("DepartmentTree", fields: [parentId], references: [id])
+  children           Department[] @relation("DepartmentTree")
+  source             SyncProvider @default(LOCAL)
+  externalId         String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  users              User[]
+  ownedUsers         User[]       @relation("UserOwnerDepartment")
+  createdBusinessData BusinessDataOwnership[] @relation("BusinessDataCreatedDepartment")
+  ownedBusinessData   BusinessDataOwnership[] @relation("BusinessDataOwnerDepartment")
+
+  @@index([parentId])
+  @@index([source, externalId])
+}
+
+model User {
+  id                    String       @id @default(cuid())
+  username              String?      @unique
+  name                  String
+  phone                 String       @unique
+  passwordHash          String?
+  userType              UserType     @default(EMPLOYEE)
+  organizationName      String?
+  departmentId          String?
+  department            Department?  @relation(fields: [departmentId], references: [id])
+  ownerDepartmentId     String?
+  ownerDepartment       Department?  @relation("UserOwnerDepartment", fields: [ownerDepartmentId], references: [id])
+  position              String?
+  status                UserStatus   @default(ENABLED)
+  lockStatus            LockStatus   @default(NORMAL)
+  source                SyncProvider @default(LOCAL)
+  externalId            String?
+  deletedAt             DateTime?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  roles                 UserRole[]
+  createdBusinessData   BusinessDataOwnership[] @relation("BusinessDataCreatedUser")
+  ownedBusinessData     BusinessDataOwnership[] @relation("BusinessDataOwnerUser")
+
+  @@index([departmentId])
+  @@index([ownerDepartmentId])
+  @@index([source, externalId])
+  @@index([deletedAt])
+}
+
+model Role {
+  id                 String       @id @default(cuid())
+  name               String
+  description        String?
+  app                String       @default("admin")
+  dataScope          DataScope    @default(OWN)
+  permissions        Json         @default("[]")
+  columnPermissions  Json         @default("[]")
+  customDepartments  Json         @default("[]")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  users              UserRole[]
+
+  @@unique([name, app])
+}
+
+model UserRole {
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  address   String?
+  contact   String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  molds     MoldDevelopment[]
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  address   String?
+  contact   String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  molds     MoldDevelopment[]
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  spec          String?
+  unit          String?
+  type          String?
+  source        String?
+  workshop      String?
+  salePrice     Decimal? @db.Decimal(12, 2)
+  costPrice     Decimal? @db.Decimal(12, 2)
+  stockMax      Int?
+  stockMin      Int?
+  minPurchase   Int?
+  dailyCapacity Int?
+  remark        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  molds         MoldDevelopment[]
+}
+
+model MoldDevelopment {
+  id                    String                @id @default(cuid())
+  code                  String                @unique
+  customerId            String
+  customer              Customer              @relation(fields: [customerId], references: [id])
+  productId             String
+  product               Product               @relation(fields: [productId], references: [id])
+  supplierId            String
+  supplier              Supplier              @relation(fields: [supplierId], references: [id])
+  customerNotifyDate    DateTime
+  moldType              String
+  followerName          String?
+  expectedDate          DateTime?
+  status                MoldDevelopmentStatus @default(WAITING_SUPPLIER_CONFIRM)
+  supplierPromiseDate   DateTime?
+  shippedAt             DateTime?
+  trackingNumber        String?
+  attachments           Json                  @default("[]")
+  remark                String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  flowRecords           MoldDevelopmentFlowRecord[]
+  productionRecords     MoldProductionRecord[]
+}
+
+model MoldDevelopmentFlowRecord {
+  id                String          @id @default(cuid())
+  moldDevelopmentId String
+  moldDevelopment   MoldDevelopment @relation(fields: [moldDevelopmentId], references: [id], onDelete: Cascade)
+  key               MoldFlowKey
+  title             String
+  done              Boolean         @default(false)
+  operator          String?
+  operatedAt        DateTime?
+  trackingNumber    String?
+  images            Json            @default("[]")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([moldDevelopmentId, key])
+  @@index([moldDevelopmentId])
+}
+
+model MoldProductionRecord {
+  id                String                   @id @default(cuid())
+  moldDevelopmentId String
+  moldDevelopment   MoldDevelopment          @relation(fields: [moldDevelopmentId], references: [id], onDelete: Cascade)
+  type              MoldProductionRecordType
+  title             String
+  operator          String?
+  images            Json                     @default("[]")
+  result            String?
+  isComplete        Boolean?
+  reason            String?
+  createdAt         DateTime                 @default(now())
+
+  @@index([moldDevelopmentId])
+  @@index([type])
+}
+
+model BusinessDataOwnership {
+  id                    String      @id @default(cuid())
+  entityType            String
+  entityId              String
+  createdByUserId       String?
+  createdByDepartmentId String?
+  ownerUserId           String?
+  ownerDepartmentId     String?
+  createdByUser         User?       @relation("BusinessDataCreatedUser", fields: [createdByUserId], references: [id])
+  createdByDepartment   Department? @relation("BusinessDataCreatedDepartment", fields: [createdByDepartmentId], references: [id])
+  ownerUser             User?       @relation("BusinessDataOwnerUser", fields: [ownerUserId], references: [id])
+  ownerDepartment       Department? @relation("BusinessDataOwnerDepartment", fields: [ownerDepartmentId], references: [id])
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  @@unique([entityType, entityId])
+  @@index([createdByUserId])
+  @@index([createdByDepartmentId])
+  @@index([ownerUserId])
+  @@index([ownerDepartmentId])
+}

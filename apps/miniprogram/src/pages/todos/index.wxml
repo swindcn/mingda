@@ -1,0 +1,10 @@
+<view class="page">
+  <view class="todo-card card" wx:for="{{todos}}" wx:key="id" bindtap="openTodo" data-id="{{item.moldId}}">
+    <view class="todo-header">
+      <text class="todo-title">{{item.title}}</text>
+      <text class="todo-type">{{item.moduleName}}</text>
+    </view>
+    <view class="todo-meta">{{item.moldId}} · {{item.stateText}}</view>
+    <view class="todo-due">{{item.dueText}}</view>
+  </view>
+</view>

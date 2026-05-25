@@ -1,0 +1,22 @@
+<view class="page profile-page">
+  <view class="profile-card card">
+    <view class="avatar">闽</view>
+    <view>
+      <view class="name">闽大铸件</view>
+      <view class="muted">欢迎，{{username}}</view>
+    </view>
+  </view>
+
+  <view class="menu-card card">
+    <view class="menu-row">
+      <text>当前版本</text>
+      <text class="muted">0.1.0</text>
+    </view>
+    <view class="menu-row">
+      <text>账号类型</text>
+      <text class="muted">供应商协同账号</text>
+    </view>
+  </view>
+
+  <button class="logout-button" bindtap="logout">退出登录</button>
+</view>

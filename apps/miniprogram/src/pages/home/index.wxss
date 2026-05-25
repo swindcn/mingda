@@ -1,0 +1,153 @@
+.home-page {
+  min-height: 100vh;
+  padding-bottom: 136rpx;
+  background: #f6f7f9;
+  box-sizing: border-box;
+}
+
+.feature-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(145deg, #3b82f6, #0f55ff);
+}
+
+.content {
+  padding: 28rpx 32rpx;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18rpx;
+}
+
+.section-title {
+  color: #111827;
+  font-size: 36rpx;
+  font-weight: 700;
+}
+
+.more-link {
+  color: #0f55ff;
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.todo-scroll {
+  max-height: 500rpx;
+}
+
+.todo-card {
+  display: flex;
+  align-items: center;
+  min-height: 124rpx;
+  padding: 22rpx 24rpx;
+  margin-bottom: 18rpx;
+  background: #fff;
+  border-radius: 22rpx;
+  box-shadow: 0 4rpx 14rpx rgba(15, 23, 42, 0.1);
+  box-sizing: border-box;
+}
+
+.todo-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-line {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.todo-title {
+  color: #111827;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.priority,
+.module-tag {
+  height: 36rpx;
+  padding: 0 12rpx;
+  line-height: 36rpx;
+  font-size: 24rpx;
+  border-radius: 8rpx;
+}
+
+.priority-high {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+.priority-middle {
+  color: #d97706;
+  background: #fef3c7;
+}
+
+.priority-low {
+  color: #2563eb;
+  background: #dbeafe;
+}
+
+.module-tag {
+  color: #4b5563;
+  background: #eef2f7;
+}
+
+.todo-meta {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 12rpx;
+  color: #667085;
+  font-size: 26rpx;
+}
+
+.clock {
+  color: #f97316;
+  font-size: 30rpx;
+}
+
+.chevron {
+  color: #9ca3af;
+  font-size: 52rpx;
+}
+
+.grid-title {
+  margin: 42rpx 0 28rpx;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18rpx;
+}
+
+.feature-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 194rpx;
+  background: #fff;
+  border-radius: 22rpx;
+  box-shadow: 0 4rpx 14rpx rgba(15, 23, 42, 0.1);
+}
+
+.feature-icon {
+  width: 96rpx;
+  height: 96rpx;
+  margin-bottom: 18rpx;
+  font-size: 50rpx;
+  border-radius: 26rpx;
+}
+
+.feature-text {
+  color: #111827;
+  font-size: 28rpx;
+  font-weight: 700;
+}

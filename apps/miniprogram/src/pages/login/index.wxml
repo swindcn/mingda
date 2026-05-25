@@ -1,0 +1,25 @@
+<view class="login-page">
+  <view class="login-card">
+    <view class="brand-mark">闽</view>
+    <view class="brand-title">闽大铸件</view>
+    <view class="brand-subtitle">移动协同平台</view>
+
+    <view class="form">
+      <view class="field">
+        <text class="label">账号</text>
+        <input value="{{username}}" placeholder="请输入账号" bindinput="onUsernameInput" />
+      </view>
+      <view class="field">
+        <text class="label">密码</text>
+        <input value="{{password}}" password="{{!showPassword}}" placeholder="请输入密码" bindinput="onPasswordInput" />
+        <text class="toggle" bindtap="togglePassword">{{showPassword ? '隐藏' : '显示'}}</text>
+      </view>
+      <view class="form-row">
+        <checkbox checked="{{rememberPassword}}" bindtap="toggleRemember" />
+        <text class="remember">记住密码</text>
+        <text class="forgot">忘记密码？</text>
+      </view>
+      <button class="primary-button login-button" loading="{{loading}}" bindtap="login">登录</button>
+    </view>
+  </view>
+</view>

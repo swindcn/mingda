@@ -1,0 +1,29 @@
+.todo-card {
+  margin-bottom: 20rpx;
+}
+
+.todo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.todo-title {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.todo-type {
+  padding: 6rpx 14rpx;
+  color: #1677ff;
+  font-size: 22rpx;
+  background: #eaf3ff;
+  border-radius: 999rpx;
+}
+
+.todo-meta,
+.todo-due {
+  margin-top: 14rpx;
+  color: #6b7280;
+  font-size: 24rpx;
+}
