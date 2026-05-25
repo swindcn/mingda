@@ -330,6 +330,7 @@ export class BasicDataController {
     const role = await this.prisma.role.create({
       data: {
         name: body.name.trim(),
+        organizationName: body.organization || organizationName,
         description: body.description,
         app: body.app || '管理端',
         dataScope: prismaScope(body.dataScope) || 'OWN',
@@ -350,6 +351,7 @@ export class BasicDataController {
       where: { id },
       data: {
         name: body.name?.trim(),
+        organizationName: body.organization,
         description: body.description,
         app: body.app,
         dataScope: prismaScope(body.dataScope),
@@ -448,7 +450,7 @@ export class BasicDataController {
     return {
       id: record.id,
       name: record.name,
-      organization: organizationName,
+      organization: record.organizationName || organizationName,
       app: record.app,
       description: record.description || '',
       createdBy: record.name === '系统管理员' ? '系统' : '管理员',
@@ -503,6 +505,7 @@ export class BasicDataController {
     const adminRole = await this.prisma.role.upsert({
       where: { name_app: { name: '系统管理员', app: '管理端' } },
       update: {
+        organizationName,
         dataScope: 'ALL',
         permissions: [
           'admin',
@@ -526,6 +529,7 @@ export class BasicDataController {
       },
       create: {
         name: '系统管理员',
+        organizationName,
         app: '管理端',
         description: '系统内置管理员角色，拥有全部管理端权限。',
         dataScope: 'ALL',

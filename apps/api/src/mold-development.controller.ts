@@ -360,16 +360,19 @@ export class MoldDevelopmentController {
 
   private async ensureAdminAccount() {
     const passwordHash = hashPassword('13665068911')
-    const existing = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ username: 'admin' }, { phone: '13665068911' }],
-      },
+    const adminByPhone = await this.prisma.user.findUnique({
+      where: { phone: '13665068911' },
+      select: { id: true },
+    })
+    const adminByUsername = await this.prisma.user.findUnique({
+      where: { username: 'admin' },
       select: { id: true },
     })
 
     const adminRole = await this.prisma.role.upsert({
       where: { name_app: { name: '系统管理员', app: '管理端' } },
       update: {
+        organizationName: '摩尔元数（福建）科技有限公司',
         dataScope: 'ALL',
         permissions: [
           'admin',
@@ -393,6 +396,7 @@ export class MoldDevelopmentController {
       },
       create: {
         name: '系统管理员',
+        organizationName: '摩尔元数（福建）科技有限公司',
         app: '管理端',
         description: '系统内置管理员角色，拥有全部管理端权限。',
         dataScope: 'ALL',
@@ -418,7 +422,14 @@ export class MoldDevelopmentController {
       },
     })
 
+    const existing = adminByPhone || adminByUsername
     if (existing) {
+      if (adminByPhone && adminByUsername && adminByPhone.id !== adminByUsername.id) {
+        await this.prisma.user.update({
+          where: { id: adminByUsername.id },
+          data: { username: null },
+        })
+      }
       await this.prisma.user.update({
         where: { id: existing.id },
         data: {

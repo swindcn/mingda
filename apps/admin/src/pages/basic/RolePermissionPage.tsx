@@ -30,7 +30,13 @@ import type { DataNode } from 'antd/es/tree'
 import { useEffect, useMemo, useState } from 'react'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
-import { DEPARTMENT_STORAGE_EVENT, getDepartmentOptions, loadDepartments } from '../../utils/departments'
+import {
+  DEPARTMENT_STORAGE_EVENT,
+  fetchDepartmentsFromApi,
+  getDepartmentOptions,
+  loadDepartments,
+} from '../../utils/departments'
+import type { DepartmentRecord } from '../../utils/departments'
 import {
   dataScopeLabels,
   createRoleOnApi,
@@ -51,7 +57,6 @@ interface RoleFormValues {
   description?: string
 }
 
-const organizations = ['摩尔元数（福建）科技有限公司', '厦门子公司', '培训学员组织']
 const apps = ['管理端', '小程序端']
 
 const dataColumns = [
@@ -83,6 +88,13 @@ function filterPermissionTreeByKeys(nodes: DataNode[], checkedKeys: string[]): D
     .filter(Boolean) as DataNode[]
 }
 
+function getOrganizationOptions(departments: DepartmentRecord[]) {
+  return departments.map((department) => ({
+    label: department.name,
+    value: department.name,
+  }))
+}
+
 export function RolePermissionPage() {
   const [roleForm] = Form.useForm<RoleFormValues>()
   const [roles, setRoles] = useState<RoleRecord[]>(() => loadRoles())
@@ -98,7 +110,9 @@ export function RolePermissionPage() {
   const [columnPermissions, setColumnPermissions] = useState<string[]>([])
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [users, setUsers] = useState(() => loadUsers())
-  const [departmentOptions, setDepartmentOptions] = useState(() => getDepartmentOptions(loadDepartments()))
+  const [departments, setDepartments] = useState<DepartmentRecord[]>(() => loadDepartments())
+  const departmentOptions = useMemo(() => getDepartmentOptions(departments), [departments])
+  const organizationOptions = useMemo(() => getOrganizationOptions(departments), [departments])
   const userOptions = useMemo(
     () =>
       users.map((user) => ({
@@ -123,7 +137,13 @@ export function RolePermissionPage() {
   }, [])
 
   useEffect(() => {
-    const refreshDepartments = () => setDepartmentOptions(getDepartmentOptions(loadDepartments()))
+    void fetchDepartmentsFromApi()
+      .then(setDepartments)
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const refreshDepartments = () => setDepartments(loadDepartments())
     const refreshUsers = () => setUsers(loadUsers())
     window.addEventListener(DEPARTMENT_STORAGE_EVENT, refreshDepartments)
     window.addEventListener(USER_STORAGE_EVENT, refreshUsers)
@@ -146,7 +166,7 @@ export function RolePermissionPage() {
   const openCreateRole = () => {
     setEditingRole(null)
     roleForm.resetFields()
-    roleForm.setFieldsValue({ organization: organizations[0], app: apps[0] })
+    roleForm.setFieldsValue({ organization: organizationOptions[0]?.value, app: apps[0] })
     setRoleModalOpen(true)
   }
 
@@ -363,7 +383,7 @@ export function RolePermissionPage() {
             allowClear
             placeholder="组织机构"
             style={{ width: 260 }}
-            options={organizations.map((item) => ({ label: item, value: item }))}
+            options={organizationOptions}
           />
           <Input
             allowClear
@@ -404,7 +424,7 @@ export function RolePermissionPage() {
             <Input placeholder="请输入角色名称" />
           </Form.Item>
           <Form.Item label="组织机构" name="organization" rules={[{ required: true, message: '请选择组织机构' }]}>
-            <Select options={organizations.map((item) => ({ label: item, value: item }))} />
+            <Select placeholder="请选择组织机构" options={organizationOptions} />
           </Form.Item>
           <Form.Item label="应用" name="app" rules={[{ required: true, message: '请选择应用' }]}>
             <Select options={apps.map((item) => ({ label: item, value: item }))} />

@@ -117,6 +117,7 @@ model User {
 model Role {
   id                 String       @id @default(cuid())
   name               String
+  organizationName   String?
   description        String?
   app                String       @default("admin")
   dataScope          DataScope    @default(OWN)
