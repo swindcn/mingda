@@ -256,6 +256,7 @@ export class BasicDataController {
         position: body.position,
         status: body.status === '禁用' ? 'DISABLED' : 'ENABLED',
         lockStatus: body.lockStatus === '锁定' ? 'LOCKED' : 'NORMAL',
+        belongsTo: body.userType === '供应商' || body.userType === '客户' ? body.belongsTo || null : null,
         source: 'LOCAL',
       },
     })
@@ -281,6 +282,12 @@ export class BasicDataController {
         departmentId: body.department || body.departmentId ? department?.id || null : undefined,
         ownerDepartmentId: body.department || body.departmentId ? department?.id || null : undefined,
         position: body.position,
+        belongsTo:
+          body.userType === '供应商' || body.userType === '客户'
+            ? body.belongsTo || null
+            : body.userType === '员工'
+              ? null
+              : undefined,
         status: body.status === '禁用' ? 'DISABLED' : body.status === '启用' ? 'ENABLED' : undefined,
         lockStatus: body.lockStatus === '锁定' ? 'LOCKED' : body.lockStatus === '正常' ? 'NORMAL' : undefined,
       },
@@ -429,6 +436,7 @@ export class BasicDataController {
       status: record.status === 'ENABLED' ? '启用' : '禁用',
       lockStatus: record.lockStatus === 'NORMAL' ? '正常' : '锁定',
       source: sourceLabel(record.source),
+      belongsTo: record.belongsTo || undefined,
       createdBy: '管理员',
       createdAt: formatDateTime(record.createdAt),
       updatedBy: '管理员',

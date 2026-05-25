@@ -27,6 +27,7 @@ import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
 import { DEPARTMENT_STORAGE_EVENT, getDepartmentOptions, loadDepartments } from '../../utils/departments'
 import { loadDictionaries } from '../../utils/dictionaries'
+import { MASTER_DATA_EVENT, loadCustomers, loadSuppliers } from '../../utils/masterData'
 import { ROLE_STORAGE_EVENT, loadRoles } from '../../utils/roles'
 import {
   createUserOnApi,
@@ -63,8 +64,6 @@ interface SyncFormValues {
   appKey?: string
 }
 
-const suppliers = ['鑫源材料', '华泰金属', '东方铸造']
-const customers = ['长城汽车', '比亚迪集团', '上汽集团']
 const organizations = ['摩尔元数（福建）科技有限公司', '厦门子公司', '培训学员组织']
 
 const providerLabelMap: Record<SyncProvider, '钉钉' | '企业微信' | '飞书'> = {
@@ -174,6 +173,8 @@ export function UserManagementPage() {
   const [dictionaries, setDictionaries] = useState(() => loadDictionaries())
   const [roles, setRoles] = useState(() => loadRoles())
   const [departmentOptions, setDepartmentOptions] = useState(() => getDepartmentOptions(loadDepartments()))
+  const [suppliers, setSuppliers] = useState(() => loadSuppliers())
+  const [customers, setCustomers] = useState(() => loadCustomers())
   const selectedUserType = Form.useWatch('userType', form)
 
   useEffect(() => {
@@ -202,6 +203,15 @@ export function UserManagementPage() {
     const refresh = () => setDepartmentOptions(getDepartmentOptions(loadDepartments()))
     window.addEventListener(DEPARTMENT_STORAGE_EVENT, refresh)
     return () => window.removeEventListener(DEPARTMENT_STORAGE_EVENT, refresh)
+  }, [])
+
+  useEffect(() => {
+    const refresh = () => {
+      setSuppliers(loadSuppliers())
+      setCustomers(loadCustomers())
+    }
+    window.addEventListener(MASTER_DATA_EVENT, refresh)
+    return () => window.removeEventListener(MASTER_DATA_EVENT, refresh)
   }, [])
 
   const filteredUsers = useMemo(() => {
@@ -250,41 +260,24 @@ export function UserManagementPage() {
       ...values,
       belongsTo: values.userType === '员工' ? undefined : values.belongsTo,
     }
-    const now = '2026-05-22 10:00:00'
 
     if (editingUser) {
-      void updateUserOnApi(editingUser.id, normalizedValues)
-        .then(() => fetchUsersFromApi().then(setUsers))
-        .catch(() => undefined)
-      setUsers((currentUsers) =>
-        currentUsers.map((user) =>
-          user.id === editingUser.id
-            ? {
-                ...user,
-                ...normalizedValues,
-                updatedBy: '管理员',
-                updatedAt: now,
-              }
-            : user,
-        ),
-      )
+      try {
+        await updateUserOnApi(editingUser.id, normalizedValues)
+        setUsers(await fetchUsersFromApi())
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '用户更新失败')
+        return
+      }
       message.success('用户已更新')
     } else {
-      void createUserOnApi(normalizedValues)
-        .then(() => fetchUsersFromApi().then(setUsers))
-        .catch(() => undefined)
-      setUsers((currentUsers) => [
-        ...currentUsers,
-        {
-          id: createNextId(currentUsers),
-          ...normalizedValues,
-          source: '本地',
-          createdBy: '管理员',
-          createdAt: now,
-          updatedBy: '管理员',
-          updatedAt: now,
-        },
-      ])
+      try {
+        await createUserOnApi(normalizedValues)
+        setUsers(await fetchUsersFromApi())
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '用户新增失败')
+        return
+      }
       message.success('用户已新增')
     }
 
@@ -567,13 +560,19 @@ export function UserManagementPage() {
 
             {selectedUserType === '供应商' && (
               <Form.Item label="归属供应商" name="belongsTo" rules={[{ required: true, message: '请选择归属供应商' }]}>
-                <Select options={suppliers.map((supplier) => ({ label: supplier, value: supplier }))} />
+                <Select
+                  placeholder="请选择归属供应商"
+                  options={suppliers.map((supplier) => ({ label: supplier.name, value: supplier.id }))}
+                />
               </Form.Item>
             )}
 
             {selectedUserType === '客户' && (
               <Form.Item label="归属客户" name="belongsTo" rules={[{ required: true, message: '请选择归属客户' }]}>
-                <Select options={customers.map((customer) => ({ label: customer, value: customer }))} />
+                <Select
+                  placeholder="请选择归属客户"
+                  options={customers.map((customer) => ({ label: customer.name, value: customer.id }))}
+                />
               </Form.Item>
             )}
           </div>
