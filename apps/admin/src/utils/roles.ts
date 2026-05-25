@@ -102,33 +102,6 @@ export const initialRoles: RoleRecord[] = [
     columnPermissions: [],
     userIds: [],
   },
-  {
-    id: 'R001',
-    name: 'CRM-商机洞察',
-    organization: '摩尔元数（福建）科技有限公司',
-    app: '管理端',
-    description: '客户、商机与模具开发数据查看角色',
-    createdBy: '李健佛',
-    createdAt: '2026-05-21 18:18:25',
-    permissions: ['admin', 'basic', 'basic.customer', 'mold', 'mold.development.view'],
-    dataScope: 'custom_departments',
-    customDepartments: [{ departmentId: '101', includeChildren: true }],
-    columnPermissions: ['customer.contact', 'customer.phone', 'mold.remark'],
-    userIds: ['U001'],
-  },
-  {
-    id: 'R002',
-    name: '行政管理',
-    organization: '摩尔元数（福建）科技有限公司',
-    app: '管理端',
-    createdBy: '李健佛',
-    createdAt: '2026-05-12 09:15:14',
-    permissions: ['admin', 'basic', 'basic.department', 'basic.user'],
-    dataScope: 'organization',
-    customDepartments: [],
-    columnPermissions: [],
-    userIds: [],
-  },
 ]
 
 export function loadRoles() {

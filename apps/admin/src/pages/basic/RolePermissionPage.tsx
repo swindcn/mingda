@@ -26,6 +26,7 @@ import {
   message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
+import type { DataNode } from 'antd/es/tree'
 import { useEffect, useMemo, useState } from 'react'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
@@ -35,7 +36,6 @@ import {
   createRoleOnApi,
   deleteRoleOnApi,
   fetchRolesFromApi,
-  initialRoles,
   loadRoles,
   permissionTree,
   saveRoles,
@@ -67,6 +67,22 @@ function createNextRoleId(roles: RoleRecord[]) {
   return `R${String(roles.length + 1).padStart(3, '0')}`
 }
 
+function filterPermissionTreeByKeys(nodes: DataNode[], checkedKeys: string[]): DataNode[] {
+  const checkedKeySet = new Set(checkedKeys)
+  return nodes
+    .map((node) => {
+      const children = node.children ? filterPermissionTreeByKeys(node.children, checkedKeys) : []
+      if (!checkedKeySet.has(String(node.key)) && children.length === 0) {
+        return null
+      }
+      return {
+        ...node,
+        children: children.length > 0 ? children : undefined,
+      }
+    })
+    .filter(Boolean) as DataNode[]
+}
+
 export function RolePermissionPage() {
   const [roleForm] = Form.useForm<RoleFormValues>()
   const [roles, setRoles] = useState<RoleRecord[]>(() => loadRoles())
@@ -75,7 +91,7 @@ export function RolePermissionPage() {
   const [permissionModalOpen, setPermissionModalOpen] = useState(false)
   const [userModalOpen, setUserModalOpen] = useState(false)
   const [editingRole, setEditingRole] = useState<RoleRecord | null>(null)
-  const [activeRole, setActiveRole] = useState<RoleRecord | null>(initialRoles[0])
+  const [activeRole, setActiveRole] = useState<RoleRecord | null>(null)
   const [checkedPermissions, setCheckedPermissions] = useState<string[]>([])
   const [dataScope, setDataScope] = useState<DataScope>('self')
   const [customDepartments, setCustomDepartments] = useState<RoleRecord['customDepartments']>([])
@@ -90,6 +106,10 @@ export function RolePermissionPage() {
         value: user.id,
       })),
     [users],
+  )
+  const assignedPermissionTree = useMemo(
+    () => filterPermissionTreeByKeys(permissionTree, checkedPermissions),
+    [checkedPermissions],
   )
 
   useEffect(() => {
@@ -424,7 +444,17 @@ export function RolePermissionPage() {
                     />
                   </Card>
                   <Card title="已分配权限" size="small">
-                    <Tree defaultExpandAll treeData={permissionTree} checkedKeys={checkedPermissions} checkable selectable={false} />
+                    {assignedPermissionTree.length > 0 ? (
+                      <Tree
+                        defaultExpandAll
+                        treeData={assignedPermissionTree}
+                        checkedKeys={checkedPermissions}
+                        checkable
+                        selectable={false}
+                      />
+                    ) : (
+                      <Typography.Text type="secondary">暂未分配功能权限</Typography.Text>
+                    )}
                   </Card>
                 </div>
               ),

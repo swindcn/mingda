@@ -25,9 +25,10 @@ import {
 import type { UploadFile, UploadProps } from 'antd'
 import dayjs from 'dayjs'
 import type { ReactNode } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { SubPageHeader } from '../../components/SubPageHeader'
+import { apiRequest } from '../../services/api'
 import { loadDictionaries } from '../../utils/dictionaries'
 
 interface DevelopmentData {
@@ -46,6 +47,48 @@ interface DevelopmentData {
   createdAt: string
   remark: string
   images: string[]
+}
+
+interface ApiFlowRecord {
+  key: string
+  title: string
+  done: boolean
+  operator?: string
+  time?: string
+  trackingNumber?: string
+  images?: string[]
+}
+
+interface ApiProductionRecord {
+  id: string
+  type: 'trial' | 'batch' | 'evaluation'
+  title: string
+  operator?: string
+  time: string
+  images?: string[]
+  result?: '通过' | '不通过'
+  isComplete?: boolean
+  reason?: string
+}
+
+interface ApiMoldDetail {
+  id: string
+  code: string
+  customerName: string
+  productCode: string
+  productName: string
+  moldType: string
+  status: string
+  supplierName: string
+  followerName: string
+  notifiedDate: string
+  expectedDate: string
+  issuedDate: string
+  remark: string
+  images: string[]
+  trackingNumber?: string
+  flowRecords: ApiFlowRecord[]
+  productionRecords: ApiProductionRecord[]
 }
 
 interface EditFormValues {
@@ -258,6 +301,97 @@ export function MoldDevelopmentDetailPage() {
     images: ['模具设计图.jpg', '产品图纸.jpg', '3D效果图.jpg'],
   })
 
+  const applyApiDetail = (detail: ApiMoldDetail) => {
+    const confirmRecord = detail.flowRecords.find((record) => record.key === 'confirm' && record.done)
+    const shippingRecord = detail.flowRecords.find((record) => record.key === 'shipping' && record.done)
+    const receiveRecord = detail.flowRecords.find((record) => record.key === 'receive' && record.done)
+    const evaluationRecord = detail.productionRecords.find((record) => record.type === 'evaluation')
+
+    setDevelopmentData((current) => ({
+      ...current,
+      id: detail.code || detail.id,
+      customerName: detail.customerName,
+      productCode: detail.productCode,
+      productName: detail.productName,
+      customerNotifyDate: detail.notifiedDate,
+      moldType: detail.moldType,
+      supplierName: detail.supplierName,
+      expectedDate: detail.expectedDate,
+      status: detail.status,
+      trackingNumber: shippingRecord?.trackingNumber || detail.trackingNumber,
+      createdAt: detail.issuedDate,
+      remark: detail.remark,
+      images: detail.images,
+    }))
+    setDrawingConfirmation(
+      confirmRecord
+        ? {
+            operator: confirmRecord.operator || '',
+            time: confirmRecord.time || '',
+          }
+        : null,
+    )
+    setShipmentInfo(
+      shippingRecord
+        ? {
+            operator: shippingRecord.operator || '',
+            time: shippingRecord.time || '',
+            trackingNumber: shippingRecord.trackingNumber || '',
+            images: shippingRecord.images || [],
+          }
+        : null,
+    )
+    setReceiveInfo(
+      receiveRecord
+        ? {
+            operator: receiveRecord.operator || '',
+            time: receiveRecord.time || '',
+            images: receiveRecord.images || [],
+          }
+        : null,
+    )
+    setTrialRecords(
+      detail.productionRecords
+        .filter((record) => record.type === 'trial')
+        .map((record) => ({
+          operator: record.operator || '',
+          time: record.time,
+          productImages: record.images || [],
+          destructiveTestImages: [],
+        })),
+    )
+    setBatchRecords(
+      detail.productionRecords
+        .filter((record) => record.type === 'batch')
+        .map((record) => ({
+          operator: record.operator || '',
+          time: record.time,
+          productImages: record.images || [],
+          destructiveTestImages: [],
+        })),
+    )
+    setEvaluationInfo(
+      evaluationRecord
+        ? {
+            operator: evaluationRecord.operator || '',
+            result: evaluationRecord.result || '通过',
+            isDevelopmentComplete: evaluationRecord.isComplete ?? true,
+            reason: evaluationRecord.reason || '',
+            time: evaluationRecord.time,
+          }
+        : null,
+    )
+  }
+
+  useEffect(() => {
+    if (!id) return
+    void apiRequest<ApiMoldDetail>(`/mobile/molds/${id}?viewer=admin`)
+      .then(applyApiDetail)
+      .catch((error) => {
+        message.error(error instanceof Error ? error.message : '模具开发详情加载失败')
+      })
+  }, [id])
+
   const isTerminated = developmentData.status === '已中止'
   const isCompleted = Boolean(evaluationInfo?.isDevelopmentComplete && !isTerminated)
   const canOperate = !isTerminated && !isCompleted
@@ -395,7 +529,20 @@ export function MoldDevelopmentDetailPage() {
     message.success(values.isDevelopmentComplete ? '模具评判已保存' : '模具评判已保存，本单暂未完成')
   }
 
-  const submitTermination = (values: TerminationFormValues) => {
+  const submitTermination = async (values: TerminationFormValues) => {
+    try {
+      const updated = await apiRequest<ApiMoldDetail>(`/admin/molds/${developmentData.id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: values.reason,
+          operator: currentOperator,
+        }),
+      })
+      applyApiDetail(updated)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '中止开发失败')
+      return
+    }
     setTerminationInfo({
       operator: currentOperator,
       time: getNowText(),

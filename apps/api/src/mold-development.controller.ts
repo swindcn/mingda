@@ -67,6 +67,11 @@ interface CreateMoldBody {
   remark?: string
 }
 
+interface CancelMoldBody {
+  reason?: string
+  operator?: string
+}
+
 type MoldWithRelations = Prisma.MoldDevelopmentGetPayload<{
   include: {
     customer: true
@@ -562,6 +567,24 @@ export class MoldDevelopmentController {
     })
 
     return { id: mold.code }
+  }
+
+  @Post('admin/molds/:id/cancel')
+  async cancelMold(@Param('id') id: string, @Body() body: CancelMoldBody) {
+    const mold = await this.findMold(id)
+    if (mold.status === 'COMPLETED') {
+      throw new BadRequestException('已完成的模具开发单不能中止')
+    }
+
+    await this.prisma.moldDevelopment.update({
+      where: { id: mold.id },
+      data: {
+        status: 'CANCELLED',
+        remark: body.reason ? `${mold.remark || ''}\n中止理由：${body.reason}`.trim() : mold.remark,
+      },
+    })
+
+    return toMobileMold(await this.findMold(id), { viewer: 'admin' })
   }
 
   @Post('mobile/molds/:id/confirm-drawing')

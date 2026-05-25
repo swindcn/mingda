@@ -114,6 +114,7 @@ export function AppLayout() {
   const navigate = useNavigate()
   const [permissionVersion, setPermissionVersion] = useState(0)
   const currentUser = getCurrentAdminUser()
+  const displayName = currentUser?.name || currentUser?.username || '未登录用户'
   const menuItems = useMemo(() => filterMenuItems(allMenuItems), [permissionVersion])
 
   useEffect(() => {
@@ -176,7 +177,7 @@ export function AppLayout() {
         >
           <Typography.Text strong>铸件行业业务管理系统</Typography.Text>
           <Space>
-            <Typography.Text type="secondary">{currentUser?.name || '管理员'}</Typography.Text>
+            <Typography.Text type="secondary">{displayName}</Typography.Text>
             <Button
               icon={<LogoutOutlined />}
               onClick={() => {

@@ -553,18 +553,6 @@ export class BasicDataController {
         ],
       },
     })
-    await this.prisma.role.upsert({
-      where: { name_app: { name: '普通用户', app: '管理端' } },
-      update: {},
-      create: {
-        name: '普通用户',
-        app: '管理端',
-        description: '基础登录角色。',
-        dataScope: 'OWN',
-        permissions: ['admin', 'mold', 'mold.development.view'],
-      },
-    })
-
     const admin = await this.prisma.user.findFirst({
       where: { OR: [{ username: 'admin' }, { phone: '13665068911' }] },
     })
