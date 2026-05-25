@@ -24,9 +24,30 @@ interface LoginResponse {
   }
 }
 
+const REMEMBER_LOGIN_KEY = 'mingda-admin-remember-login'
+
+function loadRememberedLogin(): LoginFormValues {
+  const fallback = { username: '', password: '', remember: false }
+  const raw = window.localStorage.getItem(REMEMBER_LOGIN_KEY)
+  if (!raw) return fallback
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<LoginFormValues>
+    return {
+      username: parsed.username || '',
+      password: parsed.password || '',
+      remember: Boolean(parsed.remember),
+    }
+  } catch {
+    window.localStorage.removeItem(REMEMBER_LOGIN_KEY)
+    return fallback
+  }
+}
+
 export function LoginPage() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
+  const [initialValues] = useState(() => loadRememberedLogin())
 
   const handleLogin = async (values: LoginFormValues) => {
     setLoading(true)
@@ -44,6 +65,18 @@ export function LoginPage() {
         'mingda-admin-user',
         JSON.stringify({ ...result.user, username: result.user.username || values.username }),
       )
+      if (values.remember) {
+        window.localStorage.setItem(
+          REMEMBER_LOGIN_KEY,
+          JSON.stringify({
+            username: values.username,
+            password: values.password,
+            remember: true,
+          }),
+        )
+      } else {
+        window.localStorage.removeItem(REMEMBER_LOGIN_KEY)
+      }
       navigate('/dashboard')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '登录失败')
@@ -93,7 +126,7 @@ export function LoginPage() {
             layout="vertical"
             size="large"
             onFinish={handleLogin}
-            initialValues={{ remember: true }}
+            initialValues={initialValues}
           >
             <Form.Item
               label="账号"
