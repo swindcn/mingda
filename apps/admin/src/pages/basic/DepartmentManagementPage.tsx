@@ -37,6 +37,7 @@ import {
   updateDepartmentOnApi,
 } from '../../utils/departments'
 import type { DepartmentRecord } from '../../utils/departments'
+import { hasPermission } from '../../utils/roles'
 import { loadUsers, saveUsers } from '../../utils/users'
 
 type SyncProvider = 'dingtalk' | 'wechat-work' | 'lark'
@@ -113,6 +114,9 @@ export function DepartmentManagementPage() {
   const [syncModalOpen, setSyncModalOpen] = useState(false)
   const [editingDepartment, setEditingDepartment] = useState<DepartmentRecord | null>(null)
   const [syncProvider, setSyncProvider] = useState<SyncProvider>('dingtalk')
+  const canCreateDepartment = hasPermission('basic.department.create')
+  const canEditDepartment = hasPermission('basic.department.edit')
+  const canDeleteDepartment = hasPermission('basic.department.delete')
 
   useEffect(() => {
     void fetchDepartmentsFromApi()
@@ -276,26 +280,38 @@ export function DepartmentManagementPage() {
       render: (_, record) => (
         <TableActions
           actions={[
-            {
-              key: 'create-child',
-              label: '新增子部门',
-              shortLabel: '子部门',
-              icon: <PlusOutlined />,
-              onClick: () => openCreateModal(record),
-            },
-            {
-              key: 'edit',
-              label: '编辑',
-              icon: <EditOutlined />,
-              onClick: () => openEditModal(record),
-            },
-            {
-              key: 'delete',
-              label: '删除',
-              icon: <DeleteOutlined />,
-              danger: true,
-              onClick: () => confirmDelete(record),
-            },
+            ...(canCreateDepartment
+              ? [
+                  {
+                    key: 'create-child',
+                    label: '新增子部门',
+                    shortLabel: '子部门',
+                    icon: <PlusOutlined />,
+                    onClick: () => openCreateModal(record),
+                  },
+                ]
+              : []),
+            ...(canEditDepartment
+              ? [
+                  {
+                    key: 'edit',
+                    label: '编辑',
+                    icon: <EditOutlined />,
+                    onClick: () => openEditModal(record),
+                  },
+                ]
+              : []),
+            ...(canDeleteDepartment
+              ? [
+                  {
+                    key: 'delete',
+                    label: '删除',
+                    icon: <DeleteOutlined />,
+                    danger: true,
+                    onClick: () => confirmDelete(record),
+                  },
+                ]
+              : []),
           ]}
         />
       ),
@@ -318,9 +334,11 @@ export function DepartmentManagementPage() {
           <Button icon={<SyncOutlined />} onClick={openSyncModal}>
             同步钉钉数据
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreateModal()}>
-            新增部门
-          </Button>
+          {canCreateDepartment && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreateModal()}>
+              新增部门
+            </Button>
+          )}
         </Space>
       </div>
 

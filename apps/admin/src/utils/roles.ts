@@ -41,7 +41,15 @@ export const permissionTree: DataNode[] = [
         title: '基础资料',
         key: 'basic',
         children: [
-          { title: '部门管理', key: 'basic.department' },
+          {
+            title: '部门管理',
+            key: 'basic.department',
+            children: [
+              { title: '部门管理-新增', key: 'basic.department.create' },
+              { title: '部门管理-编辑', key: 'basic.department.edit' },
+              { title: '部门管理-删除', key: 'basic.department.delete' },
+            ],
+          },
           { title: '用户管理', key: 'basic.user' },
           { title: '角色权限', key: 'basic.role' },
           { title: '客户管理', key: 'basic.customer' },
@@ -85,6 +93,9 @@ export const initialRoles: RoleRecord[] = [
       'admin',
       'basic',
       'basic.department',
+      'basic.department.create',
+      'basic.department.edit',
+      'basic.department.delete',
       'basic.user',
       'basic.role',
       'basic.customer',
