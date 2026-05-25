@@ -208,6 +208,14 @@ export class BasicDataController {
         where: { ownerDepartmentId: { in: ids } },
         data: { ownerDepartmentId: null },
       }),
+      this.prisma.businessDataOwnership.updateMany({
+        where: { createdByDepartmentId: { in: ids } },
+        data: { createdByDepartmentId: null },
+      }),
+      this.prisma.businessDataOwnership.updateMany({
+        where: { ownerDepartmentId: { in: ids } },
+        data: { ownerDepartmentId: null },
+      }),
       this.prisma.department.deleteMany({
         where: { id: { in: ids } },
       }),
@@ -484,34 +492,6 @@ export class BasicDataController {
   }
 
   private async ensureBasicSeed() {
-    const root = await this.prisma.department.upsert({
-      where: { code: '1' },
-      update: { name: organizationName },
-      create: { code: '1', name: organizationName, source: 'LOCAL' },
-    })
-    const production = await this.prisma.department.upsert({
-      where: { code: '101' },
-      update: { name: '生产中心', parentId: root.id },
-      create: { code: '101', name: '生产中心', parentId: root.id, source: 'LOCAL' },
-    })
-    await Promise.all([
-      this.prisma.department.upsert({
-        where: { code: '100' },
-        update: { name: '总经办', parentId: root.id },
-        create: { code: '100', name: '总经办', parentId: root.id, source: 'LOCAL' },
-      }),
-      this.prisma.department.upsert({
-        where: { code: '102' },
-        update: { name: '技术支持中心', parentId: root.id },
-        create: { code: '102', name: '技术支持中心', parentId: root.id, source: 'LOCAL' },
-      }),
-      this.prisma.department.upsert({
-        where: { code: '101-1' },
-        update: { name: '产品一部', parentId: production.id },
-        create: { code: '101-1', name: '产品一部', parentId: production.id, source: 'LOCAL' },
-      }),
-    ])
-
     const adminRole = await this.prisma.role.upsert({
       where: { name_app: { name: '系统管理员', app: '管理端' } },
       update: {
@@ -566,10 +546,6 @@ export class BasicDataController {
       where: { OR: [{ username: 'admin' }, { phone: '13665068911' }] },
     })
     if (admin) {
-      await this.prisma.user.update({
-        where: { id: admin.id },
-        data: { departmentId: root.id, ownerDepartmentId: root.id },
-      })
       await this.prisma.userRole.upsert({
         where: { userId_roleId: { userId: admin.id, roleId: adminRole.id } },
         update: {},
