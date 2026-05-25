@@ -10,6 +10,7 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common'
 import {
   MoldDevelopmentStatus,
@@ -19,6 +20,7 @@ import {
 } from '@prisma/client'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { PrismaService } from './prisma/prisma.service'
+import { AdminAuthGuard } from './shared/admin-auth.guard'
 
 interface LoginBody {
   username?: string
@@ -509,6 +511,7 @@ export class MoldDevelopmentController {
   }
 
   @Post('admin/molds')
+  @UseGuards(AdminAuthGuard)
   async createMold(@Body() body: CreateMoldBody) {
     await this.ensureSeedData()
     const customer = await this.upsertCustomer(body.customerId || 'CUS_CUSTOM', body.customerName || body.customerId || '')
@@ -556,6 +559,7 @@ export class MoldDevelopmentController {
   }
 
   @Delete('admin/molds/:id')
+  @UseGuards(AdminAuthGuard)
   async deleteMold(@Param('id') id: string) {
     const mold = await this.findMold(id)
     if (mold.status !== 'CANCELLED') {
@@ -570,6 +574,7 @@ export class MoldDevelopmentController {
   }
 
   @Post('admin/molds/:id/cancel')
+  @UseGuards(AdminAuthGuard)
   async cancelMold(@Param('id') id: string, @Body() body: CancelMoldBody) {
     const mold = await this.findMold(id)
     if (mold.status === 'COMPLETED') {

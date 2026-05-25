@@ -9,9 +9,11 @@ import {
   Patch,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common'
 import { DataScope, Prisma, SyncProvider } from '@prisma/client'
 import { PrismaService } from './prisma/prisma.service'
+import { AdminAuthGuard } from './shared/admin-auth.guard'
 
 interface DepartmentBody {
   name?: string
@@ -149,6 +151,7 @@ function customDepartments(value: Prisma.JsonValue | null | undefined) {
 }
 
 @Controller('admin')
+@UseGuards(AdminAuthGuard)
 export class BasicDataController {
   constructor(private readonly prisma: PrismaService) {}
 
