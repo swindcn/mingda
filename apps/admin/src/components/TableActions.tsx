@@ -18,8 +18,10 @@ interface TableActionsProps {
 }
 
 export function TableActions({ actions, visibleCount = 3 }: TableActionsProps) {
-  const visibleActions = actions.slice(0, visibleCount)
-  const moreActions = actions.slice(visibleCount)
+  const shouldUseMore = actions.length > visibleCount
+  const directCount = shouldUseMore ? Math.max(visibleCount - 1, 0) : visibleCount
+  const visibleActions = actions.slice(0, directCount)
+  const moreActions = actions.slice(directCount)
 
   const menuItems: MenuProps['items'] = moreActions.map((action) => ({
     key: action.key,

@@ -28,16 +28,13 @@ import { useNavigate } from 'react-router'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
 import {
-  appendDepartment,
   createDepartmentOnApi,
   deleteDepartmentOnApi,
   fetchDepartmentsFromApi,
   getDepartmentOptions,
-  loadDepartments,
   removeDepartmentByKey,
   saveDepartments,
   updateDepartmentOnApi,
-  updateDepartmentByKey,
 } from '../../utils/departments'
 import type { DepartmentRecord } from '../../utils/departments'
 import { loadUsers, saveUsers } from '../../utils/users'
@@ -110,7 +107,8 @@ export function DepartmentManagementPage() {
   const [departmentForm] = Form.useForm<DepartmentFormValues>()
   const [syncForm] = Form.useForm<SyncFormValues>()
   const navigate = useNavigate()
-  const [departments, setDepartments] = useState<DepartmentRecord[]>(() => loadDepartments())
+  const [departments, setDepartments] = useState<DepartmentRecord[]>([])
+  const [departmentLoading, setDepartmentLoading] = useState(true)
   const [departmentModalOpen, setDepartmentModalOpen] = useState(false)
   const [syncModalOpen, setSyncModalOpen] = useState(false)
   const [editingDepartment, setEditingDepartment] = useState<DepartmentRecord | null>(null)
@@ -119,7 +117,10 @@ export function DepartmentManagementPage() {
   useEffect(() => {
     void fetchDepartmentsFromApi()
       .then(setDepartments)
-      .catch(() => undefined)
+      .catch((error) => {
+        message.error(error instanceof Error ? error.message : '部门数据加载失败')
+      })
+      .finally(() => setDepartmentLoading(false))
   }, [])
 
   const departmentOptions = useMemo(
@@ -159,49 +160,45 @@ export function DepartmentManagementPage() {
 
   const handleSubmitDepartment = async (values: DepartmentFormValues) => {
     if (editingDepartment) {
-      void updateDepartmentOnApi(editingDepartment.key, {
-        name: values.name,
-        code: values.code,
-      })
-        .then(setDepartments)
-        .catch(() => undefined)
-      setDepartments((current) =>
-        updateDepartmentByKey(current, editingDepartment.key, {
+      try {
+        const nextDepartments = await updateDepartmentOnApi(editingDepartment.key, {
           name: values.name,
           code: values.code,
-          createdAt: values.createdAt.format('YYYY-MM-DD HH:mm:ss'),
-        }),
-      )
-      message.success('部门已更新')
-    } else {
-      const nextRecord: DepartmentRecord = {
-        key: values.code,
-        name: values.name,
-        code: values.code,
-        createdAt: values.createdAt.format('YYYY-MM-DD HH:mm:ss'),
-        source: '本地',
+        })
+        setDepartments(nextDepartments)
+        message.success('部门已更新')
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '部门更新失败')
+        return
       }
-      void createDepartmentOnApi({
-        name: values.name,
-        code: values.code,
-        parentKey: values.parentKey,
-      })
-        .then(setDepartments)
-        .catch(() => undefined)
-      setDepartments((current) => appendDepartment(current, values.parentKey, nextRecord))
-      message.success('部门已新增')
+    } else {
+      try {
+        const nextDepartments = await createDepartmentOnApi({
+          name: values.name,
+          code: values.code,
+          parentKey: values.parentKey,
+        })
+        setDepartments(nextDepartments)
+        message.success('部门已新增')
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '部门新增失败')
+        return
+      }
     }
     closeDepartmentModal()
   }
 
-  const handleDelete = (record: DepartmentRecord) => {
-    void deleteDepartmentOnApi(record.key)
-      .then((nextDepartments) => {
-        setDepartments(nextDepartments)
-      })
-      .catch(() => undefined)
+  const handleDelete = async (record: DepartmentRecord) => {
+    const { nextDepartments, removedNames } = removeDepartmentByKey(departments, record.key)
+
+    try {
+      setDepartments(await deleteDepartmentOnApi(record.key))
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '部门删除失败')
+      return
+    }
+
     setDepartments((current) => {
-      const { nextDepartments, removedNames } = removeDepartmentByKey(current, record.key)
       const removedNameSet = new Set(removedNames)
       const users = loadUsers()
       const nextUsers = users.map((user) =>
@@ -213,7 +210,7 @@ export function DepartmentManagementPage() {
         saveUsers(nextUsers)
       }
       saveDepartments(nextDepartments)
-      return nextDepartments
+      return current
     })
     message.success('部门已删除，相关用户的所属部门已清空')
   }
@@ -334,6 +331,7 @@ export function DepartmentManagementPage() {
           rowKey="key"
           columns={columns}
           dataSource={departments}
+          loading={departmentLoading}
           pagination={false}
           expandable={{ defaultExpandAllRows: true }}
         />
