@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { DataScope, Prisma, SyncProvider } from '@prisma/client'
+import { randomBytes, scryptSync } from 'node:crypto'
 import { PrismaService } from './prisma/prisma.service'
 import { AdminAuthGuard } from './shared/admin-auth.guard'
 
@@ -24,6 +25,7 @@ interface DepartmentBody {
 interface UserBody {
   name?: string
   phone?: string
+  password?: string
   userType?: '员工' | '供应商' | '客户'
   organization?: string
   department?: string
@@ -67,6 +69,12 @@ interface DepartmentDto {
 }
 
 const organizationName = '摩尔元数（福建）科技有限公司'
+
+function hashPassword(password: string) {
+  const salt = randomBytes(16).toString('hex')
+  const hash = scryptSync(password, salt, 64).toString('hex')
+  return `scrypt:${salt}:${hash}`
+}
 
 function formatDateTime(value?: Date | null) {
   if (!value) return ''
@@ -249,6 +257,7 @@ export class BasicDataController {
       data: {
         name: body.name.trim(),
         phone: body.phone.trim(),
+        passwordHash: body.password ? hashPassword(body.password) : null,
         userType: userTypeValue(body.userType) || 'EMPLOYEE',
         organizationName: body.organization || organizationName,
         departmentId: department?.id,
@@ -277,6 +286,7 @@ export class BasicDataController {
       data: {
         name: body.name?.trim(),
         phone: body.phone?.trim(),
+        passwordHash: body.password ? hashPassword(body.password) : undefined,
         userType: userTypeValue(body.userType),
         organizationName: body.organization,
         departmentId: body.department || body.departmentId ? department?.id || null : undefined,
