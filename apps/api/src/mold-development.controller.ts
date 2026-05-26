@@ -471,7 +471,6 @@ export class MoldDevelopmentController {
 
   @Get('mobile/home')
   async home() {
-    await this.ensureSeedData()
     const records = await this.findMolds()
     const todos = records
       .map(supplierTodoFromMold)
@@ -486,7 +485,6 @@ export class MoldDevelopmentController {
 
   @Get('mobile/todos')
   async todoList() {
-    await this.ensureSeedData()
     return (await this.findMolds())
       .map(supplierTodoFromMold)
       .filter((todo): todo is NonNullable<typeof todo> => Boolean(todo))
@@ -498,7 +496,6 @@ export class MoldDevelopmentController {
     @Query('viewer') viewer?: string,
     @Headers('authorization') authorization?: string,
   ) {
-    await this.ensureSeedData()
     const records = await this.findMolds()
     const normalized = keyword?.trim()
     const mapped = records.map((record) => toMobileMold(record, { viewer, authorization }))
@@ -522,14 +519,12 @@ export class MoldDevelopmentController {
     @Query('viewer') viewer?: string,
     @Headers('authorization') authorization?: string,
   ) {
-    await this.ensureSeedData()
     return toMobileMold(await this.findMold(id), { viewer, authorization })
   }
 
   @Post('admin/molds')
   @UseGuards(AdminAuthGuard)
   async createMold(@Body() body: CreateMoldBody) {
-    await this.ensureSeedData()
     const customer = await this.upsertCustomer(body.customerId || 'CUS_CUSTOM', body.customerName || body.customerId || '')
     const product = await this.upsertProduct(body.productCode, body.productName || body.productCode)
     const supplier = await this.upsertSupplier(body.supplierId || 'SUP_CUSTOM', body.supplierName || body.supplierId || '')
