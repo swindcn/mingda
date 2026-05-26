@@ -47,20 +47,10 @@ interface PartnerDirectoryPageProps {
   iconColor: string
   loadRecords: () => PartnerRecord[]
   saveRecords: (records: PartnerRecord[]) => void
-}
-
-function getTodayText() {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function createNextId(records: PartnerRecord[], idPrefix: string) {
-  const nextNumber =
-    records.reduce((max, record) => {
-      const numericPart = Number(record.id.replace(idPrefix, ''))
-      return Number.isFinite(numericPart) ? Math.max(max, numericPart) : max
-    }, 0) + 1
-
-  return `${idPrefix}${String(nextNumber).padStart(3, '0')}`
+  fetchRecords: () => Promise<PartnerRecord[]>
+  createRecord: (record: Partial<PartnerRecord>) => Promise<PartnerRecord[]>
+  updateRecord: (id: string, record: Partial<PartnerRecord>) => Promise<PartnerRecord[]>
+  deleteRecord: (id: string) => Promise<PartnerRecord[]>
 }
 
 export function PartnerDirectoryPage({
@@ -72,6 +62,10 @@ export function PartnerDirectoryPage({
   autoIdNotice,
   loadRecords,
   saveRecords,
+  fetchRecords,
+  createRecord,
+  updateRecord,
+  deleteRecord,
 }: PartnerDirectoryPageProps) {
   const [form] = Form.useForm<PartnerFormValues>()
   const [records, setRecords] = useState<PartnerRecord[]>(() => loadRecords())
@@ -82,6 +76,12 @@ export function PartnerDirectoryPage({
   useEffect(() => {
     saveRecords(records)
   }, [records, saveRecords])
+
+  useEffect(() => {
+    void fetchRecords()
+      .then(setRecords)
+      .catch((error) => message.error(error instanceof Error ? error.message : `${entityName}数据加载失败`))
+  }, [entityName, fetchRecords])
 
   const filteredRecords = useMemo(() => {
     const normalizedKeyword = keyword.trim()
@@ -115,36 +115,35 @@ export function PartnerDirectoryPage({
     form.resetFields()
   }
 
-  const handleSubmit = (values: PartnerFormValues) => {
+  const handleSubmit = async (values: PartnerFormValues) => {
     if (editingRecord) {
-      setRecords((currentRecords) =>
-        currentRecords.map((record) =>
-          record.id === editingRecord.id
-            ? {
-                ...record,
-                ...values,
-              }
-            : record,
-        ),
-      )
+      try {
+        setRecords(await updateRecord(editingRecord.id, values))
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : `${entityName}更新失败`)
+        return
+      }
       message.success(`${entityName}已更新`)
     } else {
-      setRecords((currentRecords) => [
-        ...currentRecords,
-        {
-          id: createNextId(currentRecords, idPrefix),
-          ...values,
-          createdAt: getTodayText(),
-        },
-      ])
+      try {
+        setRecords(await createRecord(values))
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : `${entityName}新增失败`)
+        return
+      }
       message.success(`${entityName}已新增`)
     }
 
     closeModal()
   }
 
-  const handleDelete = (id: string) => {
-    setRecords((currentRecords) => currentRecords.filter((record) => record.id !== id))
+  const handleDelete = async (id: string) => {
+    try {
+      setRecords(await deleteRecord(id))
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : `${entityName}删除失败`)
+      return
+    }
     message.success(`${entityName}已删除`)
   }
 

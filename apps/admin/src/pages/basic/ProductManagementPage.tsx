@@ -26,24 +26,17 @@ import { useEffect, useMemo, useState } from 'react'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
 import { loadDictionaries } from '../../utils/dictionaries'
-import { loadProducts, saveProducts } from '../../utils/masterData'
+import {
+  createProductOnApi,
+  deleteProductOnApi,
+  fetchProductsFromApi,
+  loadProducts,
+  saveProducts,
+  updateProductOnApi,
+} from '../../utils/masterData'
 import type { ProductRecord, ProductSource } from '../../utils/masterData'
 
 type ProductFormValues = Omit<ProductRecord, 'id' | 'createdAt'>
-
-function getTodayText() {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function createNextProductId(products: ProductRecord[]) {
-  const nextNumber =
-    products.reduce((max, product) => {
-      const numericPart = Number(product.id.replace('P', ''))
-      return Number.isFinite(numericPart) ? Math.max(max, numericPart) : max
-    }, 0) + 1
-
-  return `P${String(nextNumber).padStart(3, '0')}`
-}
 
 function formatMoney(value: number) {
   return `¥${value.toFixed(2)}`
@@ -66,6 +59,12 @@ export function ProductManagementPage() {
   useEffect(() => {
     saveProducts(products)
   }, [products])
+
+  useEffect(() => {
+    void fetchProductsFromApi()
+      .then(setProducts)
+      .catch((error) => message.error(error instanceof Error ? error.message : '产品数据加载失败'))
+  }, [])
 
   const filteredProducts = useMemo(() => {
     const normalizedKeyword = keyword.trim()
@@ -117,36 +116,35 @@ export function ProductManagementPage() {
     form.resetFields()
   }
 
-  const handleSubmit = (values: ProductFormValues) => {
+  const handleSubmit = async (values: ProductFormValues) => {
     if (editingProduct) {
-      setProducts((currentProducts) =>
-        currentProducts.map((product) =>
-          product.id === editingProduct.id
-            ? {
-                ...product,
-                ...values,
-              }
-            : product,
-        ),
-      )
+      try {
+        setProducts(await updateProductOnApi(editingProduct.id, values))
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '产品更新失败')
+        return
+      }
       message.success('产品已更新')
     } else {
-      setProducts((currentProducts) => [
-        ...currentProducts,
-        {
-          id: createNextProductId(currentProducts),
-          ...values,
-          createdAt: getTodayText(),
-        },
-      ])
+      try {
+        setProducts(await createProductOnApi(values))
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '产品新增失败')
+        return
+      }
       message.success('产品已新增')
     }
 
     closeModal()
   }
 
-  const handleDelete = (id: string) => {
-    setProducts((currentProducts) => currentProducts.filter((product) => product.id !== id))
+  const handleDelete = async (id: string) => {
+    try {
+      setProducts(await deleteProductOnApi(id))
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '产品删除失败')
+      return
+    }
     message.success('产品已删除')
   }
 

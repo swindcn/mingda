@@ -35,6 +35,9 @@ import {
 import { loadDictionaries } from '../../utils/dictionaries'
 import {
   MASTER_DATA_EVENT,
+  fetchCustomersFromApi,
+  fetchProductsFromApi,
+  fetchSuppliersFromApi,
   loadCustomers,
   loadProducts,
   loadSuppliers,
@@ -301,7 +304,20 @@ export function MoldDevelopmentPage() {
       .sort((a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf())
   }, [currentUser?.id, currentUser?.name, developments, keyword, statusFilter])
 
-  const openCreateModal = () => {
+  const openCreateModal = async () => {
+    try {
+      const [nextCustomers, nextProducts, nextSuppliers] = await Promise.all([
+        fetchCustomersFromApi(),
+        fetchProductsFromApi(),
+        fetchSuppliersFromApi(),
+      ])
+      setCustomers(nextCustomers)
+      setProducts(nextProducts)
+      setSuppliers(nextSuppliers)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '基础档案加载失败')
+      return
+    }
     form.resetFields()
     setFileList([])
     setModalOpen(true)

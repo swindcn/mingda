@@ -37,6 +37,31 @@ interface UserBody {
   belongsTo?: string
 }
 
+
+interface PartnerBody {
+  name?: string
+  address?: string
+  contact?: string
+  phone?: string
+}
+
+interface ProductBody {
+  name?: string
+  code?: string
+  spec?: string
+  unit?: string
+  type?: string
+  source?: string
+  workshop?: string
+  salePrice?: number
+  costPrice?: number
+  stockMax?: number
+  stockMin?: number
+  minPurchase?: number
+  dailyCapacity?: number
+  remark?: string
+}
+
 interface RoleBody {
   name?: string
   organization?: string
@@ -137,6 +162,17 @@ function prismaScope(scope?: RoleBody['dataScope']) {
   return scope ? map[scope] : undefined
 }
 
+
+function toNumber(value: unknown) {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : undefined
+}
+
+function toInteger(value: unknown) {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? Math.trunc(numberValue) : undefined
+}
+
 function stringArray(value: Prisma.JsonValue | null | undefined) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
@@ -230,6 +266,151 @@ export class BasicDataController {
     ])
 
     return { id, removedIds: ids }
+  }
+
+
+  @Get('customers')
+  async customers() {
+    const records = await this.prisma.customer.findMany({ orderBy: { createdAt: 'asc' } })
+    return records.map((record) => this.toPartner(record))
+  }
+
+  @Post('customers')
+  async createCustomer(@Body() body: PartnerBody) {
+    if (!body.name?.trim()) throw new BadRequestException('请输入客户名称')
+    const code = await this.createNextPartnerCode('CUS', 'customer')
+    const record = await this.prisma.customer.create({
+      data: {
+        code,
+        name: body.name.trim(),
+        address: body.address,
+        contact: body.contact,
+        phone: body.phone,
+      },
+    })
+    return this.toPartner(record)
+  }
+
+  @Put('customers/:id')
+  async updateCustomer(@Param('id') id: string, @Body() body: PartnerBody) {
+    const record = await this.prisma.customer.update({
+      where: { code: id },
+      data: {
+        name: body.name?.trim(),
+        address: body.address,
+        contact: body.contact,
+        phone: body.phone,
+      },
+    })
+    return this.toPartner(record)
+  }
+
+  @Delete('customers/:id')
+  async deleteCustomer(@Param('id') id: string) {
+    await this.prisma.customer.delete({ where: { code: id } })
+    return { id }
+  }
+
+  @Get('suppliers')
+  async suppliers() {
+    const records = await this.prisma.supplier.findMany({ orderBy: { createdAt: 'asc' } })
+    return records.map((record) => this.toPartner(record))
+  }
+
+  @Post('suppliers')
+  async createSupplier(@Body() body: PartnerBody) {
+    if (!body.name?.trim()) throw new BadRequestException('请输入供应商名称')
+    const code = await this.createNextPartnerCode('SUP', 'supplier')
+    const record = await this.prisma.supplier.create({
+      data: {
+        code,
+        name: body.name.trim(),
+        address: body.address,
+        contact: body.contact,
+        phone: body.phone,
+      },
+    })
+    return this.toPartner(record)
+  }
+
+  @Put('suppliers/:id')
+  async updateSupplier(@Param('id') id: string, @Body() body: PartnerBody) {
+    const record = await this.prisma.supplier.update({
+      where: { code: id },
+      data: {
+        name: body.name?.trim(),
+        address: body.address,
+        contact: body.contact,
+        phone: body.phone,
+      },
+    })
+    return this.toPartner(record)
+  }
+
+  @Delete('suppliers/:id')
+  async deleteSupplier(@Param('id') id: string) {
+    await this.prisma.supplier.delete({ where: { code: id } })
+    return { id }
+  }
+
+  @Get('products')
+  async products() {
+    const records = await this.prisma.product.findMany({ orderBy: { createdAt: 'asc' } })
+    return records.map((record) => this.toProduct(record))
+  }
+
+  @Post('products')
+  async createProduct(@Body() body: ProductBody) {
+    if (!body.name?.trim() || !body.code?.trim()) throw new BadRequestException('请输入产品名称和编码')
+    const record = await this.prisma.product.create({
+      data: {
+        code: body.code.trim(),
+        name: body.name.trim(),
+        spec: body.spec,
+        unit: body.unit,
+        type: body.type,
+        source: body.source,
+        workshop: body.workshop,
+        salePrice: toNumber(body.salePrice),
+        costPrice: toNumber(body.costPrice),
+        stockMax: toInteger(body.stockMax),
+        stockMin: toInteger(body.stockMin),
+        minPurchase: toInteger(body.minPurchase),
+        dailyCapacity: toInteger(body.dailyCapacity),
+        remark: body.remark,
+      },
+    })
+    return this.toProduct(record)
+  }
+
+  @Put('products/:id')
+  async updateProduct(@Param('id') id: string, @Body() body: ProductBody) {
+    const record = await this.prisma.product.update({
+      where: { code: id },
+      data: {
+        code: body.code?.trim(),
+        name: body.name?.trim(),
+        spec: body.spec,
+        unit: body.unit,
+        type: body.type,
+        source: body.source,
+        workshop: body.workshop,
+        salePrice: toNumber(body.salePrice),
+        costPrice: toNumber(body.costPrice),
+        stockMax: toInteger(body.stockMax),
+        stockMin: toInteger(body.stockMin),
+        minPurchase: toInteger(body.minPurchase),
+        dailyCapacity: toInteger(body.dailyCapacity),
+        remark: body.remark,
+      },
+    })
+    return this.toProduct(record)
+  }
+
+  @Delete('products/:id')
+  async deleteProduct(@Param('id') id: string) {
+    await this.prisma.product.delete({ where: { code: id } })
+    return { id }
   }
 
   @Get('users')
@@ -380,6 +561,62 @@ export class BasicDataController {
   async deleteRole(@Param('id') id: string) {
     await this.prisma.role.delete({ where: { id } })
     return { id }
+  }
+
+
+  private toPartner(record: {
+    id: string
+    code: string
+    name: string
+    address: string | null
+    contact: string | null
+    phone: string | null
+    createdAt: Date
+  }) {
+    return {
+      id: record.code,
+      dbId: record.id,
+      name: record.name,
+      address: record.address || '',
+      contact: record.contact || '',
+      phone: record.phone || '',
+      createdAt: formatDateTime(record.createdAt).slice(0, 10),
+    }
+  }
+
+  private toProduct(record: Prisma.ProductGetPayload<object>) {
+    return {
+      id: record.code,
+      dbId: record.id,
+      name: record.name,
+      code: record.code,
+      spec: record.spec || '',
+      unit: record.unit || '',
+      type: record.type || '',
+      source: (record.source || '自制件') as '自制件' | '外购件',
+      workshop: record.workshop || '',
+      salePrice: Number(record.salePrice || 0),
+      costPrice: Number(record.costPrice || 0),
+      stockMax: record.stockMax || 0,
+      stockMin: record.stockMin || 0,
+      minPurchase: record.minPurchase || 0,
+      dailyCapacity: record.dailyCapacity || 0,
+      remark: record.remark || '',
+      createdAt: formatDateTime(record.createdAt).slice(0, 10),
+    }
+  }
+
+  private async createNextPartnerCode(prefix: 'CUS' | 'SUP', model: 'customer' | 'supplier') {
+    const records =
+      model === 'customer'
+        ? await this.prisma.customer.findMany({ select: { code: true } })
+        : await this.prisma.supplier.findMany({ select: { code: true } })
+    const nextNumber =
+      records.reduce((max, record) => {
+        const numericPart = Number(record.code.replace(prefix, ''))
+        return Number.isFinite(numericPart) ? Math.max(max, numericPart) : max
+      }, 0) + 1
+    return `${prefix}${String(nextNumber).padStart(3, '0')}`
   }
 
   private toDepartment(record: {

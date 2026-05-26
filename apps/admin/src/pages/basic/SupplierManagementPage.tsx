@@ -1,6 +1,13 @@
 import { Building2 } from 'lucide-react'
 import { PartnerDirectoryPage } from './components/PartnerDirectoryPage'
-import { loadSuppliers, saveSuppliers } from '../../utils/masterData'
+import {
+  createSupplierOnApi,
+  deleteSupplierOnApi,
+  fetchSuppliersFromApi,
+  loadSuppliers,
+  saveSuppliers,
+  updateSupplierOnApi,
+} from '../../utils/masterData'
 
 export function SupplierManagementPage() {
   return (
@@ -16,6 +23,10 @@ export function SupplierManagementPage() {
       iconColor="#059669"
       loadRecords={loadSuppliers}
       saveRecords={saveSuppliers}
+      fetchRecords={fetchSuppliersFromApi}
+      createRecord={createSupplierOnApi}
+      updateRecord={updateSupplierOnApi}
+      deleteRecord={deleteSupplierOnApi}
     />
   )
 }

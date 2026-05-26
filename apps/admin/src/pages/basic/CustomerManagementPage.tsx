@@ -1,6 +1,13 @@
 import { UserCircle } from 'lucide-react'
 import { PartnerDirectoryPage } from './components/PartnerDirectoryPage'
-import { loadCustomers, saveCustomers } from '../../utils/masterData'
+import {
+  createCustomerOnApi,
+  deleteCustomerOnApi,
+  fetchCustomersFromApi,
+  loadCustomers,
+  saveCustomers,
+  updateCustomerOnApi,
+} from '../../utils/masterData'
 
 export function CustomerManagementPage() {
   return (
@@ -16,6 +23,10 @@ export function CustomerManagementPage() {
       iconColor="#7c3aed"
       loadRecords={loadCustomers}
       saveRecords={saveCustomers}
+      fetchRecords={fetchCustomersFromApi}
+      createRecord={createCustomerOnApi}
+      updateRecord={updateCustomerOnApi}
+      deleteRecord={deleteCustomerOnApi}
     />
   )
 }
