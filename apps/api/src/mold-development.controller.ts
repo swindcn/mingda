@@ -434,7 +434,6 @@ export class MoldDevelopmentController {
         where: { id: existing.id },
         data: {
           username: 'admin',
-          name: '系统管理员',
           phone: '13665068911',
           passwordHash,
           userType: 'EMPLOYEE',
