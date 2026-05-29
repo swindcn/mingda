@@ -9,6 +9,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common'
@@ -30,6 +31,14 @@ interface LoginBody {
 interface ViewerOptions {
   viewer?: string
   authorization?: string
+  user?: MobileViewerUser | null
+}
+
+interface MobileViewerUser {
+  id: string
+  name: string
+  userType: string
+  belongsTo: string | null
 }
 
 interface ShippingBody {
@@ -46,9 +55,12 @@ interface ReceiveBody {
 interface ProductionBody {
   operator?: string
   images?: string[]
+  productImages?: string[]
+  destructiveImages?: string[]
 }
 
 interface EvaluationBody {
+  operator?: string
   result?: '通过' | '不通过'
   isComplete?: boolean
   reason?: string
@@ -88,6 +100,72 @@ const imageFallbacks = [
   '/assets/mock/mold-drawing.svg',
   '/assets/mock/product-drawing.svg',
   '/assets/mock/effect-drawing.svg',
+]
+
+const adminPermissions = [
+  'admin',
+  'basic',
+  'basic.department',
+  'basic.department.create',
+  'basic.department.edit',
+  'basic.department.delete',
+  'basic.user',
+  'basic.role',
+  'basic.customer',
+  'basic.supplier',
+  'basic.product',
+  'basic.dictionary',
+  'mold',
+  'mold.development.view',
+  'mold.development.create',
+  'mold.development.edit',
+  'mold.development.delete',
+  'mold.model.view',
+  'mold.model.create',
+  'mold.model.edit',
+  'mold.model.delete',
+  'mold.corebox.view',
+  'mold.corebox.create',
+  'mold.corebox.edit',
+  'mold.corebox.delete',
+  'model',
+  'model.workshop-line.view',
+  'model.workshop-line.create',
+  'model.workshop-line.edit',
+  'model.workshop-line.delete',
+  'model.team.view',
+  'model.team.create',
+  'model.team.edit',
+  'model.team.delete',
+  'model.equipment.view',
+  'model.equipment.create',
+  'model.equipment.edit',
+  'model.equipment.delete',
+  'model.material.view',
+  'model.material.create',
+  'model.material.edit',
+  'model.material.delete',
+  'model.recipe.view',
+  'model.recipe.create',
+  'model.recipe.edit',
+  'model.recipe.delete',
+  'model.routing.view',
+  'model.routing.create',
+  'model.routing.edit',
+  'model.routing.delete',
+  'model.calendar.view',
+  'model.calendar.create',
+  'model.calendar.edit',
+  'model.calendar.delete',
+  'model.schedule.view',
+  'model.schedule.create',
+  'model.schedule.edit',
+  'model.schedule.delete',
+  'model.schedule.batch',
+  'model.defect.view',
+  'model.defect.create',
+  'model.defect.edit',
+  'model.defect.delete',
 ]
 
 function hashPassword(password: string) {
@@ -139,6 +217,41 @@ function formatDateTime(value?: Date | null) {
 
 function arrayFromJson(value: Prisma.JsonValue | null | undefined) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function objectFromJson(value: Prisma.JsonValue | null | undefined) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null
+}
+
+function productionImagesFromJson(value: Prisma.JsonValue | null | undefined) {
+  const objectValue = objectFromJson(value)
+  if (!objectValue) {
+    const images = arrayFromJson(value)
+    return { images, productImages: images, destructiveImages: [] }
+  }
+
+  const imagePayload = objectValue as Record<string, Prisma.JsonValue>
+  const productImages = arrayFromJson(imagePayload.productImages)
+  const destructiveImages = arrayFromJson(imagePayload.destructiveImages)
+  const images = arrayFromJson(imagePayload.images)
+  return {
+    images: images.length ? images : [...productImages, ...destructiveImages],
+    productImages,
+    destructiveImages,
+  }
+}
+
+function parseTerminationRecord(remark?: string | null) {
+  if (!remark?.includes('中止理由：')) return null
+
+  const reason = remark.split('中止理由：').pop()?.trim() || ''
+  const operator = remark.match(/中止人：(.+)/)?.[1]?.split('\n')[0]?.trim()
+  const time = remark.match(/中止时间：(.+)/)?.[1]?.split('\n')[0]?.trim()
+  return {
+    operator: operator || undefined,
+    time: time || undefined,
+    reason,
+  }
 }
 
 function mobileStatus(status: MoldDevelopmentStatus) {
@@ -198,31 +311,52 @@ function productionTitle(type: MoldProductionRecordType, count: number) {
 
 function isSupplierEmployeeViewer({ viewer, authorization }: ViewerOptions = {}) {
   if (viewer === 'admin') return false
+  if (authorization?.replace(/^Bearer\s+/i, '').startsWith('db-token-')) return false
   const token = authorization?.replace(/^Bearer\s+/i, '') || ''
   return token.startsWith('mock-token-')
+}
+
+function isSupplierUser(user?: MobileViewerUser | null): user is MobileViewerUser {
+  return user?.userType === 'SUPPLIER'
 }
 
 function toMobileMold(record: MoldWithRelations, options: ViewerOptions = {}) {
   const status = mobileStatus(record.status)
   const counts = { TRIAL: 0, BATCH: 0, EVALUATION: 0 }
-  const shouldMaskSupplierFields = isSupplierEmployeeViewer(options)
+  const shouldMaskSupplierFields = isSupplierEmployeeViewer(options) || isSupplierUser(options.user)
+  const isFollower = Boolean(options.user && record.followerName && options.user.name === record.followerName)
+  const canSupplierOperate =
+    isSupplierUser(options.user) &&
+    Boolean(options.user.belongsTo) &&
+    (record.supplier.code === options.user.belongsTo || record.supplier.name === options.user.belongsTo)
 
   return {
     id: record.code,
     code: record.code,
+    customerId: record.customer.code,
     customerName: shouldMaskSupplierFields ? '' : record.customer.name,
     productCode: shouldMaskSupplierFields ? '' : record.product.code,
     productName: record.product.name,
     moldType: record.moldType,
     status,
     statusTone: statusTone(status),
+    supplierId: record.supplier.code,
     supplierName: record.supplier.name,
     followerName: record.followerName || '',
     notifiedDate: formatDate(record.customerNotifyDate),
     expectedDate: formatDate(record.expectedDate),
     issuedDate: formatDate(record.createdAt),
+    trackingNumber: record.trackingNumber || '',
     remark: record.remark || '',
     images: arrayFromJson(record.attachments),
+    permissions: {
+      canConfirmDrawing: canSupplierOperate && status === '待确认',
+      canShip: canSupplierOperate && status === '待发货',
+      canReceive: isFollower && status === '待收货',
+      canTrial: isFollower && (status === '待试产' || status === '试产中'),
+      canBatch: isFollower && (status === '待试产' || status === '试产中'),
+      canEvaluate: isFollower && (status === '待试产' || status === '试产中'),
+    },
     flowRecords: record.flowRecords.map((flow) => ({
       key: flowKey(flow.key),
       title: flow.title || flowTitle(flow.key),
@@ -234,28 +368,47 @@ function toMobileMold(record: MoldWithRelations, options: ViewerOptions = {}) {
     })),
     productionRecords: record.productionRecords.map((production) => {
       counts[production.type] += 1
+      const productionImages = productionImagesFromJson(production.images)
       return {
         id: production.id,
         type: productionType(production.type),
         title: production.title || productionTitle(production.type, counts[production.type]),
         operator: production.operator || undefined,
         time: formatDateTime(production.createdAt) || '',
-        images: arrayFromJson(production.images),
+        images: productionImages.images,
+        productImages: productionImages.productImages,
+        destructiveImages: productionImages.destructiveImages,
         result: production.result || undefined,
         isComplete: production.isComplete ?? undefined,
         reason: production.reason || undefined,
       }
     }),
+    terminationRecord: parseTerminationRecord(record.remark),
   }
 }
 
-function supplierTodoFromMold(record: MoldWithRelations) {
+function todoFromMold(record: MoldWithRelations, user?: MobileViewerUser | null) {
   const status = mobileStatus(record.status)
-  if (status !== '待确认' && status !== '待发货') return null
+  let title = ''
+
+  if (isSupplierUser(user)) {
+    const matchedSupplier = Boolean(
+      user.belongsTo && (record.supplier.code === user.belongsTo || record.supplier.name === user.belongsTo),
+    )
+    if (matchedSupplier && status === '待确认') title = '模具图纸确认'
+    if (matchedSupplier && status === '待发货') title = '模具发货确认'
+  }
+
+  const followerName = user?.userType !== 'SUPPLIER' ? user?.name : undefined
+  if (followerName && record.followerName === followerName && status === '待收货') {
+    title = '模具收货确认'
+  }
+
+  if (!title) return null
 
   return {
     id: `todo-${record.code}`,
-    title: status === '待确认' ? '模具图纸确认' : '模具发货确认',
+    title,
     priority: '高',
     priorityTone: 'high',
     moduleName: '模具开发',
@@ -266,7 +419,8 @@ function supplierTodoFromMold(record: MoldWithRelations) {
 }
 
 function requireSupplierEmployee(authorization?: string) {
-  if (!isSupplierEmployeeViewer({ authorization })) {
+  const token = authorization?.replace(/^Bearer\s+/i, '') || ''
+  if (!token.startsWith('db-token-') && !isSupplierEmployeeViewer({ authorization })) {
     throw new ForbiddenException('仅供应商员工可以执行该操作')
   }
 }
@@ -328,6 +482,7 @@ export class MoldDevelopmentController {
         user: {
           id: user.id,
           name: user.name,
+          phone: user.phone,
           userType: user.userType,
           username: user.username,
           isSupplierEmployee: user.userType === 'SUPPLIER',
@@ -339,18 +494,6 @@ export class MoldDevelopmentController {
           permissions,
           dataScope: frontendDataScope(roles[0]?.dataScope || 'OWN'),
           columnPermissions,
-        },
-      }
-    }
-
-    if (username !== 'admin') {
-      return {
-        token: `mock-token-${username}`,
-        user: {
-          id: 'supplier-demo-user',
-          name: username,
-          userType: 'SUPPLIER_EMPLOYEE',
-          isSupplierEmployee: true,
         },
       }
     }
@@ -374,25 +517,7 @@ export class MoldDevelopmentController {
       update: {
         organizationName: '摩尔元数（福建）科技有限公司',
         dataScope: 'ALL',
-        permissions: [
-          'admin',
-          'basic',
-          'basic.department',
-          'basic.department.create',
-          'basic.department.edit',
-          'basic.department.delete',
-          'basic.user',
-          'basic.role',
-          'basic.customer',
-          'basic.supplier',
-          'basic.product',
-          'basic.dictionary',
-          'mold',
-          'mold.development.view',
-          'mold.development.create',
-          'mold.development.edit',
-          'mold.development.delete',
-        ],
+        permissions: adminPermissions,
       },
       create: {
         name: '系统管理员',
@@ -400,25 +525,7 @@ export class MoldDevelopmentController {
         app: '管理端',
         description: '系统内置管理员角色，拥有全部管理端权限。',
         dataScope: 'ALL',
-        permissions: [
-          'admin',
-          'basic',
-          'basic.department',
-          'basic.department.create',
-          'basic.department.edit',
-          'basic.department.delete',
-          'basic.user',
-          'basic.role',
-          'basic.customer',
-          'basic.supplier',
-          'basic.product',
-          'basic.dictionary',
-          'mold',
-          'mold.development.view',
-          'mold.development.create',
-          'mold.development.edit',
-          'mold.development.delete',
-        ],
+        permissions: adminPermissions,
       },
     })
 
@@ -436,7 +543,7 @@ export class MoldDevelopmentController {
           username: 'admin',
           phone: '13665068911',
           passwordHash,
-          userType: 'EMPLOYEE',
+          userType: 'SUPER_ADMIN',
           status: 'ENABLED',
           lockStatus: 'NORMAL',
           source: 'LOCAL',
@@ -457,7 +564,7 @@ export class MoldDevelopmentController {
         name: '系统管理员',
         phone: '13665068911',
         passwordHash,
-        userType: 'EMPLOYEE',
+        userType: 'SUPER_ADMIN',
         status: 'ENABLED',
         lockStatus: 'NORMAL',
         source: 'LOCAL',
@@ -470,10 +577,11 @@ export class MoldDevelopmentController {
   }
 
   @Get('mobile/home')
-  async home() {
-    const records = await this.findMolds()
+  async home(@Headers('authorization') authorization?: string) {
+    const viewerUser = await this.getViewerUser(authorization)
+    const records = await this.findMoldsForViewer(viewerUser)
     const todos = records
-      .map(supplierTodoFromMold)
+      .map((record) => todoFromMold(record, viewerUser))
       .filter((todo): todo is NonNullable<typeof todo> => Boolean(todo))
 
     return {
@@ -484,9 +592,10 @@ export class MoldDevelopmentController {
   }
 
   @Get('mobile/todos')
-  async todoList() {
-    return (await this.findMolds())
-      .map(supplierTodoFromMold)
+  async todoList(@Headers('authorization') authorization?: string) {
+    const viewerUser = await this.getViewerUser(authorization)
+    return (await this.findMoldsForViewer(viewerUser))
+      .map((record) => todoFromMold(record, viewerUser))
       .filter((todo): todo is NonNullable<typeof todo> => Boolean(todo))
   }
 
@@ -496,9 +605,10 @@ export class MoldDevelopmentController {
     @Query('viewer') viewer?: string,
     @Headers('authorization') authorization?: string,
   ) {
-    const records = await this.findMolds()
+    const viewerUser = await this.getViewerUser(authorization)
+    const records = await this.findMoldsForViewer(viewerUser)
     const normalized = keyword?.trim()
-    const mapped = records.map((record) => toMobileMold(record, { viewer, authorization }))
+    const mapped = records.map((record) => toMobileMold(record, { viewer, authorization, user: viewerUser }))
 
     if (!normalized) return mapped
     return mapped.filter((item) =>
@@ -519,7 +629,9 @@ export class MoldDevelopmentController {
     @Query('viewer') viewer?: string,
     @Headers('authorization') authorization?: string,
   ) {
-    return toMobileMold(await this.findMold(id), { viewer, authorization })
+    const viewerUser = await this.getViewerUser(authorization)
+    const mold = await this.findMoldForViewer(id, viewerUser)
+    return toMobileMold(mold, { viewer, authorization, user: viewerUser })
   }
 
   @Post('admin/molds')
@@ -584,6 +696,40 @@ export class MoldDevelopmentController {
     return { id: mold.code }
   }
 
+  @Put('admin/molds/:id')
+  @UseGuards(AdminAuthGuard)
+  async updateMold(@Param('id') id: string, @Body() body: CreateMoldBody) {
+    const mold = await this.findMold(id)
+    const customer = await this.upsertCustomer(body.customerId || 'CUS_CUSTOM', body.customerName || body.customerId || '')
+    const product = await this.upsertProduct(body.productCode, body.productName || body.productCode)
+    const supplier = await this.upsertSupplier(body.supplierId || 'SUP_CUSTOM', body.supplierName || body.supplierId || '')
+    const images = body.attachments?.length
+      ? [...arrayFromJson(mold.attachments), ...body.attachments.map((_item, index) => imageFallbacks[index % imageFallbacks.length])]
+      : arrayFromJson(mold.attachments)
+
+    await this.prisma.moldDevelopment.update({
+      where: { id: mold.id },
+      data: {
+        customerId: customer.id,
+        productId: product.id,
+        supplierId: supplier.id,
+        customerNotifyDate: toDate(body.customerNotifyDate),
+        moldType: body.moldType,
+        followerName: body.followerName,
+        expectedDate: body.expectedDate ? toDate(body.expectedDate) : null,
+        attachments: images,
+        remark: body.remark,
+      },
+    })
+
+    await this.prisma.moldDevelopmentFlowRecord.updateMany({
+      where: { moldDevelopmentId: mold.id, key: 'ISSUE' },
+      data: { images },
+    })
+
+    return toMobileMold(await this.findMold(id), { viewer: 'admin' })
+  }
+
   @Post('admin/molds/:id/cancel')
   @UseGuards(AdminAuthGuard)
   async cancelMold(@Param('id') id: string, @Body() body: CancelMoldBody) {
@@ -596,28 +742,56 @@ export class MoldDevelopmentController {
       where: { id: mold.id },
       data: {
         status: 'CANCELLED',
-        remark: body.reason ? `${mold.remark || ''}\n中止理由：${body.reason}`.trim() : mold.remark,
+        remark: body.reason
+          ? `${mold.remark || ''}\n中止人：${body.operator || '当前用户'}\n中止时间：${formatDateTime(new Date())}\n中止理由：${body.reason}`.trim()
+          : mold.remark,
       },
     })
 
     return toMobileMold(await this.findMold(id), { viewer: 'admin' })
   }
 
+  @Post('admin/molds/:id/confirm-drawing')
+  @UseGuards(AdminAuthGuard)
+  async adminConfirmDrawing(@Param('id') id: string) {
+    return this.confirmDrawingRecord(id, '管理员', { viewer: 'admin' })
+  }
+
+  @Post('admin/molds/:id/shipping')
+  @UseGuards(AdminAuthGuard)
+  async adminShipping(@Param('id') id: string, @Body() body: ShippingBody) {
+    return this.shippingRecord(id, body, { viewer: 'admin' })
+  }
+
+  @Post('admin/molds/:id/receive')
+  @UseGuards(AdminAuthGuard)
+  async adminReceive(@Param('id') id: string, @Body() body: ReceiveBody) {
+    return this.receiveRecord(id, body, { viewer: 'admin' })
+  }
+
+  @Post('admin/molds/:id/trial')
+  @UseGuards(AdminAuthGuard)
+  async adminTrial(@Param('id') id: string, @Body() body: ProductionBody) {
+    return this.productionRecord(id, 'TRIAL', body, { viewer: 'admin' })
+  }
+
+  @Post('admin/molds/:id/batch')
+  @UseGuards(AdminAuthGuard)
+  async adminBatch(@Param('id') id: string, @Body() body: ProductionBody) {
+    return this.productionRecord(id, 'BATCH', body, { viewer: 'admin' })
+  }
+
+  @Post('admin/molds/:id/evaluation')
+  @UseGuards(AdminAuthGuard)
+  async adminEvaluation(@Param('id') id: string, @Body() body: EvaluationBody) {
+    return this.evaluationRecord(id, body, { viewer: 'admin' })
+  }
+
   @Post('mobile/molds/:id/confirm-drawing')
   async confirmDrawing(@Param('id') id: string, @Headers('authorization') authorization?: string) {
     requireSupplierEmployee(authorization)
-    const mold = await this.findMold(id)
-    await this.prisma.$transaction([
-      this.prisma.moldDevelopment.update({
-        where: { id: mold.id },
-        data: { status: 'SUPPLIER_CONFIRMED' },
-      }),
-      this.prisma.moldDevelopmentFlowRecord.update({
-        where: { moldDevelopmentId_key: { moldDevelopmentId: mold.id, key: 'CONFIRM' } },
-        data: { done: true, operator: '当前用户', operatedAt: new Date() },
-      }),
-    ])
-    return toMobileMold(await this.findMold(id), { authorization })
+    const viewerUser = await this.requireSupplierViewer(authorization)
+    return this.confirmDrawingRecord(id, viewerUser.name || '当前用户', { authorization, user: viewerUser })
   }
 
   @Post('mobile/molds/:id/shipping')
@@ -627,6 +801,66 @@ export class MoldDevelopmentController {
     @Headers('authorization') authorization?: string,
   ) {
     requireSupplierEmployee(authorization)
+    const viewerUser = await this.requireSupplierViewer(authorization)
+    return this.shippingRecord(id, body, { authorization, user: viewerUser })
+  }
+
+  @Post('mobile/molds/:id/receive')
+  async receive(
+    @Param('id') id: string,
+    @Body() body: ReceiveBody,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const viewerUser = await this.requireFollowerViewer(id, authorization)
+    return this.receiveRecord(id, { ...body, operator: body.operator || viewerUser.name }, { authorization, user: viewerUser })
+  }
+
+  @Post('mobile/molds/:id/trial')
+  async trial(
+    @Param('id') id: string,
+    @Body() body: ProductionBody,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const viewerUser = await this.requireFollowerViewer(id, authorization)
+    return this.productionRecord(id, 'TRIAL', { ...body, operator: body.operator || viewerUser.name }, { authorization, user: viewerUser })
+  }
+
+  @Post('mobile/molds/:id/batch')
+  async batch(
+    @Param('id') id: string,
+    @Body() body: ProductionBody,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const viewerUser = await this.requireFollowerViewer(id, authorization)
+    return this.productionRecord(id, 'BATCH', { ...body, operator: body.operator || viewerUser.name }, { authorization, user: viewerUser })
+  }
+
+  @Post('mobile/molds/:id/evaluation')
+  async evaluation(
+    @Param('id') id: string,
+    @Body() body: EvaluationBody,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const viewerUser = await this.requireFollowerViewer(id, authorization)
+    return this.evaluationRecord(id, { ...body, operator: body.operator || viewerUser.name }, { authorization, user: viewerUser })
+  }
+
+  private async confirmDrawingRecord(id: string, operator: string, options: ViewerOptions = {}) {
+    const mold = await this.findMold(id)
+    await this.prisma.$transaction([
+      this.prisma.moldDevelopment.update({
+        where: { id: mold.id },
+        data: { status: 'SUPPLIER_CONFIRMED' },
+      }),
+      this.prisma.moldDevelopmentFlowRecord.update({
+        where: { moldDevelopmentId_key: { moldDevelopmentId: mold.id, key: 'CONFIRM' } },
+        data: { done: true, operator, operatedAt: new Date() },
+      }),
+    ])
+    return toMobileMold(await this.findMold(id), options)
+  }
+
+  private async shippingRecord(id: string, body: ShippingBody, options: ViewerOptions = {}) {
     const mold = await this.findMold(id)
     await this.prisma.$transaction([
       this.prisma.moldDevelopment.update({
@@ -644,11 +878,10 @@ export class MoldDevelopmentController {
         },
       }),
     ])
-    return toMobileMold(await this.findMold(id), { authorization })
+    return toMobileMold(await this.findMold(id), options)
   }
 
-  @Post('mobile/molds/:id/receive')
-  async receive(@Param('id') id: string, @Body() body: ReceiveBody) {
+  private async receiveRecord(id: string, body: ReceiveBody, options: ViewerOptions = {}) {
     const mold = await this.findMold(id)
     await this.prisma.$transaction([
       this.prisma.moldDevelopment.update({
@@ -665,23 +898,31 @@ export class MoldDevelopmentController {
         },
       }),
     ])
-    return toMobileMold(await this.findMold(id))
+    return toMobileMold(await this.findMold(id), options)
   }
 
-  @Post('mobile/molds/:id/trial')
-  async trial(@Param('id') id: string, @Body() body: ProductionBody) {
+  private async productionRecord(
+    id: string,
+    type: 'TRIAL' | 'BATCH',
+    body: ProductionBody,
+    options: ViewerOptions = {},
+  ) {
     const mold = await this.findMold(id)
     const count = await this.prisma.moldProductionRecord.count({
-      where: { moldDevelopmentId: mold.id, type: 'TRIAL' },
+      where: { moldDevelopmentId: mold.id, type },
     })
     await this.prisma.$transaction([
       this.prisma.moldProductionRecord.create({
         data: {
           moldDevelopmentId: mold.id,
-          type: 'TRIAL',
-          title: productionTitle('TRIAL', count + 1),
+          type,
+          title: productionTitle(type, count + 1),
           operator: body.operator || '当前用户',
-          images: body.images || [],
+          images: {
+            productImages: body.productImages || body.images || [],
+            destructiveImages: body.destructiveImages || [],
+            images: body.images?.length ? body.images : [...(body.productImages || []), ...(body.destructiveImages || [])],
+          },
         },
       }),
       this.prisma.moldDevelopment.update({
@@ -689,35 +930,10 @@ export class MoldDevelopmentController {
         data: { status: 'TRIAL_PRODUCTION' },
       }),
     ])
-    return toMobileMold(await this.findMold(id))
+    return toMobileMold(await this.findMold(id), options)
   }
 
-  @Post('mobile/molds/:id/batch')
-  async batch(@Param('id') id: string, @Body() body: ProductionBody) {
-    const mold = await this.findMold(id)
-    const count = await this.prisma.moldProductionRecord.count({
-      where: { moldDevelopmentId: mold.id, type: 'BATCH' },
-    })
-    await this.prisma.$transaction([
-      this.prisma.moldProductionRecord.create({
-        data: {
-          moldDevelopmentId: mold.id,
-          type: 'BATCH',
-          title: productionTitle('BATCH', count + 1),
-          operator: body.operator || '当前用户',
-          images: body.images || [],
-        },
-      }),
-      this.prisma.moldDevelopment.update({
-        where: { id: mold.id },
-        data: { status: 'TRIAL_PRODUCTION' },
-      }),
-    ])
-    return toMobileMold(await this.findMold(id))
-  }
-
-  @Post('mobile/molds/:id/evaluation')
-  async evaluation(@Param('id') id: string, @Body() body: EvaluationBody) {
+  private async evaluationRecord(id: string, body: EvaluationBody, options: ViewerOptions = {}) {
     const mold = await this.findMold(id)
     await this.prisma.$transaction([
       this.prisma.moldProductionRecord.create({
@@ -725,6 +941,7 @@ export class MoldDevelopmentController {
           moldDevelopmentId: mold.id,
           type: 'EVALUATION',
           title: '模具评判记录',
+          operator: body.operator || '当前用户',
           result: body.result || '通过',
           isComplete: body.isComplete ?? true,
           reason: body.reason,
@@ -735,7 +952,7 @@ export class MoldDevelopmentController {
         data: { status: body.isComplete ?? true ? 'COMPLETED' : 'TRIAL_PRODUCTION' },
       }),
     ])
-    return toMobileMold(await this.findMold(id))
+    return toMobileMold(await this.findMold(id), options)
   }
 
   private moldInclude() {
@@ -755,6 +972,16 @@ export class MoldDevelopmentController {
     })
   }
 
+  private async findMoldsForViewer(user?: MobileViewerUser | null) {
+    if (!isSupplierUser(user)) return this.findMolds()
+    if (!user.belongsTo) return []
+    return this.prisma.moldDevelopment.findMany({
+      where: { supplier: { OR: [{ code: user.belongsTo }, { name: user.belongsTo }] } },
+      orderBy: { createdAt: 'desc' },
+      include: this.moldInclude(),
+    })
+  }
+
   private async findMold(id: string) {
     const record = await this.prisma.moldDevelopment.findFirst({
       where: { OR: [{ id }, { code: id }] },
@@ -764,6 +991,47 @@ export class MoldDevelopmentController {
       throw new NotFoundException('模具开发任务不存在')
     }
     return record
+  }
+
+  private async findMoldForViewer(id: string, user?: MobileViewerUser | null) {
+    const record = await this.findMold(id)
+    if (isSupplierUser(user) && record.supplier.name !== user.belongsTo && record.supplier.code !== user.belongsTo) {
+      throw new NotFoundException('模具开发任务不存在')
+    }
+    return record
+  }
+
+  private async getViewerUser(authorization?: string): Promise<MobileViewerUser | null> {
+    const token = authorization?.replace(/^Bearer\s+/i, '') || ''
+    if (!token.startsWith('db-token-')) return null
+    const id = token.replace('db-token-', '')
+    const user = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, name: true, userType: true, belongsTo: true, status: true, lockStatus: true },
+    })
+    if (!user) throw new ForbiddenException('登录已失效')
+    if (user.status !== 'ENABLED' || user.lockStatus !== 'NORMAL') {
+      throw new ForbiddenException('账号已禁用或锁定')
+    }
+    return user
+  }
+
+  private async requireSupplierViewer(authorization?: string): Promise<MobileViewerUser> {
+    const user = await this.getViewerUser(authorization)
+    if (!isSupplierUser(user)) {
+      throw new ForbiddenException('仅供应商员工可以执行该操作')
+    }
+    return user
+  }
+
+  private async requireFollowerViewer(id: string, authorization?: string): Promise<MobileViewerUser> {
+    const user = await this.getViewerUser(authorization)
+    if (!user) throw new ForbiddenException('请先登录')
+    const mold = await this.findMoldForViewer(id, user)
+    if (!mold.followerName || mold.followerName !== user.name) {
+      throw new ForbiddenException('仅跟单人可以执行该操作')
+    }
+    return user
   }
 
   private async createNextMoldCode() {

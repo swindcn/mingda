@@ -5,7 +5,7 @@ Page({
 
   onShow() {
     this.setData({
-      username: wx.getStorageSync('mingda_username') || '1',
+      username: wx.getStorageSync('mingda_display_name') || wx.getStorageSync('mingda_login_account') || '1',
     })
   },
 

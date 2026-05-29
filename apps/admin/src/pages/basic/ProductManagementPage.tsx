@@ -49,6 +49,7 @@ export function ProductManagementPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<ProductRecord | null>(null)
   const [dictionaries, setDictionaries] = useState(() => loadDictionaries())
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     const refresh = () => setDictionaries(loadDictionaries())
@@ -60,10 +61,19 @@ export function ProductManagementPage() {
     saveProducts(products)
   }, [products])
 
+  const refreshProducts = async () => {
+    setLoading(true)
+    try {
+      setProducts(await fetchProductsFromApi())
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '物料数据加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    void fetchProductsFromApi()
-      .then(setProducts)
-      .catch((error) => message.error(error instanceof Error ? error.message : '产品数据加载失败'))
+    void refreshProducts()
   }, [])
 
   const filteredProducts = useMemo(() => {
@@ -121,18 +131,18 @@ export function ProductManagementPage() {
       try {
         setProducts(await updateProductOnApi(editingProduct.id, values))
       } catch (error) {
-        message.error(error instanceof Error ? error.message : '产品更新失败')
+        message.error(error instanceof Error ? error.message : '物料更新失败')
         return
       }
-      message.success('产品已更新')
+      message.success('物料已更新')
     } else {
       try {
         setProducts(await createProductOnApi(values))
       } catch (error) {
-        message.error(error instanceof Error ? error.message : '产品新增失败')
+        message.error(error instanceof Error ? error.message : '物料新增失败')
         return
       }
-      message.success('产品已新增')
+      message.success('物料已新增')
     }
 
     closeModal()
@@ -142,15 +152,15 @@ export function ProductManagementPage() {
     try {
       setProducts(await deleteProductOnApi(id))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '产品删除失败')
+      message.error(error instanceof Error ? error.message : '物料删除失败')
       return
     }
-    message.success('产品已删除')
+    message.success('物料已删除')
   }
 
   const confirmDelete = (record: ProductRecord) => {
     Modal.confirm({
-      title: '删除产品',
+      title: '删除物料',
       content: `确定删除「${record.name}」吗？`,
       okText: '删除',
       cancelText: '取消',
@@ -160,7 +170,7 @@ export function ProductManagementPage() {
   }
 
   const handleExportTemplate = () => {
-    message.info('产品导入模板下载功能待后端文件服务接入')
+    message.info('物料导入模板下载功能待后端文件服务接入')
   }
 
   const uploadProps: UploadProps = {
@@ -175,18 +185,18 @@ export function ProductManagementPage() {
 
   const columns: TableColumnsType<ProductRecord> = [
     {
-      title: '产品ID',
+      title: '物料ID',
       dataIndex: 'id',
       width: 100,
     },
     {
-      title: '产品名称',
+      title: '物料名称',
       dataIndex: 'name',
       width: 180,
       fixed: 'left',
     },
     {
-      title: '产品编码',
+      title: '物料编码',
       dataIndex: 'code',
       width: 130,
     },
@@ -280,10 +290,13 @@ export function ProductManagementPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">产品管理</h1>
-          <p className="page-description">维护产品编码、规格、来源、价格、库存和产能信息。</p>
+          <h1 className="page-title">物料管理</h1>
+          <p className="page-description">维护物料编码、规格、来源、价格、库存和产能信息。</p>
         </div>
         <Space>
+          <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={refreshProducts}>
+            查询
+          </Button>
           <Button icon={<DownloadOutlined />} onClick={handleExportTemplate}>
             下载模板
           </Button>
@@ -291,7 +304,7 @@ export function ProductManagementPage() {
             <Button icon={<UploadOutlined />}>Excel导入</Button>
           </Upload>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-            新增产品
+            新增物料
           </Button>
         </Space>
       </div>
@@ -301,7 +314,7 @@ export function ProductManagementPage() {
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="搜索产品名称、编码、ID、规格、来源或车间"
+            placeholder="搜索物料名称、编码、ID、规格、来源或车间"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
             style={{ maxWidth: 420 }}
@@ -312,6 +325,7 @@ export function ProductManagementPage() {
             rowKey="id"
             columns={columns}
             dataSource={filteredProducts}
+            loading={loading}
             pagination={{
               pageSize: 10,
               showSizeChanger: false,
@@ -322,7 +336,7 @@ export function ProductManagementPage() {
       </Card>
 
       <Modal
-        title={editingProduct ? '编辑产品' : '新增产品'}
+        title={editingProduct ? '编辑物料' : '新增物料'}
         open={modalOpen}
         width={860}
         okText={editingProduct ? '保存' : '确认添加'}
@@ -347,7 +361,7 @@ export function ProductManagementPage() {
             dailyCapacity: 0,
           }}
         >
-          <Typography.Title level={5}>产品基本信息</Typography.Title>
+          <Typography.Title level={5}>物料基本信息</Typography.Title>
           <div
             style={{
               display: 'grid',
@@ -356,28 +370,28 @@ export function ProductManagementPage() {
             }}
           >
             <Form.Item
-              label="产品名称"
+              label="物料名称"
               name="name"
-              rules={[{ required: true, message: '请输入产品名称' }]}
+              rules={[{ required: true, message: '请输入物料名称' }]}
             >
-              <Input placeholder="请输入产品名称" />
+              <Input placeholder="请输入物料名称" />
             </Form.Item>
             <Form.Item
-              label="产品编码"
+              label="物料编码"
               name="code"
-              rules={[{ required: true, message: '请输入产品编码' }]}
+              rules={[{ required: true, message: '请输入物料编码' }]}
             >
-              <Input placeholder="请输入产品编码" />
+              <Input placeholder="请输入物料编码" disabled={Boolean(editingProduct)} />
             </Form.Item>
             <Form.Item
-              label="产品规格"
+              label="物料规格"
               name="spec"
-              rules={[{ required: true, message: '请输入产品规格' }]}
+              rules={[{ required: true, message: '请输入物料规格' }]}
             >
               <Input placeholder="例如：600x400x360" />
             </Form.Item>
             <Form.Item
-              label="产品单位"
+              label="物料单位"
               name="unit"
               rules={[{ required: true, message: '请选择产品单位' }]}
             >
@@ -389,7 +403,7 @@ export function ProductManagementPage() {
               />
             </Form.Item>
             <Form.Item
-              label="产品类型"
+              label="物料类型"
               name="type"
               rules={[{ required: true, message: '请选择产品类型' }]}
             >
@@ -401,7 +415,7 @@ export function ProductManagementPage() {
               />
             </Form.Item>
             <Form.Item
-              label="产品来源"
+              label="物料来源"
               name="source"
               rules={[{ required: true, message: '请选择产品来源' }]}
             >
@@ -423,7 +437,7 @@ export function ProductManagementPage() {
           </div>
 
           <Typography.Title level={5} style={{ marginTop: 8 }}>
-            产品辅助信息
+            物料辅助信息
           </Typography.Title>
           <div
             style={{
@@ -432,10 +446,10 @@ export function ProductManagementPage() {
               gap: '0 16px',
             }}
           >
-            <Form.Item label="产品售价(元)" name="salePrice">
+            <Form.Item label="物料售价(元)" name="salePrice">
               <InputNumber min={0} precision={2} style={{ width: '100%' }} />
             </Form.Item>
-            <Form.Item label="产品成本价(元)" name="costPrice">
+            <Form.Item label="物料成本价(元)" name="costPrice">
               <InputNumber min={0} precision={2} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item label="库存上限" name="stockMax">

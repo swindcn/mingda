@@ -209,6 +209,19 @@ export async function deleteDepartmentOnApi(id: string) {
   return fetchDepartmentsFromApi()
 }
 
+export async function syncDepartmentsOnApi(input: {
+  provider: 'dingtalk' | 'wechat-work' | 'lark'
+  syncMode: 'merge' | 'overwrite'
+  departments: DepartmentRecord[]
+}) {
+  const departments = await apiRequest<DepartmentRecord[]>('/admin/departments/sync', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  saveDepartments(departments)
+  return departments
+}
+
 export function walkDepartments(
   records: DepartmentRecord[],
   depth = 0,

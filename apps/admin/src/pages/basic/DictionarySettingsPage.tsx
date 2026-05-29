@@ -1,10 +1,11 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { Button, Card, Form, Input, Space, Tag, Typography, message } from 'antd'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   defaultDictionaries,
+  fetchDictionariesFromApi,
   loadDictionaries,
-  saveDictionaries,
+  updateDictionariesOnApi,
 } from '../../utils/dictionaries'
 import type { DictionaryState } from '../../utils/dictionaries'
 
@@ -33,13 +34,40 @@ const dictionaryMeta: Array<{
     title: '岗位信息配置',
     description: '用于用户管理新增/编辑用户时的岗位字段。',
   },
+  {
+    key: 'workshopTypes',
+    title: '车间类型配置',
+    description: '用于生产建模中车间与产线的车间类型字段。',
+  },
 ]
 
 export function DictionarySettingsPage() {
   const [form] = Form.useForm<Record<string, string>>()
   const [dictionaries, setDictionaries] = useState<DictionaryState>(() => loadDictionaries())
+  const [saving, setSaving] = useState(false)
 
-  const addItem = (key: keyof DictionaryState) => {
+  useEffect(() => {
+    void fetchDictionariesFromApi()
+      .then(setDictionaries)
+      .catch((error) => {
+        message.error(error instanceof Error ? error.message : '字典数据加载失败')
+      })
+  }, [])
+
+  const persistDictionaries = async (next: DictionaryState, successMessage: string) => {
+    setSaving(true)
+    try {
+      const saved = await updateDictionariesOnApi(next)
+      setDictionaries(saved)
+      message.success(successMessage)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '字典保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addItem = async (key: keyof DictionaryState) => {
     const value = form.getFieldValue(key)?.trim()
     if (!value) {
       message.warning('请输入字典项名称')
@@ -51,27 +79,22 @@ export function DictionarySettingsPage() {
     }
 
     const next = { ...dictionaries, [key]: [...dictionaries[key], value] }
-    setDictionaries(next)
-    saveDictionaries(next)
+    await persistDictionaries(next, '字典项已新增')
     form.setFieldValue(key, '')
-    message.success('字典项已新增')
   }
 
-  const removeItem = (key: keyof DictionaryState, value: string) => {
+  const removeItem = async (key: keyof DictionaryState, value: string) => {
     const nextValues = dictionaries[key].filter((item) => item !== value)
     if (!nextValues.length) {
       message.warning('至少保留一个字典项')
       return
     }
     const next = { ...dictionaries, [key]: nextValues }
-    setDictionaries(next)
-    saveDictionaries(next)
+    await persistDictionaries(next, '字典项已删除')
   }
 
-  const resetDefault = () => {
-    setDictionaries(defaultDictionaries)
-    saveDictionaries(defaultDictionaries)
-    message.success('已恢复默认字典')
+  const resetDefault = async () => {
+    await persistDictionaries(defaultDictionaries, '已恢复默认字典')
   }
 
   return (
@@ -81,7 +104,7 @@ export function DictionarySettingsPage() {
           <h1 className="page-title">字典设置</h1>
           <p className="page-description">维护业务表单中的可选项，变更后会立即应用到本浏览器管理端。</p>
         </div>
-        <Button onClick={resetDefault}>恢复默认</Button>
+        <Button loading={saving} onClick={resetDefault}>恢复默认</Button>
       </div>
 
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -100,7 +123,7 @@ export function DictionarySettingsPage() {
                 <Form.Item name={meta.key} noStyle>
                   <Input placeholder={`新增${meta.title.replace('配置', '')}`} onPressEnter={() => addItem(meta.key)} />
                 </Form.Item>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => addItem(meta.key)}>
+                <Button loading={saving} type="primary" icon={<PlusOutlined />} onClick={() => addItem(meta.key)}>
                   新增
                 </Button>
               </Space.Compact>

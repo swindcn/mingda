@@ -89,12 +89,6 @@
   font-size: 26rpx;
 }
 
-.forgot {
-  margin-left: auto;
-  color: #1677ff;
-  font-size: 26rpx;
-}
-
 .login-button {
   height: 92rpx;
   line-height: 92rpx;

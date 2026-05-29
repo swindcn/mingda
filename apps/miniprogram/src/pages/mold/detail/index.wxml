@@ -64,11 +64,84 @@
         </view>
       </view>
     </view>
+
+    <view wx:if="{{showInternalRecords && hasDevelopmentRecords}}" class="card records-card">
+      <view class="card-title">开发记录</view>
+      <view class="divider"></view>
+
+      <view class="record-item" wx:for="{{mold.productionRecords}}" wx:key="id">
+        <view class="record-title">{{item.title}}</view>
+        <view wx:if="{{item.operator}}" class="record-line">填写人：{{item.operator}}</view>
+        <view wx:if="{{item.time}}" class="record-line">提交时间：{{item.time}}</view>
+        <view wx:if="{{item.type === 'evaluation'}}">
+          <view wx:if="{{item.result}}" class="record-line">评判结果：{{item.result}}</view>
+          <view class="record-line">是否开发完成：{{item.isComplete ? '是' : '否'}}</view>
+          <view wx:if="{{item.reason}}" class="record-line">评判理由：{{item.reason}}</view>
+        </view>
+        <view wx:if="{{item.type !== 'evaluation'}}">
+          <view wx:if="{{item.productImages && item.productImages.length}}" class="record-section">
+            <view class="record-subtitle">产品图片</view>
+            <view class="record-images">
+              <image
+                wx:for="{{item.productImages}}"
+                wx:for-item="recordImage"
+                wx:key="*this"
+                class="flow-thumb"
+                src="{{recordImage}}"
+                mode="aspectFill"
+                data-src="{{recordImage}}"
+                data-urls="{{item.productImages}}"
+                bindtap="previewImage"
+              />
+            </view>
+          </view>
+          <view wx:if="{{item.destructiveImages && item.destructiveImages.length}}" class="record-section">
+            <view class="record-subtitle">破坏性检测图片</view>
+            <view class="record-images">
+              <image
+                wx:for="{{item.destructiveImages}}"
+                wx:for-item="recordImage"
+                wx:key="*this"
+                class="flow-thumb"
+                src="{{recordImage}}"
+                mode="aspectFill"
+                data-src="{{recordImage}}"
+                data-urls="{{item.destructiveImages}}"
+                bindtap="previewImage"
+              />
+            </view>
+          </view>
+          <view wx:if="{{(!item.productImages || !item.productImages.length) && item.images && item.images.length}}" class="record-section">
+            <view class="record-subtitle">图片</view>
+            <view class="record-images">
+              <image
+                wx:for="{{item.images}}"
+                wx:for-item="recordImage"
+                wx:key="*this"
+                class="flow-thumb"
+                src="{{recordImage}}"
+                mode="aspectFill"
+                data-src="{{recordImage}}"
+                data-urls="{{item.images}}"
+                bindtap="previewImage"
+              />
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{mold.terminationRecord}}" class="record-item">
+        <view class="record-title">开发中止记录</view>
+        <view wx:if="{{mold.terminationRecord.operator}}" class="record-line">中止人：{{mold.terminationRecord.operator}}</view>
+        <view wx:if="{{mold.terminationRecord.time}}" class="record-line">中止时间：{{mold.terminationRecord.time}}</view>
+        <view wx:if="{{mold.terminationRecord.reason}}" class="record-line">中止理由：{{mold.terminationRecord.reason}}</view>
+      </view>
+    </view>
   </view>
 
   <view wx:if="{{showBottomActions}}" class="bottom-actions">
-    <button class="bottom-button trial" bindtap="openTrial">试模生产</button>
-    <button class="bottom-button batch" bindtap="openBatch">批量生产</button>
-    <button class="bottom-button eval" bindtap="openEvaluation">模具测评</button>
+    <button wx:if="{{mold.permissions && mold.permissions.canTrial}}" class="bottom-button trial" bindtap="openTrial">试模生产</button>
+    <button wx:if="{{mold.permissions && mold.permissions.canBatch}}" class="bottom-button batch" bindtap="openBatch">批量生产</button>
+    <button wx:if="{{mold.permissions && mold.permissions.canEvaluate}}" class="bottom-button eval" bindtap="openEvaluation">模具测评</button>
   </view>
 </view>

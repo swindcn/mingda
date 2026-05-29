@@ -1,5 +1,9 @@
 import { login as loginApi } from '../../services/api'
 
+function isPhoneAccount(value: string) {
+  return /^1\d{10}$/.test(value)
+}
+
 Page({
   data: {
     username: '',
@@ -11,9 +15,18 @@ Page({
 
   onLoad() {
     const rememberPassword = wx.getStorageSync('mingda_remember') === true
+    const rememberedAccount = wx.getStorageSync('mingda_login_account') || ''
     if (rememberPassword) {
+      if (rememberedAccount && !isPhoneAccount(rememberedAccount)) {
+        wx.removeStorageSync('mingda_login_account')
+        wx.removeStorageSync('mingda_password')
+        wx.removeStorageSync('mingda_remember')
+        wx.removeStorageSync('mingda_username')
+        return
+      }
+
       this.setData({
-        username: wx.getStorageSync('mingda_username') || '',
+        username: rememberedAccount,
         password: wx.getStorageSync('mingda_password') || '',
         rememberPassword,
       })
@@ -50,16 +63,22 @@ Page({
       })
 
       if (this.data.rememberPassword) {
-        wx.setStorageSync('mingda_username', this.data.username)
+        const loginAccount = result.user.phone || (isPhoneAccount(this.data.username) ? this.data.username : '')
+        if (loginAccount) {
+          wx.setStorageSync('mingda_login_account', loginAccount)
+        } else {
+          wx.removeStorageSync('mingda_login_account')
+        }
         wx.setStorageSync('mingda_password', this.data.password)
         wx.setStorageSync('mingda_remember', true)
       } else {
-        wx.removeStorageSync('mingda_username')
+        wx.removeStorageSync('mingda_login_account')
         wx.removeStorageSync('mingda_password')
         wx.removeStorageSync('mingda_remember')
       }
 
-      wx.setStorageSync('mingda_username', result.user.name)
+      wx.removeStorageSync('mingda_username')
+      wx.setStorageSync('mingda_display_name', result.user.name)
       wx.setStorageSync('mingda_token', result.token)
       wx.setStorageSync('mingda_user_type', result.user.userType)
       wx.setStorageSync('mingda_is_supplier_employee', Boolean(result.user.isSupplierEmployee))

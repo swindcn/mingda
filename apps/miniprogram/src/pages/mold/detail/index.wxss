@@ -130,19 +130,24 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16rpx;
   min-height: 44rpx;
 }
 
 .flow-title {
+  flex: 1;
+  min-width: 0;
   font-size: 30rpx;
   font-weight: 700;
 }
 
 .node-button {
-  min-width: 140rpx;
+  flex: 0 0 auto;
+  width: auto !important;
+  min-width: 0;
   height: 58rpx;
-  margin: 0;
-  padding: 0 18rpx;
+  margin: 0 0 0 auto;
+  padding: 0 28rpx;
   color: #fff;
   font-size: 26rpx;
   line-height: 58rpx;
@@ -170,6 +175,47 @@
 .flow-thumb {
   width: 116rpx;
   height: 116rpx;
+}
+
+.record-item {
+  padding: 24rpx;
+  margin-bottom: 20rpx;
+  background: #f8fafc;
+  border-radius: 16rpx;
+}
+
+.record-item:last-child {
+  margin-bottom: 0;
+}
+
+.record-title {
+  margin-bottom: 14rpx;
+  color: #111827;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.record-line {
+  margin-top: 8rpx;
+  color: #475467;
+  font-size: 26rpx;
+  line-height: 40rpx;
+}
+
+.record-section {
+  margin-top: 18rpx;
+}
+
+.record-subtitle {
+  margin-bottom: 12rpx;
+  color: #667085;
+  font-size: 26rpx;
+}
+
+.record-images {
+  display: flex;
+  gap: 16rpx;
+  overflow-x: auto;
 }
 
 .bottom-actions {

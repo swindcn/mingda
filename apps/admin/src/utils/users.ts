@@ -3,7 +3,7 @@ import { apiRequest } from '../services/api'
 export const USER_STORAGE_KEY = 'mingda-users'
 export const USER_STORAGE_EVENT = 'mingda-users-updated'
 
-export type UserType = '员工' | '供应商' | '客户'
+export type UserType = '超管' | '员工' | '供应商' | '客户'
 export type UserStatus = '启用' | '禁用'
 export type LockStatus = '正常' | '锁定'
 export type UserSource = '本地' | '钉钉' | '企业微信' | '飞书'
@@ -14,6 +14,7 @@ export interface UserRecord {
   phone: string
   userType: UserType
   organization: string
+  departmentId?: string
   department: string
   position: string
   role: string
@@ -33,8 +34,8 @@ export const initialUsers: UserRecord[] = [
     name: '张三',
     phone: '13800138001',
     userType: '员工',
-    organization: '摩尔元数（福建）科技有限公司',
-    department: '生产中心',
+    organization: '闽大铸件',
+    department: '生产部',
     position: '生产主管',
     role: '管理员',
     status: '启用',
@@ -50,8 +51,8 @@ export const initialUsers: UserRecord[] = [
     name: '李四',
     phone: '13800138002',
     userType: '供应商',
-    organization: '摩尔元数（福建）科技有限公司',
-    department: '技术支持中心',
+    organization: '闽大铸件',
+    department: '供应商部门',
     position: '销售经理',
     role: '普通用户',
     status: '启用',
@@ -114,8 +115,44 @@ export async function deleteUserOnApi(id: string) {
   return result
 }
 
+export async function fetchRecycledUsersFromApi() {
+  return apiRequest<UserRecord[]>('/admin/users/recycled')
+}
+
+export async function restoreUserOnApi(id: string) {
+  const result = await apiRequest<{ id: string }>(`/admin/users/${id}/restore`, {
+    method: 'PUT',
+  })
+  await fetchUsersFromApi()
+  return result
+}
+
+export async function permanentlyDeleteUserOnApi(id: string) {
+  const result = await apiRequest<{ id: string }>(`/admin/users/${id}/permanent`, {
+    method: 'DELETE',
+  })
+  await fetchUsersFromApi()
+  return result
+}
+
+export async function syncUsersOnApi(provider: 'dingtalk' | 'wechat-work' | 'lark', users: Partial<UserRecord>[]) {
+  const synced = await apiRequest<UserRecord[]>('/admin/users/sync', {
+    method: 'POST',
+    body: JSON.stringify({ provider, users }),
+  })
+  saveUsers(synced)
+  return synced
+}
+
 export function loadInternalEmployees() {
   return loadUsers().filter(
+    (user) => user.userType === '员工' && user.status === '启用' && user.lockStatus === '正常',
+  )
+}
+
+export async function fetchInternalEmployeesFromApi() {
+  const users = await fetchUsersFromApi()
+  return users.filter(
     (user) => user.userType === '员工' && user.status === '启用' && user.lockStatus === '正常',
   )
 }

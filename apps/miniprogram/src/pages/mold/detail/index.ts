@@ -9,6 +9,8 @@ Page({
     canShip: false,
     canReceive: false,
     showBottomActions: false,
+    showInternalRecords: false,
+    hasDevelopmentRecords: false,
     isSupplierEmployee: false,
     loading: false,
   },
@@ -17,6 +19,7 @@ Page({
     this.setData({
       id: query.id || '',
       isSupplierEmployee: wx.getStorageSync('mingda_is_supplier_employee') === true,
+      showInternalRecords: wx.getStorageSync('mingda_user_type') !== 'SUPPLIER' && wx.getStorageSync('mingda_user_type') !== 'CUSTOMER',
     })
   },
 
@@ -41,12 +44,14 @@ Page({
   },
 
   applyMoldState(mold: MoldDevelopmentItem) {
+    const permissions = mold.permissions
     this.setData({
       mold,
-      canConfirmDrawing: mold.status === '待确认',
-      canShip: mold.status === '待发货',
-      canReceive: mold.status === '待收货',
-      showBottomActions: mold.status === '待试产' || mold.status === '试产中',
+      canConfirmDrawing: Boolean(permissions?.canConfirmDrawing),
+      canShip: Boolean(permissions?.canShip),
+      canReceive: Boolean(permissions?.canReceive),
+      showBottomActions: Boolean(permissions?.canTrial || permissions?.canBatch || permissions?.canEvaluate),
+      hasDevelopmentRecords: Boolean(mold.productionRecords.length || mold.terminationRecord),
     })
   },
 

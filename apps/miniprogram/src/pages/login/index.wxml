@@ -17,7 +17,6 @@
       <view class="form-row">
         <checkbox checked="{{rememberPassword}}" bindtap="toggleRemember" />
         <text class="remember">记住密码</text>
-        <text class="forgot">忘记密码？</text>
       </view>
       <button class="primary-button login-button" loading="{{loading}}" bindtap="login">登录</button>
     </view>

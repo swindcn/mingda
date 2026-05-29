@@ -9,6 +9,8 @@ export interface LoginResponse {
   user: {
     id: string
     name: string
+    phone?: string
+    username?: string
     userType: string
     isSupplierEmployee?: boolean
   }
@@ -76,7 +78,7 @@ export function submitReceive(
 
 export function submitTrial(
   id: string,
-  data: { operator?: string; images?: string[] },
+  data: { operator?: string; images?: string[]; productImages?: string[]; destructiveImages?: string[] },
 ) {
   return request<MoldDevelopmentItem>({
     url: `/mobile/molds/${id}/trial`,
@@ -87,7 +89,7 @@ export function submitTrial(
 
 export function submitBatch(
   id: string,
-  data: { operator?: string; images?: string[] },
+  data: { operator?: string; images?: string[]; productImages?: string[]; destructiveImages?: string[] },
 ) {
   return request<MoldDevelopmentItem>({
     url: `/mobile/molds/${id}/batch`,

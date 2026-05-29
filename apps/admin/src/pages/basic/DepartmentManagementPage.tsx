@@ -4,6 +4,7 @@ import {
   EditOutlined,
   PlusOutlined,
   QuestionCircleOutlined,
+  SearchOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
 import {
@@ -32,13 +33,11 @@ import {
   deleteDepartmentOnApi,
   fetchDepartmentsFromApi,
   getDepartmentOptions,
-  removeDepartmentByKey,
-  saveDepartments,
+  syncDepartmentsOnApi,
   updateDepartmentOnApi,
 } from '../../utils/departments'
 import type { DepartmentRecord } from '../../utils/departments'
 import { hasPermission } from '../../utils/roles'
-import { loadUsers, saveUsers } from '../../utils/users'
 
 type SyncProvider = 'dingtalk' | 'wechat-work' | 'lark'
 
@@ -118,13 +117,19 @@ export function DepartmentManagementPage() {
   const canEditDepartment = hasPermission('basic.department.edit')
   const canDeleteDepartment = hasPermission('basic.department.delete')
 
+  const refreshDepartments = async () => {
+    setDepartmentLoading(true)
+    try {
+      setDepartments(await fetchDepartmentsFromApi())
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '部门数据加载失败')
+    } finally {
+      setDepartmentLoading(false)
+    }
+  }
+
   useEffect(() => {
-    void fetchDepartmentsFromApi()
-      .then(setDepartments)
-      .catch((error) => {
-        message.error(error instanceof Error ? error.message : '部门数据加载失败')
-      })
-      .finally(() => setDepartmentLoading(false))
+    void refreshDepartments()
   }, [])
 
   const departmentOptions = useMemo(
@@ -193,30 +198,12 @@ export function DepartmentManagementPage() {
   }
 
   const handleDelete = async (record: DepartmentRecord) => {
-    const { nextDepartments, removedNames } = removeDepartmentByKey(departments, record.key)
-
     try {
       setDepartments(await deleteDepartmentOnApi(record.key))
+      message.success('部门已删除，相关用户的所属部门已清空')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '部门删除失败')
-      return
     }
-
-    setDepartments((current) => {
-      const removedNameSet = new Set(removedNames)
-      const users = loadUsers()
-      const nextUsers = users.map((user) =>
-        removedNameSet.has(user.department)
-          ? { ...user, department: '', updatedBy: '管理员', updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss') }
-          : user,
-      )
-      if (nextUsers.some((user, index) => user.department !== users[index]?.department)) {
-        saveUsers(nextUsers)
-      }
-      saveDepartments(nextDepartments)
-      return current
-    })
-    message.success('部门已删除，相关用户的所属部门已清空')
   }
 
   const confirmDelete = (record: DepartmentRecord) => {
@@ -239,14 +226,19 @@ export function DepartmentManagementPage() {
     setSyncModalOpen(true)
   }
 
-  const handleSync = (values: SyncFormValues) => {
-    setDepartments((current) =>
-      values.syncMode === 'overwrite'
-        ? syncedDepartments[values.provider]
-        : [...current, ...syncedDepartments[values.provider]],
-    )
-    message.success(`已模拟同步${providerLabelMap[values.provider]}部门数据`)
-    setSyncModalOpen(false)
+  const handleSync = async (values: SyncFormValues) => {
+    try {
+      const nextDepartments = await syncDepartmentsOnApi({
+        provider: values.provider,
+        syncMode: values.syncMode,
+        departments: syncedDepartments[values.provider],
+      })
+      setDepartments(nextDepartments)
+      message.success(`已同步${providerLabelMap[values.provider]}部门数据`)
+      setSyncModalOpen(false)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '部门同步失败')
+    }
   }
 
   const columns: TableColumnsType<DepartmentRecord> = [
@@ -328,6 +320,9 @@ export function DepartmentManagementPage() {
           </p>
         </div>
         <Space>
+          <Button type="primary" icon={<SearchOutlined />} loading={departmentLoading} onClick={refreshDepartments}>
+            查询
+          </Button>
           <Button icon={<QuestionCircleOutlined />} onClick={() => navigate('/dashboard/departments/help')}>
             配置帮助
           </Button>
@@ -409,8 +404,8 @@ export function DepartmentManagementPage() {
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          message="当前为前端模拟同步"
-          description="真实接入时应由后端安全保存密钥并调用第三方通讯录接口，前端只提交配置标识。"
+          message="当前为测试同步数据落库"
+          description="本版本会把测试同步结果写入后端数据库；真实接入时再由后端安全保存密钥并调用第三方通讯录接口。"
         />
         <Form form={syncForm} layout="vertical" onFinish={handleSync}>
           <Form.Item label="同步来源" name="provider" rules={[{ required: true }]}>

@@ -72,16 +72,26 @@ export function PartnerDirectoryPage({
   const [keyword, setKeyword] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<PartnerRecord | null>(null)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     saveRecords(records)
   }, [records, saveRecords])
 
+  const refreshRecords = async () => {
+    setLoading(true)
+    try {
+      setRecords(await fetchRecords())
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : `${entityName}数据加载失败`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    void fetchRecords()
-      .then(setRecords)
-      .catch((error) => message.error(error instanceof Error ? error.message : `${entityName}数据加载失败`))
-  }, [entityName, fetchRecords])
+    void refreshRecords()
+  }, [])
 
   const filteredRecords = useMemo(() => {
     const normalizedKeyword = keyword.trim()
@@ -226,9 +236,14 @@ export function PartnerDirectoryPage({
           <h1 className="page-title">{title}</h1>
           <p className="page-description">{description}</p>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-          新增{entityName}
-        </Button>
+        <Space>
+          <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={refreshRecords}>
+            查询
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+            新增{entityName}
+          </Button>
+        </Space>
       </div>
 
       <Card>
@@ -248,6 +263,7 @@ export function PartnerDirectoryPage({
             rowKey="id"
             columns={columns}
             dataSource={filteredRecords}
+            loading={loading}
             pagination={{
               pageSize: 10,
               showSizeChanger: false,

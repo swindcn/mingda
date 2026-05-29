@@ -29,8 +29,16 @@ export interface ProductionRecord {
   operator?: string
   time: string
   images?: string[]
+  productImages?: string[]
+  destructiveImages?: string[]
   result?: '通过' | '不通过'
   isComplete?: boolean
+  reason?: string
+}
+
+export interface TerminationRecord {
+  operator?: string
+  time?: string
   reason?: string
 }
 
@@ -50,7 +58,16 @@ export interface MoldDevelopmentItem {
   issuedDate: string
   remark: string
   images: string[]
+  permissions?: {
+    canConfirmDrawing: boolean
+    canShip: boolean
+    canReceive: boolean
+    canTrial: boolean
+    canBatch: boolean
+    canEvaluate: boolean
+  }
   flowRecords: FlowRecord[]
   productionRecords: ProductionRecord[]
+  terminationRecord?: TerminationRecord | null
   hideSupplierSensitiveFields?: boolean
 }

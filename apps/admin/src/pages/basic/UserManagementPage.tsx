@@ -25,16 +25,25 @@ import type { TableColumnsType } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
-import { DEPARTMENT_STORAGE_EVENT, getDepartmentOptions, loadDepartments } from '../../utils/departments'
+import {
+  DEPARTMENT_STORAGE_EVENT,
+  fetchDepartmentsFromApi,
+  getDepartmentOptions,
+  loadDepartments,
+} from '../../utils/departments'
+import type { DepartmentRecord } from '../../utils/departments'
 import { loadDictionaries } from '../../utils/dictionaries'
 import { MASTER_DATA_EVENT, loadCustomers, loadSuppliers } from '../../utils/masterData'
 import { ROLE_STORAGE_EVENT, loadRoles } from '../../utils/roles'
 import {
   createUserOnApi,
   deleteUserOnApi,
+  fetchRecycledUsersFromApi,
   fetchUsersFromApi,
   loadUsers,
-  saveUsers,
+  permanentlyDeleteUserOnApi,
+  restoreUserOnApi,
+  syncUsersOnApi,
   updateUserOnApi,
 } from '../../utils/users'
 import type { LockStatus, UserRecord, UserStatus, UserType } from '../../utils/users'
@@ -47,7 +56,8 @@ interface UserFormValues {
   password?: string
   userType: UserType
   organization: string
-  department: string
+  departmentId: string
+  department?: string
   position: string
   role: string
   status: UserStatus
@@ -64,7 +74,7 @@ interface SyncFormValues {
   appKey?: string
 }
 
-const organizations = ['摩尔元数（福建）科技有限公司', '厦门子公司', '培训学员组织']
+const organizationName = '闽大铸件'
 
 const providerLabelMap: Record<SyncProvider, '钉钉' | '企业微信' | '飞书'> = {
   dingtalk: '钉钉',
@@ -79,7 +89,7 @@ const syncedUsers: Record<SyncProvider, UserRecord[]> = {
       name: '张三-钉钉覆盖',
       phone: '13800138001',
       userType: '员工',
-      organization: '摩尔元数（福建）科技有限公司',
+      organization: organizationName,
       department: '总经办',
       position: '运营负责人',
       role: '普通用户',
@@ -96,8 +106,8 @@ const syncedUsers: Record<SyncProvider, UserRecord[]> = {
       name: '离职员工',
       phone: '13900001111',
       userType: '员工',
-      organization: '摩尔元数（福建）科技有限公司',
-      department: '产品一部',
+      organization: organizationName,
+      department: '生产部',
       position: '产品经理',
       role: '普通用户',
       status: '禁用',
@@ -115,8 +125,8 @@ const syncedUsers: Record<SyncProvider, UserRecord[]> = {
       name: '企微员工',
       phone: '13900002222',
       userType: '员工',
-      organization: '厦门子公司',
-      department: '财务部',
+      organization: organizationName,
+      department: '采购部',
       position: '会计',
       role: '普通用户',
       status: '启用',
@@ -134,8 +144,8 @@ const syncedUsers: Record<SyncProvider, UserRecord[]> = {
       name: '飞书员工',
       phone: '13900003333',
       userType: '员工',
-      organization: '培训学员组织',
-      department: '培训学员组织',
+      organization: organizationName,
+      department: '生产管理部',
       position: '项目成员',
       role: '普通用户',
       status: '启用',
@@ -150,13 +160,18 @@ const syncedUsers: Record<SyncProvider, UserRecord[]> = {
 }
 
 const userTypeColorMap: Record<UserType, string> = {
+  超管: 'red',
   员工: 'blue',
   供应商: 'green',
   客户: 'purple',
 }
 
-function createNextId(users: UserRecord[]) {
-  return `U${String(users.length + 1).padStart(3, '0')}`
+function getMingdaDepartmentOptions(records: DepartmentRecord[]) {
+  const root = records.find((department) => department.name === organizationName)
+  if (!root) return []
+  const options = getDepartmentOptions([root])
+  const childOptions = options.filter((department) => department.depth > 0)
+  return childOptions.length ? childOptions : []
 }
 
 export function UserManagementPage() {
@@ -172,19 +187,24 @@ export function UserManagementPage() {
   const [syncProvider, setSyncProvider] = useState<SyncProvider>('dingtalk')
   const [dictionaries, setDictionaries] = useState(() => loadDictionaries())
   const [roles, setRoles] = useState(() => loadRoles())
-  const [departmentOptions, setDepartmentOptions] = useState(() => getDepartmentOptions(loadDepartments()))
+  const [departmentOptions, setDepartmentOptions] = useState(() => getMingdaDepartmentOptions(loadDepartments()))
   const [suppliers, setSuppliers] = useState(() => loadSuppliers())
   const [customers, setCustomers] = useState(() => loadCustomers())
   const selectedUserType = Form.useWatch('userType', form)
 
-  useEffect(() => {
-    saveUsers(users)
-  }, [users])
+  const refreshUsers = async () => {
+    const [activeRecords, recycledRecords] = await Promise.all([
+      fetchUsersFromApi(),
+      fetchRecycledUsersFromApi(),
+    ])
+    setUsers(activeRecords)
+    setRecycledUsers(recycledRecords)
+  }
 
   useEffect(() => {
-    void fetchUsersFromApi()
-      .then(setUsers)
-      .catch(() => undefined)
+    void refreshUsers().catch((error) => {
+      message.error(error instanceof Error ? error.message : '用户数据加载失败')
+    })
   }, [])
 
   useEffect(() => {
@@ -200,9 +220,17 @@ export function UserManagementPage() {
   }, [])
 
   useEffect(() => {
-    const refresh = () => setDepartmentOptions(getDepartmentOptions(loadDepartments()))
+    const refresh = () => setDepartmentOptions(getMingdaDepartmentOptions(loadDepartments()))
     window.addEventListener(DEPARTMENT_STORAGE_EVENT, refresh)
     return () => window.removeEventListener(DEPARTMENT_STORAGE_EVENT, refresh)
+  }, [])
+
+  useEffect(() => {
+    void fetchDepartmentsFromApi()
+      .then((records) => setDepartmentOptions(getMingdaDepartmentOptions(records)))
+      .catch((error) => {
+        message.error(error instanceof Error ? error.message : '部门数据加载失败')
+      })
   }, [])
 
   useEffect(() => {
@@ -235,8 +263,8 @@ export function UserManagementPage() {
     form.setFieldsValue({
       userType: '员工',
       role: roles.find((role) => role.name !== '系统管理员')?.name || roles[0]?.name,
-      organization: organizations[0],
-      department: departmentOptions[0]?.name || '',
+      organization: organizationName,
+      departmentId: departmentOptions[0]?.value || '',
       status: '启用',
       lockStatus: '正常',
     })
@@ -245,7 +273,13 @@ export function UserManagementPage() {
 
   const openEditModal = (record: UserRecord) => {
     setEditingUser(record)
-    form.setFieldsValue(record)
+    const matchedDepartment = departmentOptions.find((department) => department.value === record.departmentId)
+      || departmentOptions.find((department) => department.name === record.department)
+    form.setFieldsValue({
+      ...record,
+      organization: organizationName,
+      departmentId: matchedDepartment?.value || record.departmentId || '',
+    })
     setModalOpen(true)
   }
 
@@ -256,9 +290,12 @@ export function UserManagementPage() {
   }
 
   const handleSubmit = async (values: UserFormValues) => {
+    const selectedDepartment = departmentOptions.find((department) => department.value === values.departmentId)
     const normalizedValues = {
       ...values,
-      belongsTo: values.userType === '员工' ? undefined : values.belongsTo,
+      organization: organizationName,
+      department: selectedDepartment?.name,
+      belongsTo: values.userType === '供应商' || values.userType === '客户' ? values.belongsTo : undefined,
     }
 
     if (editingUser) {
@@ -284,24 +321,42 @@ export function UserManagementPage() {
     closeModal()
   }
 
-  const handleMoveToRecycleBin = (record: UserRecord) => {
-    void deleteUserOnApi(record.id)
-      .then(() => fetchUsersFromApi().then(setUsers))
-      .catch(() => undefined)
-    setUsers((currentUsers) => currentUsers.filter((user) => user.id !== record.id))
-    setRecycledUsers((currentUsers) => [...currentUsers, { ...record, status: '禁用' }])
-    message.success('用户已移入回收站')
+  const handleMoveToRecycleBin = async (record: UserRecord) => {
+    if (record.userType === '超管') {
+      message.warning('超管用户不允许删除，请先修改为其他用户类型')
+      return
+    }
+    try {
+      await deleteUserOnApi(record.id)
+      await refreshUsers()
+      message.success('用户已移入回收站')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '用户删除失败')
+    }
   }
 
-  const handleRestore = (record: UserRecord) => {
-    setRecycledUsers((currentUsers) => currentUsers.filter((user) => user.id !== record.id))
-    setUsers((currentUsers) => [...currentUsers, { ...record, status: '启用' }])
-    message.success('用户已恢复')
+  const handleRestore = async (record: UserRecord) => {
+    try {
+      await restoreUserOnApi(record.id)
+      await refreshUsers()
+      message.success('用户已恢复')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '用户恢复失败')
+    }
   }
 
-  const handlePermanentDelete = (record: UserRecord) => {
-    setRecycledUsers((currentUsers) => currentUsers.filter((user) => user.id !== record.id))
-    message.success('用户已永久删除')
+  const handlePermanentDelete = async (record: UserRecord) => {
+    if (record.userType === '超管') {
+      message.warning('超管用户不允许删除，请先修改为其他用户类型')
+      return
+    }
+    try {
+      await permanentlyDeleteUserOnApi(record.id)
+      await refreshUsers()
+      message.success('用户已永久删除')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '用户永久删除失败')
+    }
   }
 
   const confirmMoveToRecycleBin = (record: UserRecord) => {
@@ -332,31 +387,16 @@ export function UserManagementPage() {
     setSyncModalOpen(true)
   }
 
-  const handleSync = (values: SyncFormValues) => {
-    const providerUsers = syncedUsers[values.provider]
-    setUsers((currentUsers) => {
-      const nextUsers = [...currentUsers]
-      providerUsers.forEach((syncedUser) => {
-        const existingIndex = nextUsers.findIndex((user) => user.phone === syncedUser.phone)
-        if (existingIndex >= 0) {
-          nextUsers[existingIndex] = {
-            ...nextUsers[existingIndex],
-            ...syncedUser,
-            id: nextUsers[existingIndex].id,
-            createdAt: nextUsers[existingIndex].createdAt,
-            createdBy: nextUsers[existingIndex].createdBy,
-          }
-        } else {
-          nextUsers.push({
-            ...syncedUser,
-            id: createNextId(nextUsers),
-          })
-        }
-      })
-      return nextUsers
-    })
-    message.success(`已同步${providerLabelMap[values.provider]}用户，手机号相同的账号已覆盖`)
-    setSyncModalOpen(false)
+  const handleSync = async (values: SyncFormValues) => {
+    try {
+      const synced = await syncUsersOnApi(values.provider, syncedUsers[values.provider])
+      setUsers(synced)
+      setRecycledUsers(await fetchRecycledUsersFromApi())
+      message.success(`已同步${providerLabelMap[values.provider]}用户，手机号相同的账号已覆盖`)
+      setSyncModalOpen(false)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '用户同步失败')
+    }
   }
 
   const handleUserTypeChange = (userType: UserType) => {
@@ -442,6 +482,17 @@ export function UserManagementPage() {
           <p className="page-description">管理账号、组织机构、所属部门，并支持第三方通讯录同步。</p>
         </div>
         <Space>
+          <Button
+            type="primary"
+            icon={<SearchOutlined />}
+            onClick={() =>
+              void refreshUsers().catch((error) => {
+                message.error(error instanceof Error ? error.message : '用户数据加载失败')
+              })
+            }
+          >
+            查询
+          </Button>
           <Button icon={<SyncOutlined />} onClick={openSyncModal}>
             同步用户
           </Button>
@@ -510,14 +561,14 @@ export function UserManagementPage() {
               <Input placeholder="手机号作为第三方同步唯一标识" maxLength={11} />
             </Form.Item>
             <Form.Item label="组织机构" name="organization" rules={[{ required: true, message: '请选择组织机构' }]}>
-              <Select options={organizations.map((item) => ({ label: item, value: item }))} />
+              <Select disabled options={[{ label: organizationName, value: organizationName }]} />
             </Form.Item>
-            <Form.Item label="所属部门" name="department" rules={[{ required: true, message: '请选择所属部门' }]}>
+            <Form.Item label="所属部门" name="departmentId" rules={[{ required: true, message: '请选择所属部门' }]}>
               <Select
                 placeholder="请选择所属部门"
                 options={departmentOptions.map((department) => ({
                   label: department.label,
-                  value: department.name,
+                  value: department.value,
                 }))}
               />
             </Form.Item>
@@ -532,6 +583,7 @@ export function UserManagementPage() {
             <Form.Item label="用户类型" name="userType" rules={[{ required: true, message: '请选择用户类型' }]}>
               <Select
                 options={[
+                  { label: '超管', value: '超管' },
                   { label: '员工', value: '员工' },
                   { label: '供应商', value: '供应商' },
                   { label: '客户', value: '客户' },

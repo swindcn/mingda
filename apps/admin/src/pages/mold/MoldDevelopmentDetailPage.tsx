@@ -30,6 +30,18 @@ import { useNavigate, useParams } from 'react-router'
 import { SubPageHeader } from '../../components/SubPageHeader'
 import { apiRequest } from '../../services/api'
 import { loadDictionaries } from '../../utils/dictionaries'
+import {
+  fetchCustomersFromApi,
+  fetchProductsFromApi,
+  fetchSuppliersFromApi,
+  loadCustomers,
+  loadProducts,
+  loadSuppliers,
+} from '../../utils/masterData'
+import type { PartnerRecord, ProductRecord } from '../../utils/masterData'
+import { fetchInternalEmployeesFromApi, loadInternalEmployees } from '../../utils/users'
+import { getCurrentAdminUser } from '../../utils/roles'
+import type { UserRecord } from '../../utils/users'
 
 interface DevelopmentData {
   id: string
@@ -66,6 +78,8 @@ interface ApiProductionRecord {
   operator?: string
   time: string
   images?: string[]
+  productImages?: string[]
+  destructiveImages?: string[]
   result?: '通过' | '不通过'
   isComplete?: boolean
   reason?: string
@@ -74,11 +88,13 @@ interface ApiProductionRecord {
 interface ApiMoldDetail {
   id: string
   code: string
+  customerId: string
   customerName: string
   productCode: string
   productName: string
   moldType: string
   status: string
+  supplierId: string
   supplierName: string
   followerName: string
   notifiedDate: string
@@ -156,25 +172,6 @@ interface EvaluationFormValues {
 interface TerminationFormValues {
   reason: string
 }
-
-const customers = [
-  { id: 'CUS001', name: '长城汽车股份有限公司' },
-  { id: 'CUS002', name: '比亚迪汽车工业有限公司' },
-]
-
-const products = [
-  { code: 'P001', name: '英沃保险柜门板内板' },
-  { code: 'P002', name: '球墨铸铁泵体' },
-  { code: 'mbnb0001', name: '门板组件' },
-]
-
-const suppliers = [
-  { id: 'SUP001', name: '鑫源材料有限公司' },
-  { id: 'SUP002', name: '华泰金属制品厂' },
-]
-
-const operators = ['张三', '李四', '王五', '赵六']
-const currentOperator = '张三'
 
 function getNowText() {
   return dayjs().format('YYYY-MM-DD HH:mm')
@@ -268,16 +265,21 @@ export function MoldDevelopmentDetailPage() {
   const [receiveImages, setReceiveImages] = useState<UploadFile[]>([])
   const [productImages, setProductImages] = useState<UploadFile[]>([])
   const [destructiveImages, setDestructiveImages] = useState<UploadFile[]>([])
-  const [drawingConfirmation, setDrawingConfirmation] = useState<OperatorTimeInfo | null>({
-    operator: '李四',
-    time: '2026-04-16 09:20',
-  })
-  const [shipmentInfo, setShipmentInfo] = useState<ShipmentInfo | null>({
-    operator: '王五',
-    time: '2026-04-28 16:00',
-    trackingNumber: 'SF1234567890',
-    images: ['快递单照片.jpg'],
-  })
+  const [customers, setCustomers] = useState<PartnerRecord[]>(() => loadCustomers())
+  const [products, setProducts] = useState<ProductRecord[]>(() => loadProducts())
+  const [suppliers, setSuppliers] = useState<PartnerRecord[]>(() => loadSuppliers())
+  const [internalEmployees, setInternalEmployees] = useState<UserRecord[]>(() => loadInternalEmployees())
+  const currentUser = getCurrentAdminUser()
+  const currentOperator =
+    internalEmployees.find((user) => user.id === currentUser?.id || user.name === currentUser?.name)?.name ||
+    currentUser?.name ||
+    ''
+  const employeeOptions = internalEmployees.map((employee) => ({
+    label: `${employee.name}${employee.department ? `（${employee.department}）` : ''}`,
+    value: employee.name,
+  }))
+  const [drawingConfirmation, setDrawingConfirmation] = useState<OperatorTimeInfo | null>(null)
+  const [shipmentInfo, setShipmentInfo] = useState<ShipmentInfo | null>(null)
   const [receiveInfo, setReceiveInfo] = useState<ReceiveInfo | null>(null)
   const [trialRecords, setTrialRecords] = useState<ProductionRecord[]>([])
   const [batchRecords, setBatchRecords] = useState<ProductionRecord[]>([])
@@ -310,11 +312,13 @@ export function MoldDevelopmentDetailPage() {
     setDevelopmentData((current) => ({
       ...current,
       id: detail.code || detail.id,
+      customerId: detail.customerId,
       customerName: detail.customerName,
       productCode: detail.productCode,
       productName: detail.productName,
       customerNotifyDate: detail.notifiedDate,
       moldType: detail.moldType,
+      supplierId: detail.supplierId,
       supplierName: detail.supplierName,
       expectedDate: detail.expectedDate,
       status: detail.status,
@@ -356,8 +360,8 @@ export function MoldDevelopmentDetailPage() {
         .map((record) => ({
           operator: record.operator || '',
           time: record.time,
-          productImages: record.images || [],
-          destructiveTestImages: [],
+          productImages: record.productImages || record.images || [],
+          destructiveTestImages: record.destructiveImages || [],
         })),
     )
     setBatchRecords(
@@ -366,8 +370,8 @@ export function MoldDevelopmentDetailPage() {
         .map((record) => ({
           operator: record.operator || '',
           time: record.time,
-          productImages: record.images || [],
-          destructiveTestImages: [],
+          productImages: record.productImages || record.images || [],
+          destructiveTestImages: record.destructiveImages || [],
         })),
     )
     setEvaluationInfo(
@@ -392,8 +396,24 @@ export function MoldDevelopmentDetailPage() {
       })
   }, [id])
 
+  useEffect(() => {
+    void Promise.all([fetchCustomersFromApi(), fetchProductsFromApi(), fetchSuppliersFromApi()])
+      .then(([nextCustomers, nextProducts, nextSuppliers]) => {
+        setCustomers(nextCustomers)
+        setProducts(nextProducts)
+        setSuppliers(nextSuppliers)
+      })
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    void fetchInternalEmployeesFromApi()
+      .then(setInternalEmployees)
+      .catch(() => undefined)
+  }, [])
+
   const isTerminated = developmentData.status === '已中止'
-  const isCompleted = Boolean(evaluationInfo?.isDevelopmentComplete && !isTerminated)
+  const isCompleted = developmentData.status === '已完成' || Boolean(evaluationInfo?.isDevelopmentComplete && !isTerminated)
   const canOperate = !isTerminated && !isCompleted
   const canShowFinalActions = Boolean(receiveInfo && canOperate)
   const dictionaries = useMemo(() => loadDictionaries(), [])
@@ -404,13 +424,11 @@ export function MoldDevelopmentDetailPage() {
       content: '是否确认图纸',
       okText: '确认',
       cancelText: '取消',
-      onOk: () => {
-        const next = { operator: currentOperator, time: getNowText() }
-        setDrawingConfirmation(next)
-        setDevelopmentData((current) => ({
-          ...current,
-          status: current.status === '已中止' ? current.status : '待发货',
-        }))
+      onOk: async () => {
+        const updated = await apiRequest<ApiMoldDetail>(`/admin/molds/${developmentData.id}/confirm-drawing`, {
+          method: 'POST',
+        })
+        applyApiDetail(updated)
         message.success('图纸已确认')
       },
     })
@@ -422,56 +440,68 @@ export function MoldDevelopmentDetailPage() {
     setShipmentModalOpen(true)
   }
 
-  const submitShipment = (values: ShipmentFormValues) => {
+  const submitShipment = async (values: ShipmentFormValues) => {
     if (shipmentImages.length === 0) {
       message.warning('请至少上传一张发货图片')
       return
     }
 
-    const next = {
-      operator: currentOperator,
-      time: getNowText(),
-      trackingNumber: values.trackingNumber,
-      images: getUploadNames(shipmentImages),
+    try {
+      const updated = await apiRequest<ApiMoldDetail>(`/admin/molds/${developmentData.id}/shipping`, {
+        method: 'POST',
+        body: JSON.stringify({
+          operator: currentOperator,
+          trackingNumber: values.trackingNumber,
+          images: getUploadNames(shipmentImages),
+        }),
+      })
+      applyApiDetail(updated)
+      setShipmentModalOpen(false)
+      message.success('发货信息已记录')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '发货信息保存失败')
     }
-    setShipmentInfo(next)
-    setDevelopmentData((current) => ({
-      ...current,
-      status: current.status === '已中止' ? current.status : '待收货',
-      trackingNumber: values.trackingNumber,
-    }))
-    setShipmentModalOpen(false)
-    message.success('发货信息已记录')
   }
 
-  const submitReceive = () => {
+  const submitReceive = async () => {
     if (receiveImages.length === 0) {
       message.warning('请至少上传一张收货图片')
       return
     }
 
-    const next = {
-      operator: currentOperator,
-      time: getNowText(),
-      images: getUploadNames(receiveImages),
+    try {
+      const updated = await apiRequest<ApiMoldDetail>(`/admin/molds/${developmentData.id}/receive`, {
+        method: 'POST',
+        body: JSON.stringify({
+          operator: currentOperator,
+          images: getUploadNames(receiveImages),
+        }),
+      })
+      applyApiDetail(updated)
+      setReceiveModalOpen(false)
+      message.success('收货信息已记录')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '收货信息保存失败')
     }
-    setReceiveInfo(next)
-    setDevelopmentData((current) => ({
-      ...current,
-      status: current.status === '已中止' ? current.status : '待试产',
-    }))
-    setReceiveModalOpen(false)
-    message.success('收货信息已记录')
   }
 
   const openProductionModal = (type: 'trial' | 'batch') => {
-    productionForm.resetFields()
+    productionForm.setFieldsValue({ operator: currentOperator })
     setProductImages([])
     setDestructiveImages([])
     setProductionModalType(type)
   }
 
-  const submitProduction = (values: ProductionFormValues) => {
+  const openEvaluationModal = () => {
+    evaluationForm.setFieldsValue({
+      operator: currentOperator,
+      result: '通过',
+      isDevelopmentComplete: true,
+    })
+    setEvaluationModalOpen(true)
+  }
+
+  const submitProduction = async (values: ProductionFormValues) => {
     if (!productionModalType) return
     if (productImages.length === 0) {
       message.warning('请至少上传一张产品图片')
@@ -482,54 +512,51 @@ export function MoldDevelopmentDetailPage() {
       return
     }
 
-    const next = {
-      operator: values.operator,
-      time: getNowText(),
-      productImages: getUploadNames(productImages),
-      destructiveTestImages: getUploadNames(destructiveImages),
+    try {
+      const updated = await apiRequest<ApiMoldDetail>(
+        `/admin/molds/${developmentData.id}/${productionModalType === 'trial' ? 'trial' : 'batch'}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            operator: values.operator,
+            productImages: getUploadNames(productImages),
+            destructiveImages: getUploadNames(destructiveImages),
+            images: [...getUploadNames(productImages), ...getUploadNames(destructiveImages)],
+          }),
+        },
+      )
+      applyApiDetail(updated)
+      message.success(productionModalType === 'trial' ? '试模记录已保存' : '量产记录已保存')
+      setProductionModalType(null)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '生产记录保存失败')
     }
-
-    if (productionModalType === 'trial') {
-      setTrialRecords((current) => [...current, next])
-      setDevelopmentData((current) => ({
-        ...current,
-        status: current.status === '已中止' ? current.status : '试产中',
-      }))
-      message.success('试模记录已保存')
-    } else {
-      setBatchRecords((current) => [...current, next])
-      setDevelopmentData((current) => ({
-        ...current,
-        status: current.status === '已中止' ? current.status : '试产中',
-      }))
-      message.success('量产记录已保存')
-    }
-
-    setProductionModalType(null)
   }
 
-  const submitEvaluation = (values: EvaluationFormValues) => {
-    setEvaluationInfo({
-      operator: values.operator,
-      result: values.result,
-      isDevelopmentComplete: values.isDevelopmentComplete,
-      reason: values.reason,
-      time: getNowText(),
-    })
-    setDevelopmentData((current) => ({
-      ...current,
-      status:
-        current.status === '已中止'
-          ? current.status
-          : values.isDevelopmentComplete
-            ? '已完成'
-            : '试产中',
-    }))
-    setEvaluationModalOpen(false)
-    message.success(values.isDevelopmentComplete ? '模具评判已保存' : '模具评判已保存，本单暂未完成')
+  const submitEvaluation = async (values: EvaluationFormValues) => {
+    try {
+      const updated = await apiRequest<ApiMoldDetail>(`/admin/molds/${developmentData.id}/evaluation`, {
+        method: 'POST',
+        body: JSON.stringify({
+          operator: values.operator,
+          result: values.result,
+          isComplete: values.isDevelopmentComplete,
+          reason: values.reason,
+        }),
+      })
+      applyApiDetail(updated)
+      setEvaluationModalOpen(false)
+      message.success(values.isDevelopmentComplete ? '模具评判已保存' : '模具评判已保存，本单暂未完成')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '模具评判保存失败')
+    }
   }
 
   const submitTermination = async (values: TerminationFormValues) => {
+    if (!currentOperator) {
+      message.warning('未获取到当前登录用户，请重新登录后再操作')
+      return
+    }
     try {
       const updated = await apiRequest<ApiMoldDetail>(`/admin/molds/${developmentData.id}/cancel`, {
         method: 'POST',
@@ -590,8 +617,8 @@ export function MoldDevelopmentDetailPage() {
           <FlowCard>
             <Space direction="vertical" size={10}>
               <Space wrap size={24}>
-                <Typography.Text type="secondary">下达时间：2026-04-15 14:30</Typography.Text>
-                <Typography.Text type="secondary">下达人：张三</Typography.Text>
+                <Typography.Text type="secondary">下达时间：{developmentData.createdAt}</Typography.Text>
+                <Typography.Text type="secondary">下达人：{currentOperator || '当前用户'}</Typography.Text>
               </Space>
               <Typography.Text type="secondary">下达图片：</Typography.Text>
               <Space size={12}>
@@ -759,27 +786,34 @@ export function MoldDevelopmentDetailPage() {
     form.resetFields()
   }
 
-  const handleSubmit = (values: EditFormValues) => {
+  const handleSubmit = async (values: EditFormValues) => {
     const selectedCustomer = customers.find((customer) => customer.id === values.customerId)
-    const selectedProduct = products.find((product) => product.code === values.productCode)
+    const selectedProduct = products.find((product) => product.id === values.productCode || product.code === values.productCode)
     const selectedSupplier = suppliers.find((supplier) => supplier.id === values.supplierId)
 
-    setDevelopmentData((current) => ({
-      ...current,
-      customerId: values.customerId,
-      customerName: selectedCustomer?.name || current.customerName,
-      productCode: values.productCode,
-      productName: selectedProduct?.name || current.productName,
-      customerNotifyDate: values.customerNotifyDate.format('YYYY-MM-DD'),
-      moldType: values.moldType,
-      supplierId: values.supplierId,
-      supplierName: selectedSupplier?.name || current.supplierName,
-      expectedDate: values.expectedDate?.format('YYYY-MM-DD') || '',
-      remark: values.remark || '',
-      images: [...current.images, ...fileList.map((file) => file.name)],
-    }))
-    message.success('开发需求已更新')
-    closeEditModal()
+    try {
+      const updated = await apiRequest<ApiMoldDetail>(`/admin/molds/${developmentData.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          customerId: values.customerId,
+          customerName: selectedCustomer?.name || '',
+          productCode: values.productCode,
+          productName: selectedProduct?.name || '',
+          customerNotifyDate: values.customerNotifyDate.format('YYYY-MM-DD'),
+          moldType: values.moldType,
+          supplierId: values.supplierId,
+          supplierName: selectedSupplier?.name || '',
+          expectedDate: values.expectedDate?.format('YYYY-MM-DD'),
+          attachments: fileList.map((file) => file.name),
+          remark: values.remark,
+        }),
+      })
+      applyApiDetail(updated)
+      message.success('开发需求已更新')
+      closeEditModal()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '开发需求更新失败')
+    }
   }
 
   const uploadProps: UploadProps = {
@@ -834,9 +868,11 @@ export function MoldDevelopmentDetailPage() {
         onBack={() => navigate('/dashboard/mold/development')}
         extra={
           <Space>
-            <Button danger disabled={isTerminated} onClick={() => setTerminationModalOpen(true)}>
-              中止开发
-            </Button>
+            {canOperate && (
+              <Button danger onClick={() => setTerminationModalOpen(true)}>
+                中止开发
+              </Button>
+            )}
             <Button type="primary" icon={<EditOutlined />} onClick={openEditModal}>
               编辑
             </Button>
@@ -902,7 +938,7 @@ export function MoldDevelopmentDetailPage() {
                 <Button
                   type="primary"
                   icon={<SafetyCertificateOutlined />}
-                  onClick={() => setEvaluationModalOpen(true)}
+                  onClick={openEvaluationModal}
                 >
                   模具评判
                 </Button>
@@ -1116,7 +1152,9 @@ export function MoldDevelopmentDetailPage() {
           >
             <Select
               placeholder="请选择填写人"
-              options={operators.map((operator) => ({ label: operator, value: operator }))}
+              options={employeeOptions}
+              showSearch
+              optionFilterProp="label"
             />
           </Form.Item>
           <Form.Item label="拍摄产品图片">
@@ -1159,7 +1197,9 @@ export function MoldDevelopmentDetailPage() {
           >
             <Select
               placeholder="请选择评判人"
-              options={operators.map((operator) => ({ label: operator, value: operator }))}
+              options={employeeOptions}
+              showSearch
+              optionFilterProp="label"
             />
           </Form.Item>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>

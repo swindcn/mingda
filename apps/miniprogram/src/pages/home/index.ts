@@ -19,9 +19,13 @@ Page({
 
     getApp<IAppOption>().globalData.token = token
     this.setData({
-      username: wx.getStorageSync('mingda_username') || '1',
+      username: wx.getStorageSync('mingda_display_name') || wx.getStorageSync('mingda_login_account') || '1',
     })
     void this.loadHome()
+  },
+
+  onPullDownRefresh() {
+    void this.loadHome().finally(() => wx.stopPullDownRefresh())
   },
 
   async loadHome() {

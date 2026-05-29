@@ -26,7 +26,7 @@ interface UserBody {
   name?: string
   phone?: string
   password?: string
-  userType?: '员工' | '供应商' | '客户'
+  userType?: '超管' | '员工' | '供应商' | '客户'
   organization?: string
   department?: string
   departmentId?: string
@@ -37,6 +37,19 @@ interface UserBody {
   belongsTo?: string
 }
 
+interface SyncDepartmentsBody {
+  provider?: 'dingtalk' | 'wechat-work' | 'lark'
+  syncMode?: 'merge' | 'overwrite'
+  departments?: DepartmentBody[]
+}
+
+interface DictionaryBody {
+  moldTypes?: string[]
+  productUnits?: string[]
+  productTypes?: string[]
+  positions?: string[]
+  workshopTypes?: string[]
+}
 
 interface PartnerBody {
   name?: string
@@ -74,6 +87,11 @@ interface RoleBody {
   userIds?: string[]
 }
 
+interface SyncUsersBody {
+  provider?: 'dingtalk' | 'wechat-work' | 'lark'
+  users?: UserBody[]
+}
+
 interface DepartmentTreeNode {
   id: string
   name: string
@@ -93,7 +111,82 @@ interface DepartmentDto {
   children?: DepartmentDto[]
 }
 
-const organizationName = '摩尔元数（福建）科技有限公司'
+const organizationName = '闽大铸件'
+
+const defaultDictionaries = {
+  moldTypes: ['压铸模', '砂型模', '注塑模', '冲压模', '其他'],
+  productUnits: ['片', '个', '套', '台', '件'],
+  productTypes: ['自制件', '外购件', '半成品', '成品'],
+  positions: ['生产主管', '销售经理', '运营负责人', '产品经理', '会计', '项目成员'],
+  workshopTypes: ['熔炼', '造型', '制芯', '清理', '机加工', '检验'],
+}
+
+const adminPermissions = [
+  'admin',
+  'basic',
+  'basic.department',
+  'basic.department.create',
+  'basic.department.edit',
+  'basic.department.delete',
+  'basic.user',
+  'basic.role',
+  'basic.customer',
+  'basic.supplier',
+  'basic.product',
+  'basic.dictionary',
+  'mold',
+  'mold.development.view',
+  'mold.development.create',
+  'mold.development.edit',
+  'mold.development.delete',
+  'mold.model.view',
+  'mold.model.create',
+  'mold.model.edit',
+  'mold.model.delete',
+  'mold.corebox.view',
+  'mold.corebox.create',
+  'mold.corebox.edit',
+  'mold.corebox.delete',
+  'model',
+  'model.workshop-line.view',
+  'model.workshop-line.create',
+  'model.workshop-line.edit',
+  'model.workshop-line.delete',
+  'model.team.view',
+  'model.team.create',
+  'model.team.edit',
+  'model.team.delete',
+  'model.equipment.view',
+  'model.equipment.create',
+  'model.equipment.edit',
+  'model.equipment.delete',
+  'model.material.view',
+  'model.material.create',
+  'model.material.edit',
+  'model.material.delete',
+  'model.recipe.view',
+  'model.recipe.create',
+  'model.recipe.edit',
+  'model.recipe.delete',
+  'model.routing.view',
+  'model.routing.create',
+  'model.routing.edit',
+  'model.routing.delete',
+  'model.calendar.view',
+  'model.calendar.create',
+  'model.calendar.edit',
+  'model.calendar.delete',
+  'model.schedule.view',
+  'model.schedule.create',
+  'model.schedule.edit',
+  'model.schedule.delete',
+  'model.schedule.batch',
+  'model.defect.view',
+  'model.defect.create',
+  'model.defect.edit',
+  'model.defect.delete',
+]
+
 
 function hashPassword(password: string) {
   const salt = randomBytes(16).toString('hex')
@@ -123,7 +216,8 @@ function sourceLabel(source: SyncProvider) {
 }
 
 function userTypeLabel(value: string) {
-  const map: Record<string, '员工' | '供应商' | '客户'> = {
+  const map: Record<string, '超管' | '员工' | '供应商' | '客户'> = {
+    SUPER_ADMIN: '超管',
     EMPLOYEE: '员工',
     SUPPLIER: '供应商',
     CUSTOMER: '客户',
@@ -133,6 +227,7 @@ function userTypeLabel(value: string) {
 
 function userTypeValue(value?: UserBody['userType']) {
   const map = {
+    超管: 'SUPER_ADMIN',
     员工: 'EMPLOYEE',
     供应商: 'SUPPLIER',
     客户: 'CUSTOMER',
@@ -162,6 +257,14 @@ function prismaScope(scope?: RoleBody['dataScope']) {
   return scope ? map[scope] : undefined
 }
 
+function providerValue(provider?: SyncDepartmentsBody['provider'] | SyncUsersBody['provider']) {
+  const map: Record<string, SyncProvider> = {
+    dingtalk: 'DINGTALK',
+    'wechat-work': 'WECHAT_WORK',
+    lark: 'LARK',
+  }
+  return provider ? map[provider] || 'LOCAL' : 'LOCAL'
+}
 
 function toNumber(value: unknown) {
   const numberValue = Number(value)
@@ -198,6 +301,54 @@ function customDepartments(value: Prisma.JsonValue | null | undefined) {
 @UseGuards(AdminAuthGuard)
 export class BasicDataController {
   constructor(private readonly prisma: PrismaService) {}
+
+
+  @Get('dictionaries')
+  async dictionaries() {
+    return this.getDictionaries()
+  }
+
+  @Put('dictionaries')
+  async updateDictionaries(@Body() body: DictionaryBody) {
+    const next = {
+      moldTypes: body.moldTypes?.length ? body.moldTypes : defaultDictionaries.moldTypes,
+      productUnits: body.productUnits?.length ? body.productUnits : defaultDictionaries.productUnits,
+      productTypes: body.productTypes?.length ? body.productTypes : defaultDictionaries.productTypes,
+      positions: body.positions?.length ? body.positions : defaultDictionaries.positions,
+      workshopTypes: body.workshopTypes?.length ? body.workshopTypes : defaultDictionaries.workshopTypes,
+    }
+    await Promise.all(
+      Object.entries(next).map(([key, values]) =>
+        this.prisma.dictionarySetting.upsert({
+          where: { key },
+          update: { values },
+          create: { key, values },
+        }),
+      ),
+    )
+    return next
+  }
+
+  @Put('users/:id/restore')
+  async restoreUser(@Param('id') id: string) {
+    await this.prisma.user.update({
+      where: { id },
+      data: { status: 'ENABLED', deletedAt: null },
+    })
+    return { id }
+  }
+
+  @Delete('users/:id/permanent')
+  async permanentlyDeleteUser(@Param('id') id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } })
+    if (!user) throw new NotFoundException('用户不存在')
+    if (user.userType === 'SUPER_ADMIN') {
+      throw new BadRequestException('超管用户不允许删除，请先修改为其他用户类型')
+    }
+    await this.prisma.userRole.deleteMany({ where: { userId: id } })
+    await this.prisma.user.delete({ where: { id } })
+    return { id }
+  }
 
   @Get('departments')
   async departments() {
@@ -266,6 +417,33 @@ export class BasicDataController {
     ])
 
     return { id, removedIds: ids }
+  }
+
+  @Post('departments/sync')
+  async syncDepartments(@Body() body: SyncDepartmentsBody) {
+    const departments = Array.isArray(body.departments) ? body.departments : []
+    if (!departments.length) throw new BadRequestException('没有可同步的部门数据')
+    const source = providerValue(body.provider)
+
+    if (body.syncMode === 'overwrite') {
+      await this.prisma.$transaction([
+        this.prisma.user.updateMany({
+          where: {},
+          data: { departmentId: null, ownerDepartmentId: null },
+        }),
+        this.prisma.businessDataOwnership.updateMany({
+          where: {},
+          data: { createdByDepartmentId: null, ownerDepartmentId: null },
+        }),
+        this.prisma.department.deleteMany(),
+      ])
+    }
+
+    for (const department of departments) {
+      await this.upsertDepartmentTree(department, null, source)
+    }
+
+    return this.departments()
   }
 
 
@@ -409,6 +587,15 @@ export class BasicDataController {
 
   @Delete('products/:id')
   async deleteProduct(@Param('id') id: string) {
+    const counts = await Promise.all([
+      this.prisma.moldDevelopment.count({ where: { product: { code: id } } }),
+      this.prisma.moldMaster.count({ where: { itemCode: id } }),
+      this.prisma.processRouting.count({ where: { itemCode: id } }),
+      this.prisma.meltRecipeItem.count({ where: { itemCode: id } }),
+    ])
+    if (counts.some((count) => count > 0)) {
+      throw new BadRequestException('当前物料已被业务数据引用，不能删除')
+    }
     await this.prisma.product.delete({ where: { code: id } })
     return { id }
   }
@@ -425,6 +612,64 @@ export class BasicDataController {
       },
     })
     return records.map((record) => this.toUser(record))
+  }
+
+  @Get('users/recycled')
+  async recycledUsers() {
+    const records = await this.prisma.user.findMany({
+      where: { deletedAt: { not: null } },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        department: true,
+        roles: { include: { role: true } },
+      },
+    })
+    return records.map((record) => this.toUser(record))
+  }
+
+  @Post('users/sync')
+  async syncUsers(@Body() body: SyncUsersBody) {
+    const users = Array.isArray(body.users) ? body.users : []
+    if (!users.length) throw new BadRequestException('没有可同步的用户数据')
+    const source = providerValue(body.provider)
+
+    for (const user of users) {
+      if (!user.name?.trim() || !user.phone?.trim()) continue
+      const department = await this.findDepartment(user)
+      const existing = await this.prisma.user.findUnique({ where: { phone: user.phone.trim() } })
+      const data = {
+        name: user.name.trim(),
+        userType: userTypeValue(user.userType) || 'EMPLOYEE',
+        organizationName: user.organization || organizationName,
+        departmentId: department?.id || null,
+        ownerDepartmentId: department?.id || null,
+        position: user.position,
+        status: user.status === '禁用' ? 'DISABLED' : 'ENABLED',
+        lockStatus: user.lockStatus === '锁定' ? 'LOCKED' : 'NORMAL',
+        belongsTo: user.userType === '供应商' || user.userType === '客户' ? user.belongsTo || null : null,
+        source,
+        deletedAt: null,
+      } as const
+
+      if (existing) {
+        await this.prisma.user.update({
+          where: { id: existing.id },
+          data,
+        })
+        await this.applyUserRole(existing.id, user.role)
+      } else {
+        const created = await this.prisma.user.create({
+          data: {
+            ...data,
+            phone: user.phone.trim(),
+            passwordHash: user.password ? hashPassword(user.password) : null,
+          },
+        })
+        await this.applyUserRole(created.id, user.role)
+      }
+    }
+
+    return this.users()
   }
 
   @Post('users')
@@ -476,7 +721,7 @@ export class BasicDataController {
         belongsTo:
           body.userType === '供应商' || body.userType === '客户'
             ? body.belongsTo || null
-            : body.userType === '员工'
+            : body.userType === '员工' || body.userType === '超管'
               ? null
               : undefined,
         status: body.status === '禁用' ? 'DISABLED' : body.status === '启用' ? 'ENABLED' : undefined,
@@ -495,6 +740,11 @@ export class BasicDataController {
 
   @Delete('users/:id')
   async deleteUser(@Param('id') id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } })
+    if (!user) throw new NotFoundException('用户不存在')
+    if (user.userType === 'SUPER_ADMIN') {
+      throw new BadRequestException('超管用户不允许删除，请先修改为其他用户类型')
+    }
     await this.prisma.user.update({
       where: { id },
       data: {
@@ -563,6 +813,19 @@ export class BasicDataController {
     return { id }
   }
 
+
+
+  private async getDictionaries() {
+    const records = await this.prisma.dictionarySetting.findMany()
+    const map = new Map(records.map((record) => [record.key, stringArray(record.values)]))
+    return {
+      moldTypes: map.get('moldTypes')?.length ? map.get('moldTypes') : defaultDictionaries.moldTypes,
+      productUnits: map.get('productUnits')?.length ? map.get('productUnits') : defaultDictionaries.productUnits,
+      productTypes: map.get('productTypes')?.length ? map.get('productTypes') : defaultDictionaries.productTypes,
+      positions: map.get('positions')?.length ? map.get('positions') : defaultDictionaries.positions,
+      workshopTypes: map.get('workshopTypes')?.length ? map.get('workshopTypes') : defaultDictionaries.workshopTypes,
+    }
+  }
 
   private toPartner(record: {
     id: string
@@ -737,6 +1000,32 @@ export class BasicDataController {
     })
   }
 
+  private async upsertDepartmentTree(department: DepartmentBody, parentId: string | null, source: SyncProvider) {
+    if (!department.name?.trim() || !department.code?.trim()) return null
+    const record = await this.prisma.department.upsert({
+      where: { code: department.code.trim() },
+      update: {
+        name: department.name.trim(),
+        parentId,
+        source,
+        externalId: department.code.trim(),
+      },
+      create: {
+        name: department.name.trim(),
+        code: department.code.trim(),
+        parentId,
+        source,
+        externalId: department.code.trim(),
+      },
+    })
+
+    const children = (department as DepartmentBody & { children?: DepartmentBody[] }).children || []
+    for (const child of children) {
+      await this.upsertDepartmentTree(child, record.id, source)
+    }
+    return record
+  }
+
   private async collectDepartmentIds(id: string): Promise<string[]> {
     const children = await this.prisma.department.findMany({
       where: { parentId: id },
@@ -754,25 +1043,7 @@ export class BasicDataController {
       update: {
         organizationName,
         dataScope: 'ALL',
-        permissions: [
-          'admin',
-          'basic',
-          'basic.department',
-          'basic.department.create',
-          'basic.department.edit',
-          'basic.department.delete',
-          'basic.user',
-          'basic.role',
-          'basic.customer',
-          'basic.supplier',
-          'basic.product',
-          'basic.dictionary',
-          'mold',
-          'mold.development.view',
-          'mold.development.create',
-          'mold.development.edit',
-          'mold.development.delete',
-        ],
+        permissions: adminPermissions,
       },
       create: {
         name: '系统管理员',
@@ -780,31 +1051,17 @@ export class BasicDataController {
         app: '管理端',
         description: '系统内置管理员角色，拥有全部管理端权限。',
         dataScope: 'ALL',
-        permissions: [
-          'admin',
-          'basic',
-          'basic.department',
-          'basic.department.create',
-          'basic.department.edit',
-          'basic.department.delete',
-          'basic.user',
-          'basic.role',
-          'basic.customer',
-          'basic.supplier',
-          'basic.product',
-          'basic.dictionary',
-          'mold',
-          'mold.development.view',
-          'mold.development.create',
-          'mold.development.edit',
-          'mold.development.delete',
-        ],
+        permissions: adminPermissions,
       },
     })
     const admin = await this.prisma.user.findFirst({
       where: { OR: [{ username: 'admin' }, { phone: '13665068911' }] },
     })
     if (admin) {
+      await this.prisma.user.update({
+        where: { id: admin.id },
+        data: { userType: 'SUPER_ADMIN' },
+      })
       await this.prisma.userRole.upsert({
         where: { userId_roleId: { userId: admin.id, roleId: adminRole.id } },
         update: {},

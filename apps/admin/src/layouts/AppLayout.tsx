@@ -5,14 +5,21 @@ import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import {
   Boxes,
+  CalendarDays,
+  CalendarRange,
+  ClipboardList,
+  FlaskConical,
   Factory,
   Handshake,
   Network,
   LayoutDashboard,
   ListTree,
+  Package,
   PackageSearch,
   ShieldCheck,
+  TriangleAlert,
   Users,
+  Wrench,
 } from 'lucide-react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { ROLE_STORAGE_EVENT, getCurrentAdminUser, hasPermission } from '../utils/roles'
@@ -38,6 +45,92 @@ const allMenuItems: AppMenuItem[] = [
         icon: <LayoutDashboard size={18} />,
         label: '模具开发',
         permission: 'mold.development.view',
+      },
+      {
+        key: '/dashboard/mold/model',
+        icon: <Wrench size={18} />,
+        label: '模具档案',
+        permission: 'mold.model.view',
+      },
+      {
+        key: '/dashboard/mold/corebox',
+        icon: <Package size={18} />,
+        label: '芯盒档案',
+        permission: 'mold.corebox.view',
+      },
+    ],
+  },
+  {
+    key: '/dashboard/model',
+    icon: <Factory size={18} />,
+    label: '生产建模',
+    children: [
+      {
+        key: '/dashboard/model/workshop-line',
+        icon: <Factory size={18} />,
+        label: '车间与产线',
+        permission: 'model.workshop-line.view',
+      },
+      {
+        key: '/dashboard/model/team',
+        icon: <Users size={18} />,
+        label: '班组配置',
+        permission: 'model.team.view',
+      },
+      {
+        key: '/dashboard/model/equipment',
+        icon: <Wrench size={18} />,
+        label: '设备配置',
+        permission: 'model.equipment.view',
+      },
+      {
+        key: '/dashboard/model/calendar',
+        icon: <CalendarDays size={18} />,
+        label: '工厂日历',
+        permission: 'model.calendar.view',
+      },
+      {
+        key: '/dashboard/model/shift',
+        icon: <CalendarRange size={18} />,
+        label: '班次主档',
+        permission: 'model.calendar.view',
+      },
+      {
+        key: '/dashboard/model/schedule',
+        icon: <CalendarRange size={18} />,
+        label: '动态排班表',
+        permission: 'model.schedule.view',
+      },
+    ],
+  },
+  {
+    key: '/dashboard/process',
+    icon: <ClipboardList size={18} />,
+    label: '工艺管理',
+    children: [
+      {
+        key: '/dashboard/model/material',
+        icon: <FlaskConical size={18} />,
+        label: '材质牌号',
+        permission: 'model.material.view',
+      },
+      {
+        key: '/dashboard/model/recipe',
+        icon: <ClipboardList size={18} />,
+        label: '熔炼配方',
+        permission: 'model.recipe.view',
+      },
+      {
+        key: '/dashboard/model/routing',
+        icon: <ListTree size={18} />,
+        label: '工艺路线',
+        permission: 'model.routing.view',
+      },
+      {
+        key: '/dashboard/model/defect',
+        icon: <TriangleAlert size={18} />,
+        label: '缺陷代码库',
+        permission: 'model.defect.view',
       },
     ],
   },
@@ -79,7 +172,7 @@ const allMenuItems: AppMenuItem[] = [
       {
         key: '/dashboard/products',
         icon: <PackageSearch size={18} />,
-        label: '产品管理',
+        label: '物料管理',
         permission: 'basic.product',
       },
       {
@@ -157,7 +250,7 @@ export function AppLayout() {
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={['/dashboard/mold', '/dashboard/basic']}
+          defaultOpenKeys={['/dashboard/mold', '/dashboard/model', '/dashboard/process', '/dashboard/basic']}
           items={menuItems}
           style={{ borderInlineEnd: 0, paddingTop: 12 }}
           onClick={({ key }) => navigate(key)}

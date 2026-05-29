@@ -25,6 +25,8 @@ Page({
     isComplete: true,
     reason: '',
     images: [] as string[],
+    productImages: [] as string[],
+    destructiveImages: [] as string[],
     submitting: false,
   },
 
@@ -34,6 +36,10 @@ Page({
       id: query.id || '',
       type,
       title: titleMap[type] || '提交信息',
+      operator:
+        wx.getStorageSync('mingda_display_name') ||
+        wx.getStorageSync('mingda_login_account') ||
+        '',
     })
   },
 
@@ -57,12 +63,55 @@ Page({
     this.setData({ reason: event.detail.value })
   },
 
-  chooseImages() {
+  appendImages(field: 'images' | 'productImages' | 'destructiveImages', sourceType: Array<'album' | 'camera'>) {
+    const current = this.data[field] as string[]
+    const remaining = Math.max(3 - current.length, 0)
+    if (remaining <= 0) {
+      wx.showToast({ title: '最多上传3张图片', icon: 'none' })
+      return
+    }
     wx.chooseMedia({
-      count: 3,
+      count: remaining,
       mediaType: ['image'],
+      sourceType,
       success: (result) => {
-        this.setData({ images: result.tempFiles.map((file) => file.tempFilePath) })
+        this.setData({ [field]: [...current, ...result.tempFiles.map((file) => file.tempFilePath)] })
+      },
+    })
+  },
+
+  chooseImages() {
+    this.appendImages('images', ['album'])
+  },
+
+  takeImages() {
+    this.appendImages('images', ['camera'])
+  },
+
+  chooseProductImages() {
+    this.appendImages('productImages', ['album'])
+  },
+
+  takeProductImages() {
+    this.appendImages('productImages', ['camera'])
+  },
+
+  chooseDestructiveImages() {
+    this.appendImages('destructiveImages', ['album'])
+  },
+
+  takeDestructiveImages() {
+    this.appendImages('destructiveImages', ['camera'])
+  },
+
+  scanTrackingNumber() {
+    wx.scanCode({
+      onlyFromCamera: false,
+      success: (result) => {
+        this.setData({ trackingNumber: result.result })
+      },
+      fail: () => {
+        wx.showToast({ title: '未识别到快递单号', icon: 'none' })
       },
     })
   },
@@ -89,12 +138,16 @@ Page({
       } else if (this.data.type === 'trial') {
         await submitTrial(this.data.id, {
           operator: this.data.operator,
-          images: this.data.images,
+          productImages: this.data.productImages,
+          destructiveImages: this.data.destructiveImages,
+          images: [...this.data.productImages, ...this.data.destructiveImages],
         })
       } else if (this.data.type === 'batch') {
         await submitBatch(this.data.id, {
           operator: this.data.operator,
-          images: this.data.images,
+          productImages: this.data.productImages,
+          destructiveImages: this.data.destructiveImages,
+          images: [...this.data.productImages, ...this.data.destructiveImages],
         })
       } else if (this.data.type === 'evaluation') {
         await submitEvaluation(this.data.id, {

@@ -5,6 +5,18 @@
       <input value="{{keyword}}" placeholder="搜索需求编号、客户、产品、供应商或状态等" bindinput="onKeywordInput" />
     </view>
 
+    <view class="archive-tabs">
+      <view
+        wx:for="{{archiveTabs}}"
+        wx:key="key"
+        class="archive-tab {{archiveTab === item.key ? 'archive-tab-active' : ''}}"
+        data-key="{{item.key}}"
+        bindtap="onArchiveTabTap"
+      >
+        {{item.label}}
+      </view>
+    </view>
+
     <view class="mold-card" wx:for="{{molds}}" wx:key="id" bindtap="openDetail" data-id="{{item.id}}">
       <view class="card-head">
         <text class="code">{{item.code}}</text>
@@ -44,5 +56,7 @@
         </view>
       </view>
     </view>
+
+    <view wx:if="{{!loading && !molds.length}}" class="empty-state">暂无模具开发任务</view>
   </view>
 </view>

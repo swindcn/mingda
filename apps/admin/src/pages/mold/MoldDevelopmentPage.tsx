@@ -15,6 +15,7 @@ import {
   Modal,
   Select,
   Space,
+  Tabs,
   Tag,
   Typography,
   Upload,
@@ -49,8 +50,7 @@ import {
   getEffectiveRoles,
   hasPermission,
 } from '../../utils/roles'
-import { USER_STORAGE_EVENT, loadInternalEmployees } from '../../utils/users'
-import { loadUsers } from '../../utils/users'
+import { USER_STORAGE_EVENT, fetchInternalEmployeesFromApi, loadInternalEmployees, loadUsers } from '../../utils/users'
 
 type MoldStatus =
   | '待确认'
@@ -74,7 +74,6 @@ interface MoldDevelopmentRecord {
   follower: string
   expectedDate?: string
   status: MoldStatus
-  supplierPromiseDate?: string
   shippedAt?: string
   trackingNumber?: string
   attachments: string[]
@@ -107,7 +106,6 @@ const initialDevelopments: MoldDevelopmentRecord[] = [
     follower: '王五',
     expectedDate: '2026-05-31',
     status: '待收货',
-    supplierPromiseDate: '2026-04-30',
     shippedAt: '2026-04-28 16:00',
     trackingNumber: 'SF1234567890',
     attachments: ['模具设计图.jpg', '产品图纸.jpg', '3D效果图.jpg'],
@@ -140,8 +138,12 @@ const statusOptions: Array<{ label: string; value: MoldStatus | 'all' }> = [
   { label: '待收货', value: '待收货' },
   { label: '待试产', value: '待试产' },
   { label: '试产中', value: '试产中' },
-  { label: '已完成', value: '已完成' },
-  { label: '已中止', value: '已中止' },
+]
+
+const archiveTabs: Array<{ label: string; key: 'active' | 'completed' | 'cancelled' }> = [
+  { label: '进行中', key: 'active' },
+  { label: '已完成', key: 'completed' },
+  { label: '已中止', key: 'cancelled' },
 ]
 
 const statusColorMap: Record<MoldStatus, string> = {
@@ -166,6 +168,7 @@ interface MobileMoldRecord {
   followerName: string
   notifiedDate: string
   expectedDate: string
+  trackingNumber?: string
   issuedDate: string
   remark: string
   images: string[]
@@ -189,6 +192,7 @@ function mapApiRecord(record: MobileMoldRecord): MoldDevelopmentRecord {
     follower: record.followerName,
     expectedDate: record.expectedDate,
     status: record.status,
+    trackingNumber: record.trackingNumber,
     attachments: record.images,
     remark: record.remark,
     createdAt: record.issuedDate,
@@ -201,6 +205,7 @@ export function MoldDevelopmentPage() {
   const [developments, setDevelopments] = useState<MoldDevelopmentRecord[]>(initialDevelopments)
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState<MoldStatus | 'all'>('all')
+  const [archiveTab, setArchiveTab] = useState<'active' | 'completed' | 'cancelled'>('active')
   const [modalOpen, setModalOpen] = useState(false)
   const [fileList, setFileList] = useState<UploadFile[]>([])
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -210,6 +215,7 @@ export function MoldDevelopmentPage() {
   const [customers, setCustomers] = useState(() => loadCustomers())
   const [products, setProducts] = useState(() => loadProducts())
   const [suppliers, setSuppliers] = useState(() => loadSuppliers())
+  const [loading, setLoading] = useState(false)
   const canCreate = hasPermission('mold.development.create')
   const canDelete = hasPermission('mold.development.delete')
   const columnPermissions = getCurrentColumnPermissions()
@@ -228,6 +234,12 @@ export function MoldDevelopmentPage() {
   }, [])
 
   useEffect(() => {
+    void fetchInternalEmployeesFromApi()
+      .then(setInternalEmployees)
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
     const refresh = () => {
       setCustomers(loadCustomers())
       setProducts(loadProducts())
@@ -238,11 +250,14 @@ export function MoldDevelopmentPage() {
   }, [])
 
   const loadDevelopments = async () => {
+    setLoading(true)
     try {
       const records = await apiRequest<MobileMoldRecord[]>('/mobile/molds?viewer=admin')
       setDevelopments(records.map(mapApiRecord))
     } catch (error) {
       message.error(error instanceof Error ? error.message : '模具开发列表加载失败')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -285,6 +300,9 @@ export function MoldDevelopmentPage() {
     return developments
       .filter((record) => {
         if (!isRecordVisible(record)) return false
+        if (archiveTab === 'active' && (record.status === '已完成' || record.status === '已中止')) return false
+        if (archiveTab === 'completed' && record.status !== '已完成') return false
+        if (archiveTab === 'cancelled' && record.status !== '已中止') return false
         const matchedKeyword =
           !normalizedKeyword ||
           [
@@ -298,22 +316,27 @@ export function MoldDevelopmentPage() {
           ]
             .filter(Boolean)
             .some((value) => String(value).includes(normalizedKeyword))
-        const matchedStatus = statusFilter === 'all' || record.status === statusFilter
+        const matchedStatus = archiveTab === 'active' ? statusFilter === 'all' || record.status === statusFilter : true
         return matchedKeyword && matchedStatus
       })
       .sort((a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf())
-  }, [currentUser?.id, currentUser?.name, developments, keyword, statusFilter])
+  }, [archiveTab, currentUser?.id, currentUser?.name, developments, keyword, statusFilter])
 
   const openCreateModal = async () => {
     try {
-      const [nextCustomers, nextProducts, nextSuppliers] = await Promise.all([
+      const [nextCustomers, nextProducts, nextSuppliers, nextInternalEmployees] = await Promise.all([
         fetchCustomersFromApi(),
         fetchProductsFromApi(),
         fetchSuppliersFromApi(),
+        fetchInternalEmployeesFromApi(),
       ])
       setCustomers(nextCustomers)
       setProducts(nextProducts)
       setSuppliers(nextSuppliers)
+      setInternalEmployees(nextInternalEmployees)
+      if (!nextInternalEmployees.length) {
+        message.warning('当前没有可选的内部员工，请先在用户管理中新增或启用员工账号')
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : '基础档案加载失败')
       return
@@ -430,12 +453,6 @@ export function MoldDevelopmentPage() {
     { title: '客户告知', dataIndex: 'customerNotifyDate', width: 120 },
     { title: '期望完成', dataIndex: 'expectedDate', width: 120, render: (value) => value || '-' },
     {
-      title: '供应商承诺',
-      dataIndex: 'supplierPromiseDate',
-      width: 130,
-      render: (value) => value || '待小程序确认',
-    },
-    {
       title: '快递单号',
       dataIndex: 'trackingNumber',
       width: 150,
@@ -498,26 +515,41 @@ export function MoldDevelopmentPage() {
             下达模具开发需求，并跟踪供应商确认、制作完成、发货、收货和试产流程。
           </p>
         </div>
-        {canCreate && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-            下达开发需求
+        <Space>
+          <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={loadDevelopments}>
+            查询
           </Button>
-        )}
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              下达开发需求
+            </Button>
+          )}
+        </Space>
       </div>
 
       <Card>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Space wrap>
-            {statusOptions.map((option) => (
-              <Button
-                key={option.value}
-                type={statusFilter === option.value ? 'primary' : 'default'}
-                onClick={() => setStatusFilter(option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </Space>
+          <Tabs
+            activeKey={archiveTab}
+            items={archiveTabs}
+            onChange={(key) => {
+              setArchiveTab(key as typeof archiveTab)
+              setStatusFilter('all')
+            }}
+          />
+          {archiveTab === 'active' && (
+            <Space wrap>
+              {statusOptions.map((option) => (
+                <Button
+                  key={option.value}
+                  type={statusFilter === option.value ? 'primary' : 'default'}
+                  onClick={() => setStatusFilter(option.value)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </Space>
+          )}
           <Input
             allowClear
             prefix={<SearchOutlined />}
@@ -532,6 +564,7 @@ export function MoldDevelopmentPage() {
             rowKey="id"
             columns={columns}
             dataSource={filteredDevelopments}
+            loading={loading}
             pagination={{
               pageSize: 10,
               showSizeChanger: false,

@@ -44,11 +44,10 @@ import {
   fetchRolesFromApi,
   loadRoles,
   permissionTree,
-  saveRoles,
   updateRoleOnApi,
 } from '../../utils/roles'
 import type { DataScope, RoleRecord } from '../../utils/roles'
-import { USER_STORAGE_EVENT, loadUsers } from '../../utils/users'
+import { USER_STORAGE_EVENT, fetchUsersFromApi, loadUsers } from '../../utils/users'
 
 interface RoleFormValues {
   name: string
@@ -67,10 +66,6 @@ const dataColumns = [
   { label: '供应商联系人', value: 'supplier.contact' },
   { label: '模具开发备注', value: 'mold.remark' },
 ]
-
-function createNextRoleId(roles: RoleRecord[]) {
-  return `R${String(roles.length + 1).padStart(3, '0')}`
-}
 
 function filterPermissionTreeByKeys(nodes: DataNode[], checkedKeys: string[]): DataNode[] {
   const checkedKeySet = new Set(checkedKeys)
@@ -126,20 +121,22 @@ export function RolePermissionPage() {
     [checkedPermissions],
   )
 
-  useEffect(() => {
-    saveRoles(roles)
-  }, [roles])
+  const refreshRolePage = async () => {
+    const [nextRoles, nextDepartments, nextUsers] = await Promise.all([
+      fetchRolesFromApi(),
+      fetchDepartmentsFromApi(),
+      fetchUsersFromApi(),
+    ])
+    setRoles(nextRoles)
+    setDepartments(nextDepartments)
+    setUsers(nextUsers)
+  }
 
   useEffect(() => {
-    void fetchRolesFromApi()
-      .then(setRoles)
-      .catch(() => undefined)
-  }, [])
-
-  useEffect(() => {
-    void fetchDepartmentsFromApi()
-      .then(setDepartments)
-      .catch(() => undefined)
+    void refreshRolePage()
+      .catch((error) => {
+        message.error(error instanceof Error ? error.message : '角色权限数据加载失败')
+      })
   }, [])
 
   useEffect(() => {
@@ -178,39 +175,30 @@ export function RolePermissionPage() {
 
   const handleSubmitRole = async (values: RoleFormValues) => {
     if (editingRole) {
-      void updateRoleOnApi(editingRole.id, values)
-        .then(() => fetchRolesFromApi().then(setRoles))
-        .catch(() => undefined)
-      setRoles((current) =>
-        current.map((role) => (role.id === editingRole.id ? { ...role, ...values } : role)),
-      )
-      message.success('角色已更新')
+      try {
+        await updateRoleOnApi(editingRole.id, values)
+        setRoles(await fetchRolesFromApi())
+        message.success('角色已更新')
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '角色更新失败')
+        return
+      }
     } else {
-      void createRoleOnApi({
-        ...values,
-        permissions: [],
-        dataScope: 'self',
-        customDepartments: [],
-        columnPermissions: [],
-        userIds: [],
-      })
-        .then(() => fetchRolesFromApi().then(setRoles))
-        .catch(() => undefined)
-      setRoles((current) => [
-        ...current,
-        {
-          id: createNextRoleId(current),
+      try {
+        await createRoleOnApi({
           ...values,
-          createdBy: '管理员',
-          createdAt: '2026-05-22 11:20:00',
           permissions: [],
           dataScope: 'self',
           customDepartments: [],
           columnPermissions: [],
           userIds: [],
-        },
-      ])
-      message.success('角色已新增')
+        })
+        setRoles(await fetchRolesFromApi())
+        message.success('角色已新增')
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '角色新增失败')
+        return
+      }
     }
     setRoleModalOpen(false)
   }
@@ -222,29 +210,31 @@ export function RolePermissionPage() {
       okText: '删除',
       cancelText: '取消',
       okButtonProps: { danger: true },
-      onOk: () => {
-        void deleteRoleOnApi(role.id)
-          .then(() => fetchRolesFromApi().then(setRoles))
-          .catch(() => undefined)
-        setRoles((current) => current.filter((item) => item.id !== role.id))
-        if (activeRole?.id === role.id) setActiveRole(null)
-        message.success('角色已删除')
+      onOk: async () => {
+        try {
+          await deleteRoleOnApi(role.id)
+          setRoles(await fetchRolesFromApi())
+          if (activeRole?.id === role.id) setActiveRole(null)
+          message.success('角色已删除')
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '角色删除失败')
+          throw error
+        }
       },
     })
   }
 
-  const handleCopyRole = (role: RoleRecord) => {
-    setRoles((current) => [
-      ...current,
-      {
+  const handleCopyRole = async (role: RoleRecord) => {
+    try {
+      await createRoleOnApi({
         ...role,
-        id: createNextRoleId(current),
         name: `${role.name} 副本`,
-        createdBy: '管理员',
-        createdAt: '2026-05-22 11:20:00',
-      },
-    ])
-    message.success('角色已复制')
+      })
+      setRoles(await fetchRolesFromApi())
+      message.success('角色已复制')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '角色复制失败')
+    }
   }
 
   const openPermissionModal = (role: RoleRecord) => {
@@ -262,45 +252,35 @@ export function RolePermissionPage() {
     setUserModalOpen(true)
   }
 
-  const savePermissions = () => {
+  const savePermissions = async () => {
     if (!activeRole) return
-    void updateRoleOnApi(activeRole.id, {
-      permissions: checkedPermissions,
-      dataScope,
-      customDepartments,
-      columnPermissions,
-    })
-      .then(() => fetchRolesFromApi().then(setRoles))
-      .catch(() => undefined)
-    setRoles((current) =>
-      current.map((role) =>
-        role.id === activeRole.id
-          ? {
-              ...role,
-              permissions: checkedPermissions,
-              dataScope,
-              customDepartments,
-              columnPermissions,
-            }
-          : role,
-      ),
-    )
-    message.success('权限配置已保存')
-    setPermissionModalOpen(false)
+    try {
+      await updateRoleOnApi(activeRole.id, {
+        permissions: checkedPermissions,
+        dataScope,
+        customDepartments,
+        columnPermissions,
+      })
+      setRoles(await fetchRolesFromApi())
+      message.success('权限配置已保存')
+      setPermissionModalOpen(false)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '权限配置保存失败')
+    }
   }
 
-  const saveUsers = () => {
+  const saveUsers = async () => {
     if (!activeRole) return
-    void updateRoleOnApi(activeRole.id, {
-      userIds: selectedUsers,
-    })
-      .then(() => fetchRolesFromApi().then(setRoles))
-      .catch(() => undefined)
-    setRoles((current) =>
-      current.map((role) => (role.id === activeRole.id ? { ...role, userIds: selectedUsers } : role)),
-    )
-    message.success('授权用户已保存')
-    setUserModalOpen(false)
+    try {
+      await updateRoleOnApi(activeRole.id, {
+        userIds: selectedUsers,
+      })
+      setRoles(await fetchRolesFromApi())
+      message.success('授权用户已保存')
+      setUserModalOpen(false)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '授权用户保存失败')
+    }
   }
 
   const columns: TableColumnsType<RoleRecord> = [
@@ -372,9 +352,22 @@ export function RolePermissionPage() {
             配置角色、菜单功能权限、数据行权限、字段列权限和授权用户。
           </p>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateRole}>
-          新增角色
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<SearchOutlined />}
+            onClick={() =>
+              void refreshRolePage().catch((error) => {
+                message.error(error instanceof Error ? error.message : '角色权限数据加载失败')
+              })
+            }
+          >
+            查询
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateRole}>
+            新增角色
+          </Button>
+        </Space>
       </div>
 
       <Card>

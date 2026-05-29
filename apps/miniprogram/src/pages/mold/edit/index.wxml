@@ -4,12 +4,23 @@
 
     <view wx:if="{{type === 'shipping'}}">
       <text class="label">快递单号</text>
-      <input value="{{trackingNumber}}" placeholder="请输入快递单号" bindinput="onTrackingInput" />
-      <button class="upload-button" bindtap="chooseImages">上传发货图片</button>
+      <view class="input-with-icon">
+        <input class="form-input" value="{{trackingNumber}}" placeholder="请输入快递单号" bindinput="onTrackingInput" />
+        <button class="scan-button" bindtap="scanTrackingNumber">⌗</button>
+      </view>
+      <text class="label">发货图片</text>
+      <view class="upload-row">
+        <button class="upload-button" bindtap="chooseImages">选择照片</button>
+        <button class="upload-button" bindtap="takeImages">拍照</button>
+      </view>
     </view>
 
     <view wx:elif="{{type === 'receive'}}">
-      <button class="upload-button" bindtap="chooseImages">上传收货图片</button>
+      <text class="label">收货图片</text>
+      <view class="upload-row">
+        <button class="upload-button" bindtap="chooseImages">选择照片</button>
+        <button class="upload-button" bindtap="takeImages">拍照</button>
+      </view>
     </view>
 
     <view wx:elif="{{type === 'evaluation'}}">
@@ -26,13 +37,28 @@
       <textarea value="{{reason}}" placeholder="请输入评判理由" bindinput="onReasonInput" />
     </view>
 
-    <view wx:else>
+    <view wx:elif="{{type === 'trial' || type === 'batch'}}">
       <text class="label">填写人</text>
-      <input value="{{operator}}" placeholder="请输入填写人" bindinput="onOperatorInput" />
-      <button class="upload-button" bindtap="chooseImages">上传产品与检测图片</button>
+      <input class="form-input" value="{{operator}}" placeholder="请输入填写人" bindinput="onOperatorInput" />
+      <text class="label">产品图片</text>
+      <view class="upload-row">
+        <button class="upload-button" bindtap="chooseProductImages">选择照片</button>
+        <button class="upload-button" bindtap="takeProductImages">拍照</button>
+      </view>
+      <view class="image-list" wx:if="{{productImages.length}}">
+        <image wx:for="{{productImages}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+      </view>
+      <text class="label">破坏性检测图片</text>
+      <view class="upload-row">
+        <button class="upload-button" bindtap="chooseDestructiveImages">选择照片</button>
+        <button class="upload-button" bindtap="takeDestructiveImages">拍照</button>
+      </view>
+      <view class="image-list" wx:if="{{destructiveImages.length}}">
+        <image wx:for="{{destructiveImages}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+      </view>
     </view>
 
-    <view class="image-list" wx:if="{{images.length}}">
+    <view class="image-list" wx:if="{{(type === 'shipping' || type === 'receive') && images.length}}">
       <image wx:for="{{images}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
     </view>
 

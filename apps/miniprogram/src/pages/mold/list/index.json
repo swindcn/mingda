@@ -1,3 +1,5 @@
 {
-  "navigationBarTitleText": "模具开发"
+  "navigationBarTitleText": "模具开发",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark"
 }
