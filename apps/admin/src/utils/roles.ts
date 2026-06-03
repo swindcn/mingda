@@ -17,6 +17,7 @@ export interface RoleRecord {
   createdAt: string
   permissions: string[]
   dataScope: DataScope
+  dataScopes?: DataScope[]
   customDepartments: Array<{ departmentId: string; includeChildren: boolean }>
   columnPermissions: string[]
   userIds: string[]
@@ -29,8 +30,11 @@ export interface AdminUser {
   username?: string
   permissions?: string[]
   dataScope?: DataScope
+  dataScopes?: DataScope[]
   columnPermissions?: string[]
 }
+
+export const publicSyncPermissionKeys = ['basic.product.view_synced_public'] as const
 
 export const modelingPermissionKeys = [
   'model',
@@ -46,6 +50,7 @@ export const modelingPermissionKeys = [
   'model.equipment.create',
   'model.equipment.edit',
   'model.equipment.delete',
+  'process',
   'model.material.view',
   'model.material.create',
   'model.material.edit',
@@ -92,33 +97,98 @@ export const permissionTree: DataNode[] = [
         children: [
           {
             title: '部门管理',
-            key: 'basic.department',
+            key: 'group.basic.department',
             children: [
+              { title: '部门管理-数据列表', key: 'basic.department' },
               { title: '部门管理-新增', key: 'basic.department.create' },
               { title: '部门管理-编辑', key: 'basic.department.edit' },
               { title: '部门管理-删除', key: 'basic.department.delete' },
+              { title: '部门管理-同步', key: 'basic.department.sync' },
             ],
           },
-          { title: '用户管理', key: 'basic.user' },
-          { title: '角色权限', key: 'basic.role' },
-          { title: '客户管理', key: 'basic.customer' },
-          { title: '供应商管理', key: 'basic.supplier' },
-          { title: '物料管理', key: 'basic.product' },
-          { title: '字典设置', key: 'basic.dictionary' },
+          {
+            title: '用户管理',
+            key: 'group.basic.user',
+            children: [
+              { title: '用户管理-数据列表', key: 'basic.user' },
+              { title: '用户管理-新增', key: 'basic.user.create' },
+              { title: '用户管理-编辑', key: 'basic.user.edit' },
+              { title: '用户管理-删除', key: 'basic.user.delete' },
+              { title: '用户管理-同步', key: 'basic.user.sync' },
+            ],
+          },
+          {
+            title: '角色权限',
+            key: 'group.basic.role',
+            children: [
+              { title: '角色权限-数据列表', key: 'basic.role' },
+              { title: '角色权限-新增', key: 'basic.role.create' },
+              { title: '角色权限-编辑', key: 'basic.role.edit' },
+              { title: '角色权限-删除', key: 'basic.role.delete' },
+              { title: '角色权限-配置权限', key: 'basic.role.config' },
+              { title: '角色权限-配置用户', key: 'basic.role.users' },
+              { title: '角色权限-复制', key: 'basic.role.copy' },
+            ],
+          },
+          {
+            title: '客户管理',
+            key: 'group.basic.customer',
+            children: [
+              { title: '客户管理-数据列表', key: 'basic.customer' },
+              { title: '客户管理-新增', key: 'basic.customer.create' },
+              { title: '客户管理-编辑', key: 'basic.customer.edit' },
+              { title: '客户管理-删除', key: 'basic.customer.delete' },
+            ],
+          },
+          {
+            title: '供应商管理',
+            key: 'group.basic.supplier',
+            children: [
+              { title: '供应商管理-数据列表', key: 'basic.supplier' },
+              { title: '供应商管理-新增', key: 'basic.supplier.create' },
+              { title: '供应商管理-编辑', key: 'basic.supplier.edit' },
+              { title: '供应商管理-删除', key: 'basic.supplier.delete' },
+            ],
+          },
+          {
+            title: '物料管理',
+            key: 'group.basic.product',
+            children: [
+              { title: '物料管理-数据列表', key: 'basic.product' },
+              { title: '物料管理-新增', key: 'basic.product.create' },
+              { title: '物料管理-编辑', key: 'basic.product.edit' },
+              { title: '物料管理-删除', key: 'basic.product.delete' },
+            ],
+          },
+          {
+            title: '字典设置',
+            key: 'group.basic.dictionary',
+            children: [
+              { title: '字典设置-数据列表', key: 'basic.dictionary' },
+              { title: '字典设置-编辑', key: 'basic.dictionary.edit' },
+            ],
+          },
         ],
       },
       {
         title: '模具业务',
         key: 'mold',
         children: [
-          { title: '模具开发-查看', key: 'mold.development.view' },
-          { title: '模具开发-下达', key: 'mold.development.create' },
-          { title: '模具开发-编辑', key: 'mold.development.edit' },
-          { title: '模具开发-删除', key: 'mold.development.delete' },
+          {
+            title: '模具开发',
+            key: 'group.mold.development',
+            children: [
+              { title: '模具开发-数据列表', key: 'mold.development.view' },
+              { title: '模具开发-下达', key: 'mold.development.create' },
+              { title: '模具开发-编辑', key: 'mold.development.edit' },
+              { title: '模具开发-删除', key: 'mold.development.delete' },
+            ],
+          },
           {
             title: '模具档案',
-            key: 'mold.model.view',
+            key: 'group.mold.model',
             children: [
+              { title: '模具档案-数据列表', key: 'mold.model.view' },
               { title: '模具档案-新增', key: 'mold.model.create' },
               { title: '模具档案-编辑', key: 'mold.model.edit' },
               { title: '模具档案-删除', key: 'mold.model.delete' },
@@ -126,8 +196,9 @@ export const permissionTree: DataNode[] = [
           },
           {
             title: '芯盒档案',
-            key: 'mold.corebox.view',
+            key: 'group.mold.corebox',
             children: [
+              { title: '芯盒档案-数据列表', key: 'mold.corebox.view' },
               { title: '芯盒档案-新增', key: 'mold.corebox.create' },
               { title: '芯盒档案-编辑', key: 'mold.corebox.edit' },
               { title: '芯盒档案-删除', key: 'mold.corebox.delete' },
@@ -141,8 +212,9 @@ export const permissionTree: DataNode[] = [
         children: [
           {
             title: '车间与产线',
-            key: 'model.workshop-line.view',
+            key: 'group.model.workshop-line',
             children: [
+              { title: '车间与产线-数据列表', key: 'model.workshop-line.view' },
               { title: '车间与产线-新增', key: 'model.workshop-line.create' },
               { title: '车间与产线-编辑', key: 'model.workshop-line.edit' },
               { title: '车间与产线-删除', key: 'model.workshop-line.delete' },
@@ -150,8 +222,9 @@ export const permissionTree: DataNode[] = [
           },
           {
             title: '班组配置',
-            key: 'model.team.view',
+            key: 'group.model.team',
             children: [
+              { title: '班组配置-数据列表', key: 'model.team.view' },
               { title: '班组配置-新增', key: 'model.team.create' },
               { title: '班组配置-编辑', key: 'model.team.edit' },
               { title: '班组配置-删除', key: 'model.team.delete' },
@@ -159,44 +232,19 @@ export const permissionTree: DataNode[] = [
           },
           {
             title: '设备配置',
-            key: 'model.equipment.view',
+            key: 'group.model.equipment',
             children: [
+              { title: '设备配置-数据列表', key: 'model.equipment.view' },
               { title: '设备配置-新增', key: 'model.equipment.create' },
               { title: '设备配置-编辑', key: 'model.equipment.edit' },
               { title: '设备配置-删除', key: 'model.equipment.delete' },
             ],
           },
           {
-            title: '材质牌号',
-            key: 'model.material.view',
-            children: [
-              { title: '材质牌号-新增', key: 'model.material.create' },
-              { title: '材质牌号-编辑', key: 'model.material.edit' },
-              { title: '材质牌号-删除', key: 'model.material.delete' },
-            ],
-          },
-          {
-            title: '熔炼配方',
-            key: 'model.recipe.view',
-            children: [
-              { title: '熔炼配方-新增', key: 'model.recipe.create' },
-              { title: '熔炼配方-编辑', key: 'model.recipe.edit' },
-              { title: '熔炼配方-删除', key: 'model.recipe.delete' },
-            ],
-          },
-          {
-            title: '工艺路线',
-            key: 'model.routing.view',
-            children: [
-              { title: '工艺路线-新增', key: 'model.routing.create' },
-              { title: '工艺路线-编辑', key: 'model.routing.edit' },
-              { title: '工艺路线-删除', key: 'model.routing.delete' },
-            ],
-          },
-          {
             title: '工厂日历',
-            key: 'model.calendar.view',
+            key: 'group.model.calendar',
             children: [
+              { title: '工厂日历-数据列表', key: 'model.calendar.view' },
               { title: '工厂日历-新增', key: 'model.calendar.create' },
               { title: '工厂日历-编辑', key: 'model.calendar.edit' },
               { title: '工厂日历-删除', key: 'model.calendar.delete' },
@@ -204,18 +252,56 @@ export const permissionTree: DataNode[] = [
           },
           {
             title: '动态排班表',
-            key: 'model.schedule.view',
+            key: 'group.model.schedule',
             children: [
+              { title: '动态排班表-数据列表', key: 'model.schedule.view' },
               { title: '动态排班表-新增', key: 'model.schedule.create' },
               { title: '动态排班表-编辑', key: 'model.schedule.edit' },
               { title: '动态排班表-删除', key: 'model.schedule.delete' },
               { title: '动态排班表-一键生成', key: 'model.schedule.batch' },
             ],
           },
+        ],
+      },
+      {
+        title: '工艺管理',
+        key: 'process',
+        children: [
+          {
+            title: '材质牌号',
+            key: 'group.model.material',
+            children: [
+              { title: '材质牌号-数据列表', key: 'model.material.view' },
+              { title: '材质牌号-新增', key: 'model.material.create' },
+              { title: '材质牌号-编辑', key: 'model.material.edit' },
+              { title: '材质牌号-删除', key: 'model.material.delete' },
+            ],
+          },
+          {
+            title: '熔炼配方',
+            key: 'group.model.recipe',
+            children: [
+              { title: '熔炼配方-数据列表', key: 'model.recipe.view' },
+              { title: '熔炼配方-新增', key: 'model.recipe.create' },
+              { title: '熔炼配方-编辑', key: 'model.recipe.edit' },
+              { title: '熔炼配方-删除', key: 'model.recipe.delete' },
+            ],
+          },
+          {
+            title: '工艺路线',
+            key: 'group.model.routing',
+            children: [
+              { title: '工艺路线-数据列表', key: 'model.routing.view' },
+              { title: '工艺路线-新增', key: 'model.routing.create' },
+              { title: '工艺路线-编辑', key: 'model.routing.edit' },
+              { title: '工艺路线-删除', key: 'model.routing.delete' },
+            ],
+          },
           {
             title: '缺陷代码库',
-            key: 'model.defect.view',
+            key: 'group.model.defect',
             children: [
+              { title: '缺陷代码库-数据列表', key: 'model.defect.view' },
               { title: '缺陷代码库-新增', key: 'model.defect.create' },
               { title: '缺陷代码库-编辑', key: 'model.defect.edit' },
               { title: '缺陷代码库-删除', key: 'model.defect.delete' },
@@ -235,6 +321,8 @@ export const dataScopeLabels: Record<DataScope, string> = {
   custom_departments: '自定义部门',
 }
 
+export const dataScopeOptions = Object.entries(dataScopeLabels).map(([value, label]) => ({ value, label }))
+
 export const initialRoles: RoleRecord[] = [
   {
     id: 'R000',
@@ -251,12 +339,34 @@ export const initialRoles: RoleRecord[] = [
       'basic.department.create',
       'basic.department.edit',
       'basic.department.delete',
+      'basic.department.sync',
       'basic.user',
+      'basic.user.create',
+      'basic.user.edit',
+      'basic.user.delete',
+      'basic.user.sync',
       'basic.role',
+      'basic.role.create',
+      'basic.role.edit',
+      'basic.role.delete',
+      'basic.role.config',
+      'basic.role.users',
+      'basic.role.copy',
       'basic.customer',
+      'basic.customer.create',
+      'basic.customer.edit',
+      'basic.customer.delete',
       'basic.supplier',
+      'basic.supplier.create',
+      'basic.supplier.edit',
+      'basic.supplier.delete',
       'basic.product',
+      'basic.product.create',
+      'basic.product.edit',
+      'basic.product.delete',
+      ...publicSyncPermissionKeys,
       'basic.dictionary',
+      'basic.dictionary.edit',
       'mold',
       'mold.development.view',
       'mold.development.create',
@@ -265,6 +375,7 @@ export const initialRoles: RoleRecord[] = [
       ...modelingPermissionKeys,
     ],
     dataScope: 'organization',
+    dataScopes: ['organization'],
     customDepartments: [],
     columnPermissions: [],
     userIds: [],
@@ -359,6 +470,15 @@ export function getCurrentDataScope(): DataScope {
   if (isSystemAdmin(user)) return 'organization'
   if (user?.dataScope) return user.dataScope
   return getEffectiveRoles()[0]?.dataScope || 'self'
+}
+
+export function getCurrentDataScopes(): DataScope[] {
+  const user = getCurrentAdminUser()
+  if (isSystemAdmin(user)) return ['organization']
+  if (Array.isArray(user?.dataScopes) && user.dataScopes.length) return user.dataScopes
+  if (user?.dataScope) return [user.dataScope]
+  const scopes = getEffectiveRoles().flatMap((role) => role.dataScopes?.length ? role.dataScopes : [role.dataScope])
+  return Array.from(new Set(scopes.length ? scopes : ['self']))
 }
 
 export function getCurrentColumnPermissions() {

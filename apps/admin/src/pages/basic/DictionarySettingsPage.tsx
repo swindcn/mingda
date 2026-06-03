@@ -1,16 +1,20 @@
-import { PlusOutlined } from '@ant-design/icons'
-import { Button, Card, Form, Input, Space, Tag, Typography, message } from 'antd'
-import { useEffect, useState } from 'react'
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
+import { Button, Card, Form, Input, Select, Space, Tag, Tree, Typography, message } from 'antd'
+import type { DataNode } from 'antd/es/tree'
+import { useEffect, useMemo, useState } from 'react'
 import {
   defaultDictionaries,
   fetchDictionariesFromApi,
   loadDictionaries,
   updateDictionariesOnApi,
 } from '../../utils/dictionaries'
-import type { DictionaryState } from '../../utils/dictionaries'
+import type { DictionaryState, ProductTypeNode } from '../../utils/dictionaries'
+import { hasPermission } from '../../utils/roles'
+
+type SimpleDictionaryKey = Exclude<keyof DictionaryState, 'productTypes'>
 
 const dictionaryMeta: Array<{
-  key: keyof DictionaryState
+  key: SimpleDictionaryKey
   title: string
   description: string
 }> = [
@@ -22,12 +26,7 @@ const dictionaryMeta: Array<{
   {
     key: 'productUnits',
     title: '产品单位配置',
-    description: '用于产品基本信息里的产品单位字段。',
-  },
-  {
-    key: 'productTypes',
-    title: '产品类型配置',
-    description: '用于产品基本信息里的产品类型字段。',
+    description: '用于物料基本信息里的物料单位字段。',
   },
   {
     key: 'positions',
@@ -41,10 +40,31 @@ const dictionaryMeta: Array<{
   },
 ]
 
+function flattenProductTypeNames(nodes: ProductTypeNode[], prefix = ''): string[] {
+  return nodes.flatMap((node) => {
+    const path = prefix ? `${prefix}/${node.name}` : node.name
+    return [path, ...flattenProductTypeNames(node.children || [], path)]
+  })
+}
+
+function removeTypeNode(nodes: ProductTypeNode[], path: string[]): ProductTypeNode[] {
+  const [current, ...rest] = path
+  return nodes
+    .map((node) => {
+      if (node.name !== current) return node
+      if (!rest.length) return null
+      const children = removeTypeNode(node.children || [], rest)
+      return children.length ? { ...node, children } : { name: node.name }
+    })
+    .filter((node): node is ProductTypeNode => Boolean(node))
+}
+
 export function DictionarySettingsPage() {
   const [form] = Form.useForm<Record<string, string>>()
+  const [typeForm] = Form.useForm<{ parentType?: string; typeName?: string }>()
   const [dictionaries, setDictionaries] = useState<DictionaryState>(() => loadDictionaries())
   const [saving, setSaving] = useState(false)
+  const canEdit = hasPermission('basic.dictionary.edit')
 
   useEffect(() => {
     void fetchDictionariesFromApi()
@@ -67,7 +87,7 @@ export function DictionarySettingsPage() {
     }
   }
 
-  const addItem = async (key: keyof DictionaryState) => {
+  const addItem = async (key: SimpleDictionaryKey) => {
     const value = form.getFieldValue(key)?.trim()
     if (!value) {
       message.warning('请输入字典项名称')
@@ -83,7 +103,7 @@ export function DictionarySettingsPage() {
     form.setFieldValue(key, '')
   }
 
-  const removeItem = async (key: keyof DictionaryState, value: string) => {
+  const removeItem = async (key: SimpleDictionaryKey, value: string) => {
     const nextValues = dictionaries[key].filter((item) => item !== value)
     if (!nextValues.length) {
       message.warning('至少保留一个字典项')
@@ -91,6 +111,85 @@ export function DictionarySettingsPage() {
     }
     const next = { ...dictionaries, [key]: nextValues }
     await persistDictionaries(next, '字典项已删除')
+  }
+
+  const productTypePaths = useMemo(
+    () => flattenProductTypeNames(dictionaries.productTypes),
+    [dictionaries.productTypes],
+  )
+
+  const productTypeTreeData = useMemo<DataNode[]>(() => {
+    const toTree = (nodes: ProductTypeNode[], parentPath = ''): DataNode[] =>
+      nodes.map((node) => {
+        const path = parentPath ? `${parentPath}/${node.name}` : node.name
+        return {
+          key: path,
+          title: (
+            <Space size={8}>
+              <span>{node.name}</span>
+              {canEdit && (
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void removeProductType(path)
+                  }}
+                />
+              )}
+            </Space>
+          ),
+          children: node.children?.length ? toTree(node.children, path) : undefined,
+        }
+      })
+    return toTree(dictionaries.productTypes)
+  }, [dictionaries.productTypes])
+
+  const addProductType = async () => {
+    const values = typeForm.getFieldsValue()
+    const name = values.typeName?.trim()
+    if (!name) {
+      message.warning('请输入物料类型名称')
+      return
+    }
+
+    const parentPath = values.parentType
+    if (!parentPath && dictionaries.productTypes.some((item) => item.name === name)) {
+      message.warning('一级物料类型已存在')
+      return
+    }
+
+    const appendChild = (nodes: ProductTypeNode[], path: string[]): ProductTypeNode[] =>
+      nodes.map((node) => {
+        if (node.name !== path[0]) return node
+        if (path.length === 1) {
+          const children = node.children || []
+          if (children.some((child) => child.name === name)) {
+            message.warning('同级物料类型已存在')
+            return node
+          }
+          return { ...node, children: [...children, { name }] }
+        }
+        return { ...node, children: appendChild(node.children || [], path.slice(1)) }
+      })
+
+    const nextTypes = parentPath
+      ? appendChild(dictionaries.productTypes, parentPath.split('/'))
+      : [...dictionaries.productTypes, { name }]
+
+    await persistDictionaries({ ...dictionaries, productTypes: nextTypes }, '物料类型已新增')
+    typeForm.resetFields(['typeName'])
+  }
+
+  const removeProductType = async (path: string) => {
+    if (dictionaries.productTypes.length <= 1 && !path.includes('/')) {
+      message.warning('至少保留一个物料类型')
+      return
+    }
+    const nextTypes = removeTypeNode(dictionaries.productTypes, path.split('/'))
+    await persistDictionaries({ ...dictionaries, productTypes: nextTypes }, '物料类型已删除')
   }
 
   const resetDefault = async () => {
@@ -104,7 +203,7 @@ export function DictionarySettingsPage() {
           <h1 className="page-title">字典设置</h1>
           <p className="page-description">维护业务表单中的可选项，变更后会立即应用到本浏览器管理端。</p>
         </div>
-        <Button loading={saving} onClick={resetDefault}>恢复默认</Button>
+        {canEdit && <Button loading={saving} onClick={resetDefault}>恢复默认</Button>}
       </div>
 
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -113,23 +212,50 @@ export function DictionarySettingsPage() {
             <Typography.Paragraph type="secondary">{meta.description}</Typography.Paragraph>
             <Space wrap style={{ marginBottom: 16 }}>
               {dictionaries[meta.key].map((item) => (
-                <Tag key={item} closable onClose={() => removeItem(meta.key, item)}>
+                <Tag key={item} closable={canEdit} onClose={() => removeItem(meta.key, item)}>
                   {item}
                 </Tag>
               ))}
             </Space>
-            <Form form={form} component={false}>
-              <Space.Compact style={{ width: 420, maxWidth: '100%' }}>
-                <Form.Item name={meta.key} noStyle>
-                  <Input placeholder={`新增${meta.title.replace('配置', '')}`} onPressEnter={() => addItem(meta.key)} />
-                </Form.Item>
-                <Button loading={saving} type="primary" icon={<PlusOutlined />} onClick={() => addItem(meta.key)}>
-                  新增
-                </Button>
-              </Space.Compact>
-            </Form>
+            {canEdit && (
+              <Form form={form} component={false}>
+                <Space.Compact style={{ width: 420, maxWidth: '100%' }}>
+                  <Form.Item name={meta.key} noStyle>
+                    <Input placeholder={`新增${meta.title.replace('配置', '')}`} onPressEnter={() => addItem(meta.key)} />
+                  </Form.Item>
+                  <Button loading={saving} type="primary" icon={<PlusOutlined />} onClick={() => addItem(meta.key)}>
+                    新增
+                  </Button>
+                </Space.Compact>
+              </Form>
+            )}
           </Card>
         ))}
+
+        <Card title="物料类型配置">
+          <Typography.Paragraph type="secondary">
+            用于物料管理中的物料类型字段。支持一级、二级类型；列表中按“一级类型/二级类型”展示。
+          </Typography.Paragraph>
+          {canEdit && (
+            <Form form={typeForm} layout="inline" style={{ marginBottom: 16 }}>
+              <Form.Item name="parentType" label="上级类型">
+                <Select
+                  allowClear
+                  placeholder="作为一级类型"
+                  style={{ width: 220 }}
+                  options={productTypePaths.map((path: string) => ({ label: path, value: path }))}
+                />
+              </Form.Item>
+              <Form.Item name="typeName" label="类型名称">
+                <Input placeholder="请输入类型名称" onPressEnter={addProductType} />
+              </Form.Item>
+              <Button loading={saving} type="primary" icon={<PlusOutlined />} onClick={addProductType}>
+                新增
+              </Button>
+            </Form>
+          )}
+          <Tree defaultExpandAll treeData={productTypeTreeData} />
+        </Card>
       </Space>
     </>
   )

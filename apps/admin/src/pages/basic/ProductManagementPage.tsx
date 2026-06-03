@@ -9,6 +9,8 @@ import {
 import {
   Button,
   Card,
+  Cascader,
+  Checkbox,
   Form,
   Input,
   InputNumber,
@@ -17,15 +19,20 @@ import {
   Select,
   Space,
   Tag,
+  Tree,
   Typography,
   Upload,
   message,
 } from 'antd'
 import type { TableColumnsType, UploadProps } from 'antd'
+import type { DataNode } from 'antd/es/tree'
 import { useEffect, useMemo, useState } from 'react'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
 import { loadDictionaries } from '../../utils/dictionaries'
+import type { ProductTypeNode } from '../../utils/dictionaries'
+import { fetchModelingOptions } from '../../utils/modeling'
+import type { ModelingOptions } from '../../utils/modeling'
 import {
   createProductOnApi,
   deleteProductOnApi,
@@ -35,11 +42,52 @@ import {
   updateProductOnApi,
 } from '../../utils/masterData'
 import type { ProductRecord, ProductSource } from '../../utils/masterData'
+import { hasPermission } from '../../utils/roles'
 
-type ProductFormValues = Omit<ProductRecord, 'id' | 'createdAt'>
+type ProductFormValues = Omit<ProductRecord, 'id' | 'createdAt' | 'workshop'> & {
+  workshop?: string
+}
 
 function formatMoney(value: number) {
   return `¥${value.toFixed(2)}`
+}
+
+function productTypePath(type?: string) {
+  return String(type || '')
+}
+
+function flattenTypePaths(nodes: ProductTypeNode[], prefix = ''): string[] {
+  return nodes.flatMap((node) => {
+    const path = prefix ? `${prefix}/${node.name}` : node.name
+    return [path, ...flattenTypePaths(node.children || [], path)]
+  })
+}
+
+function toCascaderOptions(nodes: ProductTypeNode[]): Array<{ label: string; value: string; children?: Array<{ label: string; value: string }> }> {
+  return nodes.map((node) => ({
+    label: node.name,
+    value: node.name,
+    children: node.children?.length ? toCascaderOptions(node.children) : undefined,
+  }))
+}
+
+function toTreeData(nodes: ProductTypeNode[]): DataNode[] {
+  return [
+    {
+      key: 'all',
+      title: '全部',
+      children: nodes.map((node) => toTypeTreeNode(node)),
+    },
+  ]
+}
+
+function toTypeTreeNode(node: ProductTypeNode, prefix = ''): DataNode {
+  const path = prefix ? `${prefix}/${node.name}` : node.name
+  return {
+    key: path,
+    title: node.name,
+    children: node.children?.map((child) => toTypeTreeNode(child, path)),
+  }
 }
 
 export function ProductManagementPage() {
@@ -49,7 +97,12 @@ export function ProductManagementPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<ProductRecord | null>(null)
   const [dictionaries, setDictionaries] = useState(() => loadDictionaries())
+  const [modelingOptions, setModelingOptions] = useState<ModelingOptions | null>(null)
   const [loading, setLoading] = useState(false)
+  const [typeFilter, setTypeFilter] = useState('all')
+  const canCreate = hasPermission('basic.product.create')
+  const canEdit = hasPermission('basic.product.edit')
+  const canDelete = hasPermission('basic.product.delete')
 
   useEffect(() => {
     const refresh = () => setDictionaries(loadDictionaries())
@@ -60,6 +113,12 @@ export function ProductManagementPage() {
   useEffect(() => {
     saveProducts(products)
   }, [products])
+
+  useEffect(() => {
+    void fetchModelingOptions()
+      .then(setModelingOptions)
+      .catch(() => setModelingOptions(null))
+  }, [])
 
   const refreshProducts = async () => {
     setLoading(true)
@@ -78,12 +137,15 @@ export function ProductManagementPage() {
 
   const filteredProducts = useMemo(() => {
     const normalizedKeyword = keyword.trim()
+    const typeMatchedProducts = typeFilter === 'all'
+      ? products
+      : products.filter((product) => productTypePath(product.type) === typeFilter || productTypePath(product.type).startsWith(`${typeFilter}/`))
 
     if (!normalizedKeyword) {
-      return products
+      return typeMatchedProducts
     }
 
-    return products.filter((product) =>
+    return typeMatchedProducts.filter((product) =>
       [
         product.id,
         product.name,
@@ -95,15 +157,37 @@ export function ProductManagementPage() {
         product.workshop,
       ].some((value) => value.includes(normalizedKeyword)),
     )
-  }, [keyword, products])
+  }, [keyword, products, typeFilter])
+
+  const productTypeOptions = useMemo(() => toCascaderOptions(dictionaries.productTypes), [dictionaries.productTypes])
+  const productTypeTree = useMemo(() => toTreeData(dictionaries.productTypes), [dictionaries.productTypes])
+  const expandedTypeKeys = useMemo(() => ['all', ...flattenTypePaths(dictionaries.productTypes)], [dictionaries.productTypes])
+  const workshopOptions = useMemo(
+    () => (modelingOptions?.workshops || []).map((record) => ({
+      label: record.name || record.code || record.id,
+      value: record.name || record.code || record.id,
+    })),
+    [modelingOptions],
+  )
+  const source = Form.useWatch('source', form)
+
+  useEffect(() => {
+    if (source !== '自制件') {
+      form.setFieldValue('workshop', undefined)
+    }
+  }, [form, source])
 
   const openCreateModal = () => {
     setEditingProduct(null)
     form.resetFields()
     form.setFieldsValue({
       unit: dictionaries.productUnits[0],
-      type: dictionaries.productTypes[0],
+      type: flattenTypePaths(dictionaries.productTypes)[0],
       source: '自制件',
+      purchaseUnit: '',
+      salesUnit: '',
+      inventoryUnit: '',
+      unitConversions: [],
       salePrice: 0,
       costPrice: 0,
       stockMax: 0,
@@ -211,9 +295,9 @@ export function ProductManagementPage() {
       width: 80,
     },
     {
-      title: '类型',
+      title: '物料类型',
       dataIndex: 'type',
-      width: 110,
+      width: 160,
     },
     {
       title: '来源',
@@ -267,19 +351,27 @@ export function ProductManagementPage() {
       render: (_, record) => (
         <TableActions
           actions={[
-            {
-              key: 'edit',
-              label: '编辑',
-              icon: <EditOutlined />,
-              onClick: () => openEditModal(record),
-            },
-            {
-              key: 'delete',
-              label: '删除',
-              icon: <DeleteOutlined />,
-              danger: true,
-              onClick: () => confirmDelete(record),
-            },
+            ...(canEdit
+              ? [
+                  {
+                    key: 'edit',
+                    label: '编辑',
+                    icon: <EditOutlined />,
+                    onClick: () => openEditModal(record),
+                  },
+                ]
+              : []),
+            ...(canDelete
+              ? [
+                  {
+                    key: 'delete',
+                    label: '删除',
+                    icon: <DeleteOutlined />,
+                    danger: true,
+                    onClick: () => confirmDelete(record),
+                  },
+                ]
+              : []),
           ]}
         />
       ),
@@ -303,36 +395,58 @@ export function ProductManagementPage() {
           <Upload {...uploadProps}>
             <Button icon={<UploadOutlined />}>Excel导入</Button>
           </Upload>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-            新增物料
-          </Button>
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              新增物料
+            </Button>
+          )}
         </Space>
       </div>
 
       <Card>
-        <Space style={{ width: '100%', marginBottom: 16 }} direction="vertical" size={16}>
-          <Input
-            allowClear
-            prefix={<SearchOutlined />}
-            placeholder="搜索物料名称、编码、ID、规格、来源或车间"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            style={{ maxWidth: 420 }}
-          />
-          <ResizableTable
-            className="fixed-action-table"
-            storageKey="product-management-table-widths"
-            rowKey="id"
-            columns={columns}
-            dataSource={filteredProducts}
-            loading={loading}
-            pagination={{
-              pageSize: 10,
-              showSizeChanger: false,
-              showTotal: (total) => `共 ${total} 条`,
-            }}
-          />
-        </Space>
+        <div className="material-management-layout">
+          <aside className="material-type-panel">
+            <div className="material-type-header">
+              <Typography.Text strong>物料类型</Typography.Text>
+            </div>
+            <Input
+              allowClear
+              size="small"
+              prefix={<SearchOutlined />}
+              placeholder="查找类型"
+              style={{ marginBottom: 12 }}
+            />
+            <Tree
+              selectedKeys={[typeFilter]}
+              expandedKeys={expandedTypeKeys}
+              onSelect={(keys) => setTypeFilter(String(keys[0] || 'all'))}
+              treeData={productTypeTree}
+            />
+          </aside>
+          <Space style={{ minWidth: 0, width: '100%' }} direction="vertical" size={16}>
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="搜索物料名称、编码、ID、规格、来源或车间"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              style={{ maxWidth: 420 }}
+            />
+            <ResizableTable
+              className="fixed-action-table"
+              storageKey="product-management-table-widths"
+              rowKey="id"
+              columns={columns}
+              dataSource={filteredProducts}
+              loading={loading}
+              pagination={{
+                pageSize: 10,
+                showSizeChanger: false,
+                showTotal: (total) => `共 ${total} 条`,
+              }}
+            />
+          </Space>
+        </div>
       </Card>
 
       <Modal
@@ -353,6 +467,10 @@ export function ProductManagementPage() {
             unit: '片',
             type: '自制件',
             source: '自制件',
+            purchaseUnit: '',
+            salesUnit: '',
+            inventoryUnit: '',
+            unitConversions: [],
             salePrice: 0,
             costPrice: 0,
             stockMax: 0,
@@ -393,7 +511,7 @@ export function ProductManagementPage() {
             <Form.Item
               label="物料单位"
               name="unit"
-              rules={[{ required: true, message: '请选择产品单位' }]}
+              rules={[{ required: true, message: '请选择物料单位' }]}
             >
               <Select
                 options={dictionaries.productUnits.map((unit) => ({
@@ -405,19 +523,23 @@ export function ProductManagementPage() {
             <Form.Item
               label="物料类型"
               name="type"
-              rules={[{ required: true, message: '请选择产品类型' }]}
+              rules={[{ required: true, message: '请选择物料类型' }]}
+              getValueFromEvent={(value: string[]) => value.join('/')}
+              getValueProps={(value?: string) => ({
+                value: productTypePath(value).split('/').filter(Boolean),
+              })}
             >
-              <Select
-                options={dictionaries.productTypes.map((type) => ({
-                  label: type,
-                  value: type,
-                }))}
+              <Cascader
+                options={productTypeOptions}
+                changeOnSelect
+                placeholder="请选择物料类型"
+                displayRender={(labels) => labels.join('/')}
               />
             </Form.Item>
             <Form.Item
               label="物料来源"
               name="source"
-              rules={[{ required: true, message: '请选择产品来源' }]}
+              rules={[{ required: true, message: '请选择物料来源' }]}
             >
               <Radio.Group
                 options={[
@@ -426,14 +548,22 @@ export function ProductManagementPage() {
                 ]}
               />
             </Form.Item>
-            <Form.Item
-              label="生产车间"
-              name="workshop"
-              rules={[{ required: true, message: '请输入生产车间' }]}
-              style={{ gridColumn: '1 / span 2' }}
-            >
-              <Input placeholder="请输入生产车间" />
-            </Form.Item>
+            {source === '自制件' ? (
+              <Form.Item
+                label="生产车间"
+                name="workshop"
+                rules={[{ required: true, message: '请选择生产车间' }]}
+                style={{ gridColumn: '1 / span 2' }}
+              >
+                <Select
+                  allowClear
+                  showSearch
+                  options={workshopOptions}
+                  placeholder="请选择生产车间"
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            ) : null}
           </div>
 
           <Typography.Title level={5} style={{ marginTop: 8 }}>
@@ -463,6 +593,93 @@ export function ProductManagementPage() {
             </Form.Item>
             <Form.Item label="日产能" name="dailyCapacity">
               <InputNumber min={0} precision={0} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item label="采购单位" name="purchaseUnit">
+              <Select
+                allowClear
+                options={dictionaries.productUnits.map((unit) => ({ label: unit, value: unit }))}
+                placeholder="用于后续采购"
+              />
+            </Form.Item>
+            <Form.Item label="销售单位" name="salesUnit">
+              <Select
+                allowClear
+                options={dictionaries.productUnits.map((unit) => ({ label: unit, value: unit }))}
+                placeholder="用于后续销售"
+              />
+            </Form.Item>
+            <Form.Item label="库存单位" name="inventoryUnit">
+              <Select
+                allowClear
+                options={dictionaries.productUnits.map((unit) => ({ label: unit, value: unit }))}
+                placeholder="用于后续库存"
+              />
+            </Form.Item>
+            <Form.Item label="单位换算规则" style={{ gridColumn: '1 / span 2' }}>
+              <Form.List name="unitConversions">
+                {(fields, { add, remove }) => (
+                  <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                    {fields.map((field, index) => (
+                      <Space key={field.key} align="baseline" wrap style={{ width: '100%' }}>
+                        <span style={{ minWidth: 24, color: '#1677ff' }}>{index + 1}</span>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'sourceQuantity']}
+                          style={{ marginBottom: 0, width: 120 }}
+                          initialValue={1}
+                        >
+                          <InputNumber min={0} precision={3} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'sourceUnit']}
+                          style={{ marginBottom: 0, width: 110 }}
+                        >
+                          <Select
+                            allowClear
+                            placeholder="单位"
+                            options={dictionaries.productUnits.map((unit) => ({ label: unit, value: unit }))}
+                          />
+                        </Form.Item>
+                        <span style={{ color: '#999' }}>≈</span>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'targetQuantity']}
+                          style={{ marginBottom: 0, width: 120 }}
+                          initialValue={1}
+                        >
+                          <InputNumber min={0} precision={3} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'targetUnit']}
+                          style={{ marginBottom: 0, width: 110 }}
+                        >
+                          <Select
+                            allowClear
+                            placeholder="单位"
+                            options={dictionaries.productUnits.map((unit) => ({ label: unit, value: unit }))}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'floating']}
+                          valuePropName="checked"
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Checkbox>浮动换算</Checkbox>
+                        </Form.Item>
+                        <Button type="link" danger onClick={() => remove(field.name)}>
+                          清空
+                        </Button>
+                      </Space>
+                    ))}
+                    <Button type="dashed" onClick={() => add({ sourceQuantity: 1, targetQuantity: 1 })}>
+                      新增换算规则
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
             </Form.Item>
             <Form.Item label="备注" name="remark" style={{ gridColumn: '1 / span 2' }}>
               <Input.TextArea rows={3} placeholder="请输入备注信息" />

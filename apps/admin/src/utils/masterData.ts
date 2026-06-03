@@ -17,6 +17,14 @@ export interface PartnerRecord {
 
 export type ProductSource = '自制件' | '外购件'
 
+export interface UnitConversionRule {
+  sourceQuantity?: number
+  sourceUnit?: string
+  targetQuantity?: number
+  targetUnit?: string
+  floating?: boolean
+}
+
 export interface ProductRecord {
   id: string
   dbId?: string
@@ -27,6 +35,10 @@ export interface ProductRecord {
   type: string
   source: ProductSource
   workshop: string
+  purchaseUnit?: string
+  salesUnit?: string
+  inventoryUnit?: string
+  unitConversions?: UnitConversionRule[]
   salePrice: number
   costPrice: number
   stockMax: number

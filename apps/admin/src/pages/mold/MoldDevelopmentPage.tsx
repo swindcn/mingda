@@ -3,14 +3,12 @@ import {
   EyeOutlined,
   PlusOutlined,
   SearchOutlined,
-  UploadOutlined,
 } from '@ant-design/icons'
 import {
   Button,
   Card,
   DatePicker,
   Form,
-  Image,
   Input,
   Modal,
   Select,
@@ -18,13 +16,13 @@ import {
   Tabs,
   Tag,
   Typography,
-  Upload,
   message,
 } from 'antd'
-import type { TableColumnsType, UploadFile, UploadProps } from 'antd'
+import type { TableColumnsType } from 'antd'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
+import { ImageUploadField } from '../../components/ImageUploadField'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
 import { apiRequest } from '../../services/api'
@@ -46,7 +44,7 @@ import {
 import {
   getCurrentAdminUser,
   getCurrentColumnPermissions,
-  getCurrentDataScope,
+  getCurrentDataScopes,
   getEffectiveRoles,
   hasPermission,
 } from '../../utils/roles'
@@ -67,6 +65,7 @@ interface MoldDevelopmentRecord {
   customerName: string
   productCode: string
   productName: string
+  moldName: string
   customerNotifyDate: string
   moldType: string
   supplierId: string
@@ -74,6 +73,8 @@ interface MoldDevelopmentRecord {
   follower: string
   expectedDate?: string
   status: MoldStatus
+  isArchived: boolean
+  archivedMoldCode?: string
   shippedAt?: string
   trackingNumber?: string
   attachments: string[]
@@ -84,6 +85,7 @@ interface MoldDevelopmentRecord {
 interface MoldDevelopmentFormValues {
   customerId: string
   productCode: string
+  moldName: string
   customerNotifyDate: dayjs.Dayjs
   moldType: string
   supplierId: string
@@ -99,6 +101,7 @@ const initialDevelopments: MoldDevelopmentRecord[] = [
     customerName: '长城汽车股份有限公司',
     productCode: 'P001',
     productName: '英沃保险柜门板内板',
+    moldName: '英沃保险柜门板内板模具',
     customerNotifyDate: '2026-04-17',
     moldType: '压铸模',
     supplierId: 'SUP001',
@@ -106,6 +109,7 @@ const initialDevelopments: MoldDevelopmentRecord[] = [
     follower: '王五',
     expectedDate: '2026-05-31',
     status: '待收货',
+    isArchived: false,
     shippedAt: '2026-04-28 16:00',
     trackingNumber: 'SF1234567890',
     attachments: ['模具设计图.jpg', '产品图纸.jpg', '3D效果图.jpg'],
@@ -118,6 +122,7 @@ const initialDevelopments: MoldDevelopmentRecord[] = [
     customerName: '比亚迪汽车工业有限公司',
     productCode: 'P002',
     productName: '球墨铸铁泵体',
+    moldName: '球墨铸铁泵体模具',
     customerNotifyDate: '2026-05-18',
     moldType: '砂型模',
     supplierId: 'SUP002',
@@ -125,6 +130,7 @@ const initialDevelopments: MoldDevelopmentRecord[] = [
     follower: '赵六',
     expectedDate: '2026-06-20',
     status: '待确认',
+    isArchived: false,
     attachments: ['泵体图纸.pdf'],
     remark: '供应商将在小程序端收到确认任务',
     createdAt: '2026-05-19',
@@ -162,7 +168,10 @@ interface MobileMoldRecord {
   customerName: string
   productCode: string
   productName: string
+  moldName: string
   moldType: string
+  isArchived?: boolean
+  archivedMoldCode?: string
   status: MoldStatus
   supplierName: string
   followerName: string
@@ -185,8 +194,11 @@ function mapApiRecord(record: MobileMoldRecord): MoldDevelopmentRecord {
     customerName: record.customerName,
     productCode: record.productCode,
     productName: record.productName,
+    moldName: record.moldName,
     customerNotifyDate: record.notifiedDate,
     moldType: record.moldType,
+    isArchived: Boolean(record.isArchived),
+    archivedMoldCode: record.archivedMoldCode,
     supplierId: '',
     supplierName: record.supplierName,
     follower: record.followerName,
@@ -202,14 +214,18 @@ function mapApiRecord(record: MobileMoldRecord): MoldDevelopmentRecord {
 export function MoldDevelopmentPage() {
   const [form] = Form.useForm<MoldDevelopmentFormValues>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
   const [developments, setDevelopments] = useState<MoldDevelopmentRecord[]>(initialDevelopments)
   const [keyword, setKeyword] = useState('')
-  const [statusFilter, setStatusFilter] = useState<MoldStatus | 'all'>('all')
-  const [archiveTab, setArchiveTab] = useState<'active' | 'completed' | 'cancelled'>('active')
+  const [statusFilter, setStatusFilter] = useState<MoldStatus | 'all'>(
+    (searchParams.get('status') as MoldStatus | 'all') || 'all',
+  )
+  const [archiveTab, setArchiveTab] = useState<'active' | 'completed' | 'cancelled'>(
+    (searchParams.get('tab') as 'active' | 'completed' | 'cancelled') || 'active',
+  )
   const [modalOpen, setModalOpen] = useState(false)
-  const [fileList, setFileList] = useState<UploadFile[]>([])
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [previewImage, setPreviewImage] = useState('')
+  const [attachments, setAttachments] = useState<string[]>([])
   const [dictionaries, setDictionaries] = useState(() => loadDictionaries())
   const [internalEmployees, setInternalEmployees] = useState(() => loadInternalEmployees())
   const [customers, setCustomers] = useState(() => loadCustomers())
@@ -220,6 +236,19 @@ export function MoldDevelopmentPage() {
   const canDelete = hasPermission('mold.development.delete')
   const columnPermissions = getCurrentColumnPermissions()
   const currentUser = getCurrentAdminUser()
+
+  const updateListState = (nextTab: typeof archiveTab, nextStatus: MoldStatus | 'all') => {
+    setArchiveTab(nextTab)
+    setStatusFilter(nextStatus)
+    const params = new URLSearchParams(location.search)
+    params.set('tab', nextTab)
+    if (nextTab === 'active' && nextStatus !== 'all') {
+      params.set('status', nextStatus)
+    } else {
+      params.delete('status')
+    }
+    navigate({ pathname: location.pathname, search: params.toString() }, { replace: true })
+  }
 
   useEffect(() => {
     const refresh = () => setDictionaries(loadDictionaries())
@@ -267,23 +296,28 @@ export function MoldDevelopmentPage() {
 
   const filteredDevelopments = useMemo(() => {
     const normalizedKeyword = keyword.trim()
-    const dataScope = getCurrentDataScope()
+    const dataScopes = getCurrentDataScopes()
     const users = loadUsers()
     const departments = loadDepartments()
     const effectiveRoles = getEffectiveRoles()
     const currentLocalUser = users.find((user) => user.id === currentUser?.id || user.name === currentUser?.name)
     const isRecordVisible = (record: MoldDevelopmentRecord) => {
-      if (dataScope === 'organization') return true
-      if (dataScope === 'self') return record.follower === currentUser?.name || record.follower === currentLocalUser?.name
-      if (dataScope === 'department' || dataScope === 'department_tree') {
-        const followerUser = users.find((user) => user.name === record.follower)
-        const visibleDepartments =
-          dataScope === 'department_tree' && currentLocalUser?.department
-            ? collectDepartmentNamesByName(departments, currentLocalUser.department, true)
-            : [currentLocalUser?.department]
-        return Boolean(followerUser?.department && visibleDepartments.includes(followerUser.department))
+      if (dataScopes.includes('organization')) return true
+      if (dataScopes.includes('self') && (record.follower === currentUser?.name || record.follower === currentLocalUser?.name)) {
+        return true
       }
-      if (dataScope === 'custom_departments') {
+      if (dataScopes.includes('department') || dataScopes.includes('department_tree')) {
+        const followerUser = users.find((user) => user.name === record.follower)
+        const visibleDepartments = new Set<string>()
+        if (dataScopes.includes('department') && currentLocalUser?.department) visibleDepartments.add(currentLocalUser.department)
+        if (dataScopes.includes('department_tree') && currentLocalUser?.department) {
+          collectDepartmentNamesByName(departments, currentLocalUser.department, true).forEach((department) =>
+            visibleDepartments.add(department),
+          )
+        }
+        if (followerUser?.department && visibleDepartments.has(followerUser.department)) return true
+      }
+      if (dataScopes.includes('custom_departments')) {
         const followerUser = users.find((user) => user.name === record.follower)
         const visibleDepartments = new Set(
           effectiveRoles.flatMap((role) =>
@@ -292,7 +326,7 @@ export function MoldDevelopmentPage() {
             ),
           ),
         )
-        return Boolean(followerUser?.department && visibleDepartments.has(followerUser.department))
+        if (followerUser?.department && visibleDepartments.has(followerUser.department)) return true
       }
       return false
     }
@@ -310,6 +344,7 @@ export function MoldDevelopmentPage() {
             record.customerName,
             record.productCode,
             record.productName,
+            record.moldName,
             record.supplierName,
             record.follower,
             record.trackingNumber,
@@ -342,13 +377,13 @@ export function MoldDevelopmentPage() {
       return
     }
     form.resetFields()
-    setFileList([])
+    setAttachments([])
     setModalOpen(true)
   }
 
   const closeModal = () => {
     setModalOpen(false)
-    setFileList([])
+    setAttachments([])
     form.resetFields()
   }
 
@@ -365,13 +400,14 @@ export function MoldDevelopmentPage() {
           customerName: selectedCustomer?.name || '',
           productCode: values.productCode,
           productName: selectedProduct?.name || '',
+          moldName: values.moldName,
           customerNotifyDate: values.customerNotifyDate.format('YYYY-MM-DD'),
           moldType: values.moldType,
           supplierId: values.supplierId,
           supplierName: selectedSupplier?.name || '',
           followerName: values.follower,
           expectedDate: values.expectedDate?.format('YYYY-MM-DD'),
-          attachments: fileList.map((file) => file.name),
+          attachments,
           remark: values.remark,
         }),
       })
@@ -411,27 +447,6 @@ export function MoldDevelopmentPage() {
     })
   }
 
-  const uploadProps: UploadProps = {
-    fileList,
-    multiple: true,
-    listType: 'picture-card',
-    beforeUpload: () => false,
-    onChange: ({ fileList: nextFileList }) => setFileList(nextFileList),
-    onPreview: async (file) => {
-      if (!file.url && !file.preview && file.originFileObj) {
-        file.preview = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.readAsDataURL(file.originFileObj as File)
-          reader.onload = () => resolve(reader.result as string)
-          reader.onerror = reject
-        })
-      }
-
-      setPreviewImage(file.url || (file.preview as string) || '')
-      setPreviewOpen(true)
-    },
-  }
-
   const columns: TableColumnsType<MoldDevelopmentRecord> = [
     { title: '需求编号', dataIndex: 'id', width: 110, fixed: 'left' },
     { title: '客户', dataIndex: 'customerName', width: 180, ellipsis: true },
@@ -442,7 +457,18 @@ export function MoldDevelopmentPage() {
       render: (_, record) => `${record.productCode} / ${record.productName}`,
     },
     { title: '模具类型', dataIndex: 'moldType', width: 110 },
+    { title: '模具名称', dataIndex: 'moldName', width: 180, ellipsis: true, render: (value) => value || '-' },
     { title: '模具供应商', dataIndex: 'supplierName', width: 170, ellipsis: true },
+    {
+      title: '建档状态',
+      key: 'archiveStatus',
+      width: 110,
+      render: (_, record) => (
+        <Tag color={record.isArchived ? 'success' : 'default'}>
+          {record.isArchived ? '已建档' : '未建档'}
+        </Tag>
+      ),
+    },
     { title: '跟单人', dataIndex: 'follower', width: 110 },
     {
       title: '流程状态',
@@ -479,7 +505,7 @@ export function MoldDevelopmentPage() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 150,
+      width: 170,
       render: (_, record) => (
         <TableActions
           actions={[
@@ -487,8 +513,21 @@ export function MoldDevelopmentPage() {
               key: 'view',
               label: '查看',
               icon: <EyeOutlined />,
-              onClick: () => navigate(`/dashboard/mold/development/${record.id}`),
+              onClick: () =>
+                navigate(`/dashboard/mold/development/${record.id}`, {
+                  state: { from: `${location.pathname}${location.search}` },
+                }),
             },
+            ...(record.status === '已完成' && !record.isArchived
+              ? [
+                  {
+                    key: 'archive',
+                    label: '建档',
+                    icon: <PlusOutlined />,
+                    onClick: () => navigate(`/dashboard/mold/model?fromMoldDevelopment=${record.id}`),
+                  },
+                ]
+              : []),
             ...(record.status === '已中止' && canDelete
               ? [
                   {
@@ -533,8 +572,7 @@ export function MoldDevelopmentPage() {
             activeKey={archiveTab}
             items={archiveTabs}
             onChange={(key) => {
-              setArchiveTab(key as typeof archiveTab)
-              setStatusFilter('all')
+              updateListState(key as typeof archiveTab, 'all')
             }}
           />
           {archiveTab === 'active' && (
@@ -543,7 +581,7 @@ export function MoldDevelopmentPage() {
                 <Button
                   key={option.value}
                   type={statusFilter === option.value ? 'primary' : 'default'}
-                  onClick={() => setStatusFilter(option.value)}
+                  onClick={() => updateListState('active', option.value)}
                 >
                   {option.label}
                 </Button>
@@ -626,6 +664,13 @@ export function MoldDevelopmentPage() {
               <DatePicker style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item
+              label="模具名称"
+              name="moldName"
+              rules={[{ required: true, message: '请输入模具名称' }]}
+            >
+              <Input placeholder="请输入模具名称" />
+            </Form.Item>
+            <Form.Item
               label="模具类型"
               name="moldType"
               rules={[{ required: true, message: '请选择模具类型' }]}
@@ -668,11 +713,7 @@ export function MoldDevelopmentPage() {
               />
             </Form.Item>
             <Form.Item label="图纸/图片附件" style={{ gridColumn: '1 / span 2' }}>
-              <Upload {...uploadProps}>
-                <Button type="link" icon={<UploadOutlined />}>
-                  上传附件
-                </Button>
-              </Upload>
+              <ImageUploadField value={attachments} onChange={setAttachments} />
               <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
                 上传后将以方形缩略图横向展示，点击缩略图可查看大图。
               </Typography.Text>
@@ -683,21 +724,6 @@ export function MoldDevelopmentPage() {
           </div>
         </Form>
       </Modal>
-      {previewImage && (
-        <Image
-          wrapperStyle={{ display: 'none' }}
-          preview={{
-            visible: previewOpen,
-            onVisibleChange: (visible) => setPreviewOpen(visible),
-            afterOpenChange: (visible) => {
-              if (!visible) {
-                setPreviewImage('')
-              }
-            },
-          }}
-          src={previewImage}
-        />
-      )}
     </>
   )
 }

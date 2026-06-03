@@ -27,6 +27,7 @@ export function CustomerManagementPage() {
       createRecord={createCustomerOnApi}
       updateRecord={updateCustomerOnApi}
       deleteRecord={deleteCustomerOnApi}
+      permission="basic.customer"
     />
   )
 }

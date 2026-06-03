@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router'
 import type { ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { AppLayout } from './layouts/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { CustomerManagementPage } from './pages/basic/CustomerManagementPage'
@@ -15,9 +16,15 @@ import { MoldDevelopmentPage } from './pages/mold/MoldDevelopmentPage'
 import { ShiftSchedulePage } from './pages/modeling/ShiftSchedulePage'
 import { WorkshopLinePage } from './pages/modeling/WorkshopLinePage'
 import { createModelingPage, modelingPages } from './pages/modeling/modelingConfigs'
+import { apiRequest } from './services/api'
 import { hasPermission } from './utils/roles'
 
-function hasValidLogin() {
+function clearLogin() {
+  window.localStorage.removeItem('mingda-admin-token')
+  window.localStorage.removeItem('mingda-admin-user')
+}
+
+function hasLocalLogin() {
   const token = window.localStorage.getItem('mingda-admin-token')
   const rawUser = window.localStorage.getItem('mingda-admin-user')
   if (!token || !rawUser) return false
@@ -26,14 +33,45 @@ function hasValidLogin() {
     const user = JSON.parse(rawUser) as { id?: string; name?: string; username?: string }
     return Boolean(user.id && (user.name || user.username))
   } catch {
-    window.localStorage.removeItem('mingda-admin-token')
-    window.localStorage.removeItem('mingda-admin-user')
+    clearLogin()
     return false
   }
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  if (!hasValidLogin()) {
+  const [checking, setChecking] = useState(() => hasLocalLogin())
+  const [authenticated, setAuthenticated] = useState(false)
+
+  useEffect(() => {
+    if (!hasLocalLogin()) {
+      setChecking(false)
+      setAuthenticated(false)
+      return
+    }
+    let cancelled = false
+    apiRequest<{ id: string }>('/auth/me')
+      .then((user) => {
+        if (!cancelled) {
+          window.localStorage.setItem('mingda-admin-user', JSON.stringify(user))
+          setAuthenticated(true)
+          setChecking(false)
+        }
+      })
+      .catch(() => {
+        clearLogin()
+        if (!cancelled) {
+          setAuthenticated(false)
+          setChecking(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (checking) return null
+
+  if (!authenticated) {
     return <Navigate to="/" replace />
   }
 
@@ -65,16 +103,16 @@ export default function App() {
         }
       >
         <Route index element={<Navigate to="/dashboard/mold/development" replace />} />
-        <Route path="departments" element={<DepartmentManagementPage />} />
+        <Route path="departments" element={protectedPage('basic.department', <DepartmentManagementPage />)} />
         <Route path="departments/help" element={<DepartmentConfigHelpPage />} />
-        <Route path="roles" element={<RolePermissionPage />} />
-        <Route path="users" element={<UserManagementPage />} />
-        <Route path="products" element={<ProductManagementPage />} />
-        <Route path="dictionaries" element={<DictionarySettingsPage />} />
-        <Route path="suppliers" element={<SupplierManagementPage />} />
-        <Route path="customers" element={<CustomerManagementPage />} />
-        <Route path="mold/development" element={<MoldDevelopmentPage />} />
-        <Route path="mold/development/:id" element={<MoldDevelopmentDetailPage />} />
+        <Route path="roles" element={protectedPage('basic.role', <RolePermissionPage />)} />
+        <Route path="users" element={protectedPage('basic.user', <UserManagementPage />)} />
+        <Route path="products" element={protectedPage('basic.product', <ProductManagementPage />)} />
+        <Route path="dictionaries" element={protectedPage('basic.dictionary', <DictionarySettingsPage />)} />
+        <Route path="suppliers" element={protectedPage('basic.supplier', <SupplierManagementPage />)} />
+        <Route path="customers" element={protectedPage('basic.customer', <CustomerManagementPage />)} />
+        <Route path="mold/development" element={protectedPage('mold.development.view', <MoldDevelopmentPage />)} />
+        <Route path="mold/development/:id" element={protectedPage('mold.development.view', <MoldDevelopmentDetailPage />)} />
         <Route path="model/workshop-line" element={protectedPage('model.workshop-line.view', <WorkshopLinePage />)} />
         <Route path="model/team" element={protectedPage('model.team.view', createModelingPage(modelingPages[2]))} />
         <Route path="model/equipment" element={protectedPage('model.equipment.view', createModelingPage(modelingPages[3]))} />

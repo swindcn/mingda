@@ -18,6 +18,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { ResizableTable } from '../../../components/ResizableTable'
 import { TableActions } from '../../../components/TableActions'
+import { hasPermission } from '../../../utils/roles'
 
 export interface PartnerRecord {
   id: string
@@ -51,6 +52,7 @@ interface PartnerDirectoryPageProps {
   createRecord: (record: Partial<PartnerRecord>) => Promise<PartnerRecord[]>
   updateRecord: (id: string, record: Partial<PartnerRecord>) => Promise<PartnerRecord[]>
   deleteRecord: (id: string) => Promise<PartnerRecord[]>
+  permission: string
 }
 
 export function PartnerDirectoryPage({
@@ -66,6 +68,7 @@ export function PartnerDirectoryPage({
   createRecord,
   updateRecord,
   deleteRecord,
+  permission,
 }: PartnerDirectoryPageProps) {
   const [form] = Form.useForm<PartnerFormValues>()
   const [records, setRecords] = useState<PartnerRecord[]>(() => loadRecords())
@@ -73,6 +76,9 @@ export function PartnerDirectoryPage({
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<PartnerRecord | null>(null)
   const [loading, setLoading] = useState(false)
+  const canCreate = hasPermission(`${permission}.create`)
+  const canEdit = hasPermission(`${permission}.edit`)
+  const canDelete = hasPermission(`${permission}.delete`)
 
   useEffect(() => {
     saveRecords(records)
@@ -210,19 +216,27 @@ export function PartnerDirectoryPage({
       render: (_, record) => (
         <TableActions
           actions={[
-            {
-              key: 'edit',
-              label: '编辑',
-              icon: <EditOutlined />,
-              onClick: () => openEditModal(record),
-            },
-            {
-              key: 'delete',
-              label: '删除',
-              icon: <DeleteOutlined />,
-              danger: true,
-              onClick: () => confirmDelete(record),
-            },
+            ...(canEdit
+              ? [
+                  {
+                    key: 'edit',
+                    label: '编辑',
+                    icon: <EditOutlined />,
+                    onClick: () => openEditModal(record),
+                  },
+                ]
+              : []),
+            ...(canDelete
+              ? [
+                  {
+                    key: 'delete',
+                    label: '删除',
+                    icon: <DeleteOutlined />,
+                    danger: true,
+                    onClick: () => confirmDelete(record),
+                  },
+                ]
+              : []),
           ]}
         />
       ),
@@ -240,9 +254,11 @@ export function PartnerDirectoryPage({
           <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={refreshRecords}>
             查询
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-            新增{entityName}
-          </Button>
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              新增{entityName}
+            </Button>
+          )}
         </Space>
       </div>
 

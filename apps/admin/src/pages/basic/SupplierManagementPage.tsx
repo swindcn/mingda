@@ -27,6 +27,7 @@ export function SupplierManagementPage() {
       createRecord={createSupplierOnApi}
       updateRecord={updateSupplierOnApi}
       deleteRecord={deleteSupplierOnApi}
+      permission="basic.supplier"
     />
   )
 }

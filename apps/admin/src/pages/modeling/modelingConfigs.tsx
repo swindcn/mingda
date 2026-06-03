@@ -30,6 +30,16 @@ const itemSelect: ModelingField = {
   required: true,
   optionSource: 'items',
   width: 170,
+  formSpan: 3,
+}
+
+const supplierSelect: ModelingField = {
+  name: 'supplierCode',
+  label: '模具供应商',
+  type: 'select',
+  optionSource: 'suppliers',
+  width: 170,
+  formSpan: 3,
 }
 
 export const modelingPages: ModelingMasterPageProps[] = [
@@ -66,8 +76,8 @@ export const modelingPages: ModelingMasterPageProps[] = [
     fields: [
       ...codeNameFields,
       workshopSelect,
-      { name: 'leaderUserId', label: '组长', type: 'select', optionSource: 'employees', width: 140 },
       { name: 'memberUserIds', label: '班组成员', type: 'multiSelect', optionSource: 'employees', width: 180 },
+      { name: 'leaderUserId', label: '班组长', type: 'select', optionSource: 'employees', width: 140 },
       statusField,
       { name: 'remark', label: '备注', type: 'textarea' },
     ],
@@ -93,7 +103,7 @@ export const modelingPages: ModelingMasterPageProps[] = [
     permission: 'basic.product',
     fields: [
       ...codeNameFields,
-      { name: 'type', label: '物料类型', type: 'select', required: true, options: ['成品', '半成品'], width: 120 },
+      { name: 'type', label: '物料类型', type: 'select', required: true, dictionaryKey: 'productTypes', width: 140 },
       { name: 'spec', label: '规格型号', width: 160 },
       { name: 'unit', label: '单位', width: 100 },
       statusField,
@@ -135,9 +145,21 @@ export const modelingPages: ModelingMasterPageProps[] = [
     fields: [
       ...codeNameFields,
       itemSelect,
-      { name: 'cavityCount', label: '型腔数', type: 'number', width: 100 },
-      { name: 'maxLife', label: '寿命上限', type: 'number', width: 110 },
-      { name: 'usedLife', label: '已用寿命', type: 'number', width: 110 },
+      supplierSelect,
+      { name: 'moldType', label: '模具类型', type: 'select', dictionaryKey: 'moldTypes', width: 120, formSpan: 2 },
+      { name: 'specModel', label: '规格型号', width: 140, formSpan: 2 },
+      { name: 'sourceMoldDevelopmentCode', label: '关联开发单号', type: 'select', optionSource: 'moldDevelopments', width: 130, formSpan: 2 },
+      { name: 'cavityCount', label: '型腔数', type: 'number', width: 100, formSpan: 2 },
+      { name: 'maxLife', label: '使用寿命', type: 'number', width: 110, formSpan: 2 },
+      { name: 'usedLife', label: '已用次数', type: 'number', width: 110, formSpan: 2 },
+      { name: 'images', label: '模具图片', type: 'json', hiddenInTable: true, formSpan: 6 },
+      { name: 'hasCoreBox', label: '是否有芯盒', type: 'checkbox', width: 110, formSpan: 6 },
+      { name: 'coreBoxCode', label: '芯盒编码', width: 140, hiddenInTable: true, visibleWhen: { field: 'hasCoreBox', value: true } },
+      { name: 'coreBoxName', label: '芯盒名称', width: 160, hiddenInTable: true, visibleWhen: { field: 'hasCoreBox', value: true } },
+      { name: 'coreBoxMoldCode', label: '关联模具', width: 160, hiddenInTable: true, computed: true, visibleWhen: { field: 'hasCoreBox', value: true } },
+      { name: 'coreBoxMaxLife', label: '芯盒使用寿命', type: 'number', width: 110, formSpan: 3, hiddenInTable: true, visibleWhen: { field: 'hasCoreBox', value: true } },
+      { name: 'coreBoxUsedLife', label: '芯盒已用次数', type: 'number', width: 110, formSpan: 3, hiddenInTable: true, visibleWhen: { field: 'hasCoreBox', value: true } },
+      { name: 'coreBoxImages', label: '芯盒图片', type: 'json', hiddenInTable: true, visibleWhen: { field: 'hasCoreBox', value: true } },
       statusField,
       { name: 'remark', label: '备注', type: 'textarea' },
     ],
@@ -150,9 +172,9 @@ export const modelingPages: ModelingMasterPageProps[] = [
     fields: [
       ...codeNameFields,
       { name: 'moldCode', label: '关联模具', type: 'select', required: true, optionSource: 'molds', width: 160 },
-      { name: 'cavityCount', label: '型腔数', type: 'number', width: 100 },
-      { name: 'maxLife', label: '寿命上限', type: 'number', width: 110 },
-      { name: 'usedLife', label: '已用寿命', type: 'number', width: 110 },
+      { name: 'images', label: '芯盒图片', type: 'json', hiddenInTable: true },
+      { name: 'maxLife', label: '使用寿命', type: 'number', width: 110 },
+      { name: 'usedLife', label: '已用次数', type: 'number', width: 110 },
       statusField,
       { name: 'remark', label: '备注', type: 'textarea' },
     ],
@@ -164,8 +186,8 @@ export const modelingPages: ModelingMasterPageProps[] = [
     permission: 'model.calendar',
     fields: [
       ...codeNameFields,
-      { name: 'startTime', label: '开始时间', required: true, width: 120 },
-      { name: 'endTime', label: '结束时间', required: true, width: 120 },
+      { name: 'startTime', label: '开始时间', type: 'time', required: true, width: 120 },
+      { name: 'endTime', label: '结束时间', type: 'time', required: true, width: 120 },
       { name: 'crossDay', label: '跨日', type: 'checkbox', width: 90 },
       statusField,
       { name: 'remark', label: '备注', type: 'textarea' },

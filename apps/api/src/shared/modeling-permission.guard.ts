@@ -4,9 +4,11 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common'
 import type { Request } from 'express'
 import { PrismaService } from '../prisma/prisma.service'
+import { extractBearerToken, verifyAdminToken } from './auth-token'
 
 const resourcePermissions: Record<string, string> = {
   workshops: 'model.workshop-line',
@@ -45,9 +47,8 @@ export class ModelingPermissionGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<Request>()
-    const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-    const userId = token?.startsWith('db-token-') ? token.replace('db-token-', '') : ''
-    if (!userId) throw new ForbiddenException('缺少权限')
+    const verifiedToken = verifyAdminToken(extractBearerToken(request.headers.authorization))
+    if (!verifiedToken) throw new UnauthorizedException('登录已过期，请重新登录')
 
     if (request.path.endsWith('/admin/modeling/options') && request.method === 'GET') {
       return true
@@ -65,7 +66,7 @@ export class ModelingPermissionGuard implements CanActivate {
     const requiredPermission = `${permissionPrefix}.${action}`
 
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: verifiedToken.userId },
       select: {
         username: true,
         userType: true,

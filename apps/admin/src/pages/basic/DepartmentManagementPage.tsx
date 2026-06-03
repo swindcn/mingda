@@ -116,6 +116,7 @@ export function DepartmentManagementPage() {
   const canCreateDepartment = hasPermission('basic.department.create')
   const canEditDepartment = hasPermission('basic.department.edit')
   const canDeleteDepartment = hasPermission('basic.department.delete')
+  const canSyncDepartment = hasPermission('basic.department.sync')
 
   const refreshDepartments = async () => {
     setDepartmentLoading(true)
@@ -326,9 +327,11 @@ export function DepartmentManagementPage() {
           <Button icon={<QuestionCircleOutlined />} onClick={() => navigate('/dashboard/departments/help')}>
             配置帮助
           </Button>
-          <Button icon={<SyncOutlined />} onClick={openSyncModal}>
-            同步钉钉数据
-          </Button>
+          {canSyncDepartment && (
+            <Button icon={<SyncOutlined />} onClick={openSyncModal}>
+              同步钉钉数据
+            </Button>
+          )}
           {canCreateDepartment && (
             <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreateModal()}>
               新增部门

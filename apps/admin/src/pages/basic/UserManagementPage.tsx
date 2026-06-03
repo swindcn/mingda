@@ -34,7 +34,7 @@ import {
 import type { DepartmentRecord } from '../../utils/departments'
 import { loadDictionaries } from '../../utils/dictionaries'
 import { MASTER_DATA_EVENT, loadCustomers, loadSuppliers } from '../../utils/masterData'
-import { ROLE_STORAGE_EVENT, loadRoles } from '../../utils/roles'
+import { ROLE_STORAGE_EVENT, hasPermission, loadRoles } from '../../utils/roles'
 import {
   createUserOnApi,
   deleteUserOnApi,
@@ -191,6 +191,10 @@ export function UserManagementPage() {
   const [suppliers, setSuppliers] = useState(() => loadSuppliers())
   const [customers, setCustomers] = useState(() => loadCustomers())
   const selectedUserType = Form.useWatch('userType', form)
+  const canCreate = hasPermission('basic.user.create')
+  const canEdit = hasPermission('basic.user.edit')
+  const canDelete = hasPermission('basic.user.delete')
+  const canSync = hasPermission('basic.user.sync')
 
   const refreshUsers = async () => {
     const [activeRecords, recycledRecords] = await Promise.all([
@@ -437,37 +441,45 @@ export function UserManagementPage() {
         activeTab === 'active' ? (
           <TableActions
             actions={[
-              {
-                key: 'edit',
-                label: '编辑',
-                icon: <EditOutlined />,
-                onClick: () => openEditModal(record),
-              },
-              {
-                key: 'delete',
-                label: '删除',
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => confirmMoveToRecycleBin(record),
-              },
+              ...(canEdit
+                ? [{
+                    key: 'edit',
+                    label: '编辑',
+                    icon: <EditOutlined />,
+                    onClick: () => openEditModal(record),
+                  }]
+                : []),
+              ...(canDelete
+                ? [{
+                    key: 'delete',
+                    label: '删除',
+                    icon: <DeleteOutlined />,
+                    danger: true,
+                    onClick: () => confirmMoveToRecycleBin(record),
+                  }]
+                : []),
             ]}
           />
         ) : (
           <TableActions
             actions={[
-              {
-                key: 'restore',
-                label: '恢复',
-                icon: <UndoOutlined />,
-                onClick: () => handleRestore(record),
-              },
-              {
-                key: 'delete',
-                label: '删除',
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => confirmPermanentDelete(record),
-              },
+              ...(canEdit
+                ? [{
+                    key: 'restore',
+                    label: '恢复',
+                    icon: <UndoOutlined />,
+                    onClick: () => handleRestore(record),
+                  }]
+                : []),
+              ...(canDelete
+                ? [{
+                    key: 'delete',
+                    label: '删除',
+                    icon: <DeleteOutlined />,
+                    danger: true,
+                    onClick: () => confirmPermanentDelete(record),
+                  }]
+                : []),
             ]}
           />
         ),
@@ -493,12 +505,16 @@ export function UserManagementPage() {
           >
             查询
           </Button>
-          <Button icon={<SyncOutlined />} onClick={openSyncModal}>
-            同步用户
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-            新增用户
-          </Button>
+          {canSync && (
+            <Button icon={<SyncOutlined />} onClick={openSyncModal}>
+              同步用户
+            </Button>
+          )}
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              新增用户
+            </Button>
+          )}
         </Space>
       </div>
 

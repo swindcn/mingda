@@ -14,7 +14,6 @@ import {
   Form,
   Input,
   Modal,
-  Radio,
   Select,
   Space,
   Switch,
@@ -39,11 +38,14 @@ import {
 import type { DepartmentRecord } from '../../utils/departments'
 import {
   dataScopeLabels,
+  dataScopeOptions,
   createRoleOnApi,
   deleteRoleOnApi,
   fetchRolesFromApi,
+  hasPermission,
   loadRoles,
   permissionTree,
+  publicSyncPermissionKeys,
   updateRoleOnApi,
 } from '../../utils/roles'
 import type { DataScope, RoleRecord } from '../../utils/roles'
@@ -66,6 +68,79 @@ const dataColumns = [
   { label: '供应商联系人', value: 'supplier.contact' },
   { label: '模具开发备注', value: 'mold.remark' },
 ]
+
+const permissionDependencies: Record<string, string> = {
+  'basic.department.create': 'basic.department',
+  'basic.department.edit': 'basic.department',
+  'basic.department.delete': 'basic.department',
+  'basic.department.sync': 'basic.department',
+  'basic.user.create': 'basic.user',
+  'basic.user.edit': 'basic.user',
+  'basic.user.delete': 'basic.user',
+  'basic.user.sync': 'basic.user',
+  'basic.role.create': 'basic.role',
+  'basic.role.edit': 'basic.role',
+  'basic.role.delete': 'basic.role',
+  'basic.role.config': 'basic.role',
+  'basic.role.users': 'basic.role',
+  'basic.role.copy': 'basic.role',
+  'basic.customer.create': 'basic.customer',
+  'basic.customer.edit': 'basic.customer',
+  'basic.customer.delete': 'basic.customer',
+  'basic.supplier.create': 'basic.supplier',
+  'basic.supplier.edit': 'basic.supplier',
+  'basic.supplier.delete': 'basic.supplier',
+  'basic.product.create': 'basic.product',
+  'basic.product.edit': 'basic.product',
+  'basic.product.delete': 'basic.product',
+  'basic.dictionary.edit': 'basic.dictionary',
+  'mold.development.create': 'mold.development.view',
+  'mold.development.edit': 'mold.development.view',
+  'mold.development.delete': 'mold.development.view',
+  'mold.model.create': 'mold.model.view',
+  'mold.model.edit': 'mold.model.view',
+  'mold.model.delete': 'mold.model.view',
+  'mold.corebox.create': 'mold.corebox.view',
+  'mold.corebox.edit': 'mold.corebox.view',
+  'mold.corebox.delete': 'mold.corebox.view',
+  'model.workshop-line.create': 'model.workshop-line.view',
+  'model.workshop-line.edit': 'model.workshop-line.view',
+  'model.workshop-line.delete': 'model.workshop-line.view',
+  'model.team.create': 'model.team.view',
+  'model.team.edit': 'model.team.view',
+  'model.team.delete': 'model.team.view',
+  'model.equipment.create': 'model.equipment.view',
+  'model.equipment.edit': 'model.equipment.view',
+  'model.equipment.delete': 'model.equipment.view',
+  'model.material.create': 'model.material.view',
+  'model.material.edit': 'model.material.view',
+  'model.material.delete': 'model.material.view',
+  'model.recipe.create': 'model.recipe.view',
+  'model.recipe.edit': 'model.recipe.view',
+  'model.recipe.delete': 'model.recipe.view',
+  'model.routing.create': 'model.routing.view',
+  'model.routing.edit': 'model.routing.view',
+  'model.routing.delete': 'model.routing.view',
+  'model.calendar.create': 'model.calendar.view',
+  'model.calendar.edit': 'model.calendar.view',
+  'model.calendar.delete': 'model.calendar.view',
+  'model.schedule.create': 'model.schedule.view',
+  'model.schedule.edit': 'model.schedule.view',
+  'model.schedule.delete': 'model.schedule.view',
+  'model.schedule.batch': 'model.schedule.view',
+  'model.defect.create': 'model.defect.view',
+  'model.defect.edit': 'model.defect.view',
+  'model.defect.delete': 'model.defect.view',
+}
+
+function normalizePermissions(keys: string[]) {
+  const normalized = new Set(keys.filter((key) => !key.startsWith('group.')))
+  keys.forEach((key) => {
+    const dependency = permissionDependencies[key]
+    if (dependency) normalized.add(dependency)
+  })
+  return Array.from(normalized)
+}
 
 function filterPermissionTreeByKeys(nodes: DataNode[], checkedKeys: string[]): DataNode[] {
   const checkedKeySet = new Set(checkedKeys)
@@ -100,12 +175,19 @@ export function RolePermissionPage() {
   const [editingRole, setEditingRole] = useState<RoleRecord | null>(null)
   const [activeRole, setActiveRole] = useState<RoleRecord | null>(null)
   const [checkedPermissions, setCheckedPermissions] = useState<string[]>([])
-  const [dataScope, setDataScope] = useState<DataScope>('self')
+  const [includeSyncedPublicData, setIncludeSyncedPublicData] = useState(false)
+  const [dataScopes, setDataScopes] = useState<DataScope[]>(['self'])
   const [customDepartments, setCustomDepartments] = useState<RoleRecord['customDepartments']>([])
   const [columnPermissions, setColumnPermissions] = useState<string[]>([])
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [users, setUsers] = useState(() => loadUsers())
   const [departments, setDepartments] = useState<DepartmentRecord[]>(() => loadDepartments())
+  const canCreate = hasPermission('basic.role.create')
+  const canEdit = hasPermission('basic.role.edit')
+  const canDelete = hasPermission('basic.role.delete')
+  const canConfig = hasPermission('basic.role.config')
+  const canAssignUsers = hasPermission('basic.role.users')
+  const canCopy = hasPermission('basic.role.copy')
   const departmentOptions = useMemo(() => getDepartmentOptions(departments), [departments])
   const organizationOptions = useMemo(() => getOrganizationOptions(departments), [departments])
   const userOptions = useMemo(
@@ -189,6 +271,7 @@ export function RolePermissionPage() {
           ...values,
           permissions: [],
           dataScope: 'self',
+          dataScopes: ['self'],
           customDepartments: [],
           columnPermissions: [],
           userIds: [],
@@ -227,8 +310,16 @@ export function RolePermissionPage() {
   const handleCopyRole = async (role: RoleRecord) => {
     try {
       await createRoleOnApi({
-        ...role,
         name: `${role.name} 副本`,
+        organization: role.organization,
+        app: role.app,
+        description: role.description,
+        permissions: role.permissions,
+        dataScope: role.dataScope,
+        dataScopes: role.dataScopes?.length ? role.dataScopes : [role.dataScope],
+        customDepartments: role.customDepartments,
+        columnPermissions: role.columnPermissions,
+        userIds: role.userIds,
       })
       setRoles(await fetchRolesFromApi())
       message.success('角色已复制')
@@ -240,7 +331,8 @@ export function RolePermissionPage() {
   const openPermissionModal = (role: RoleRecord) => {
     setActiveRole(role)
     setCheckedPermissions(role.permissions)
-    setDataScope(role.dataScope)
+    setIncludeSyncedPublicData(role.permissions.some((permission) => publicSyncPermissionKeys.includes(permission as (typeof publicSyncPermissionKeys)[number])))
+    setDataScopes(role.dataScopes?.length ? role.dataScopes : [role.dataScope])
     setCustomDepartments(role.customDepartments)
     setColumnPermissions(role.columnPermissions)
     setPermissionModalOpen(true)
@@ -254,10 +346,15 @@ export function RolePermissionPage() {
 
   const savePermissions = async () => {
     if (!activeRole) return
+    const nextPermissions = normalizePermissions([
+      ...checkedPermissions.filter((permission) => !publicSyncPermissionKeys.includes(permission as (typeof publicSyncPermissionKeys)[number])),
+      ...(includeSyncedPublicData ? publicSyncPermissionKeys : []),
+    ])
     try {
       await updateRoleOnApi(activeRole.id, {
-        permissions: checkedPermissions,
-        dataScope,
+        permissions: nextPermissions,
+        dataScope: dataScopes.includes('organization') ? 'organization' : dataScopes[0] || 'self',
+        dataScopes,
         customDepartments,
         columnPermissions,
       })
@@ -294,7 +391,18 @@ export function RolePermissionPage() {
       title: '数据权限',
       dataIndex: 'dataScope',
       width: 150,
-      render: (value: DataScope) => <Tag color="blue">{dataScopeLabels[value]}</Tag>,
+      render: (value: DataScope, record) => {
+        const scopes = record.dataScopes?.length ? record.dataScopes : [value]
+        return (
+          <Space size={4} wrap>
+            {scopes.map((scope) => (
+              <Tag key={scope} color="blue">
+                {dataScopeLabels[scope]}
+              </Tag>
+            ))}
+          </Space>
+        )
+      },
     },
     {
       title: '操作',
@@ -304,39 +412,49 @@ export function RolePermissionPage() {
       render: (_, record) => (
         <TableActions
           actions={[
-            {
-              key: 'permission',
-              label: '配置权限',
-              shortLabel: '权限',
-              icon: <SettingOutlined />,
-              onClick: () => openPermissionModal(record),
-            },
-            {
-              key: 'users',
-              label: '配置用户',
-              shortLabel: '用户',
-              icon: <UserAddOutlined />,
-              onClick: () => openUserModal(record),
-            },
-            {
-              key: 'edit',
-              label: '修改',
-              icon: <EditOutlined />,
-              onClick: () => openEditRole(record),
-            },
-            {
-              key: 'copy',
-              label: '复制',
-              icon: <CopyOutlined />,
-              onClick: () => handleCopyRole(record),
-            },
-            {
-              key: 'delete',
-              label: '删除',
-              icon: <DeleteOutlined />,
-              danger: true,
-              onClick: () => handleDeleteRole(record),
-            },
+            ...(canConfig
+              ? [{
+                  key: 'permission',
+                  label: '配置权限',
+                  shortLabel: '权限',
+                  icon: <SettingOutlined />,
+                  onClick: () => openPermissionModal(record),
+                }]
+              : []),
+            ...(canAssignUsers
+              ? [{
+                  key: 'users',
+                  label: '配置用户',
+                  shortLabel: '用户',
+                  icon: <UserAddOutlined />,
+                  onClick: () => openUserModal(record),
+                }]
+              : []),
+            ...(canEdit
+              ? [{
+                  key: 'edit',
+                  label: '修改',
+                  icon: <EditOutlined />,
+                  onClick: () => openEditRole(record),
+                }]
+              : []),
+            ...(canCopy
+              ? [{
+                  key: 'copy',
+                  label: '复制',
+                  icon: <CopyOutlined />,
+                  onClick: () => handleCopyRole(record),
+                }]
+              : []),
+            ...(canDelete
+              ? [{
+                  key: 'delete',
+                  label: '删除',
+                  icon: <DeleteOutlined />,
+                  danger: true,
+                  onClick: () => handleDeleteRole(record),
+                }]
+              : []),
           ]}
         />
       ),
@@ -364,9 +482,11 @@ export function RolePermissionPage() {
           >
             查询
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateRole}>
-            新增角色
-          </Button>
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateRole}>
+              新增角色
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -450,9 +570,10 @@ export function RolePermissionPage() {
                       checkable
                       defaultExpandAll
                       checkedKeys={checkedPermissions}
-                      onCheck={(checked) =>
-                        setCheckedPermissions(Array.isArray(checked) ? checked.map(String) : checked.checked.map(String))
-                      }
+                      onCheck={(checked) => {
+                        const keys = Array.isArray(checked) ? checked.map(String) : checked.checked.map(String)
+                        setCheckedPermissions(normalizePermissions(keys))
+                      }}
                       treeData={permissionTree}
                     />
                   </Card>
@@ -477,18 +598,24 @@ export function RolePermissionPage() {
               label: '数据行权限',
               children: (
                 <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                  <Radio.Group
-                    value={dataScope}
-                    onChange={(event) => setDataScope(event.target.value)}
-                    options={[
-                      { label: '查看和管理自己的数据', value: 'self' },
-                      { label: '查看和管理本部门的数据', value: 'department' },
-                      { label: '查看和管理本部门及下级部门的数据', value: 'department_tree' },
-                      { label: '查看和管理组织机构的数据', value: 'organization' },
-                      { label: '自定义部门数据权限', value: 'custom_departments' },
-                    ]}
+                  <Checkbox.Group
+                    value={dataScopes}
+                    onChange={(values) => {
+                      const nextValues = values.map(String) as DataScope[]
+                      setDataScopes(nextValues.includes('organization') ? ['organization'] : nextValues)
+                    }}
+                    options={dataScopeOptions.map((option) => ({
+                      ...option,
+                      disabled: dataScopes.includes('organization') && option.value !== 'organization',
+                    }))}
                   />
-                  {dataScope === 'custom_departments' && (
+                  <Checkbox
+                    checked={includeSyncedPublicData}
+                    onChange={(event) => setIncludeSyncedPublicData(event.target.checked)}
+                  >
+                    包含第三方同步公共数据
+                  </Checkbox>
+                  {dataScopes.includes('custom_departments') && (
                     <Card
                       size="small"
                       title="授权部门"

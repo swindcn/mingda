@@ -9,10 +9,18 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { PrismaService } from './prisma/prisma.service'
+import {
+  collectDepartmentIds,
+  getAdminContext,
+  upsertOwnership,
+  visibleOwnershipEntityIds,
+  type RequestWithAdmin,
+} from './shared/admin-context'
 import { AdminAuthGuard } from './shared/admin-auth.guard'
 import { ModelingPermissionGuard } from './shared/modeling-permission.guard'
 
@@ -94,7 +102,7 @@ const resourceMap = {
   molds: {
     delegate: 'moldMaster',
     unique: 'code',
-    search: ['code', 'name', 'itemCode', 'status'],
+    search: ['code', 'name', 'itemCode', 'moldType', 'supplierCode', 'specModel', 'sourceMoldDevelopmentCode', 'status'],
     required: ['code', 'name', 'itemCode'],
     orderBy: [{ createdAt: 'desc' }],
   },
@@ -142,7 +150,7 @@ const resourceMap = {
   },
 } as const
 
-const codePattern = /^[A-Za-z0-9_-]+$/
+const codePattern = /^[^\s\u4e00-\u9fff]+$/
 
 function formatDateTime(value?: Date | null) {
   if (!value) return ''
@@ -212,41 +220,85 @@ export class ModelingController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get('options')
-  async options() {
-    const [workshops, lines, teams, items, materials, molds, shifts, employees] = await Promise.all([
+  async options(@Req() request: RequestWithAdmin) {
+    const [workshops, lines, teams, items, materials, molds, shifts, suppliers, employees] = await Promise.all([
       this.prisma.workshop.findMany({ orderBy: { createdAt: 'desc' } }),
       this.prisma.productionLine.findMany({ orderBy: { createdAt: 'desc' } }),
       this.prisma.team.findMany({ orderBy: { createdAt: 'desc' }, include: { members: true } }),
       this.prisma.product.findMany({ orderBy: { createdAt: 'desc' } }),
       this.prisma.materialGrade.findMany({ orderBy: { createdAt: 'desc' } }),
-      this.prisma.moldMaster.findMany({ orderBy: { createdAt: 'desc' } }),
+      this.prisma.moldMaster.findMany({ orderBy: { createdAt: 'desc' }, include: { supplier: true } }),
       this.prisma.shiftMaster.findMany({ orderBy: { createdAt: 'desc' } }),
+      this.prisma.supplier.findMany({ orderBy: { createdAt: 'desc' } }),
       this.prisma.user.findMany({
         where: { userType: 'EMPLOYEE', status: 'ENABLED', lockStatus: 'NORMAL', deletedAt: null },
         orderBy: { createdAt: 'asc' },
         select: { id: true, name: true, phone: true, department: { select: { name: true } } },
       }),
     ])
+    const usedDevelopmentCodes = new Set(
+      molds
+        .map((record) => record.sourceMoldDevelopmentCode)
+        .filter((code): code is string => Boolean(code)),
+    )
+    const moldDevelopments = await this.prisma.moldDevelopment.findMany({
+      where: {
+        status: 'COMPLETED',
+        OR: [{ archivedMoldCode: null }, { archivedMoldCode: '' }],
+      },
+      include: { product: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    const visible = {
+      workshops: await this.visibleEntityIds(request, 'workshops'),
+      lines: await this.visibleEntityIds(request, 'lines'),
+      teams: await this.visibleEntityIds(request, 'teams'),
+      items: await this.visibleEntityIds(request, 'items'),
+      materials: await this.visibleEntityIds(request, 'materials'),
+      molds: await this.visibleEntityIds(request, 'molds'),
+      shifts: await this.visibleEntityIds(request, 'shifts'),
+    }
+    const visibleSuppliers = await visibleOwnershipEntityIds(this.prisma, getAdminContext(request), 'basic:suppliers')
+    const visibleEmployeeIds = await this.visibleEmployeeIds(request)
+    const filterByCode = <T extends { code: string }>(resource: keyof typeof visible, records: T[]) =>
+      visible[resource] ? records.filter((record) => visible[resource]?.includes(record.code)) : records
 
     return {
-      workshops: workshops.map((record) => this.toDto('workshops', record)),
-      lines: lines.map((record) => this.toDto('lines', record)),
-      teams: teams.map((record) => this.toDto('teams', record)),
-      items: items.map((record) => this.toDto('items', record)),
-      materials: materials.map((record) => this.toDto('materials', record)),
-      molds: molds.map((record) => this.toDto('molds', record)),
-      shifts: shifts.map((record) => this.toDto('shifts', record)),
-      employees: employees.map((record) => ({
-        id: record.id,
+      workshops: filterByCode('workshops', workshops).map((record) => this.toDto('workshops', record)),
+      lines: filterByCode('lines', lines).map((record) => this.toDto('lines', record)),
+      teams: filterByCode('teams', teams).map((record) => this.toDto('teams', record)),
+      items: filterByCode('items', items).map((record) => this.toDto('items', record)),
+      materials: filterByCode('materials', materials).map((record) => this.toDto('materials', record)),
+      molds: filterByCode('molds', molds).map((record) => this.toDto('molds', record)),
+      moldDevelopments: moldDevelopments
+        .filter((record) => !usedDevelopmentCodes.has(record.code))
+        .map((record) => ({
+          id: record.code,
+          dbId: record.id,
+          code: record.code,
+          name: `${record.code} / ${record.moldName || record.product.name}`,
+        })),
+      shifts: filterByCode('shifts', shifts).map((record) => this.toDto('shifts', record)),
+      suppliers: (visibleSuppliers ? suppliers.filter((record) => visibleSuppliers.includes(record.code)) : suppliers).map((record) => ({
+        id: record.code,
+        dbId: record.id,
+        code: record.code,
         name: record.name,
-        phone: record.phone,
-        department: record.department?.name || '',
       })),
+      employees: (visibleEmployeeIds ? employees.filter((record) => visibleEmployeeIds.includes(record.id)) : employees).map(
+        (record) => ({
+          id: record.id,
+          name: record.name,
+          phone: record.phone,
+          department: record.department?.name || '',
+        }),
+      ),
     }
   }
 
   @Get(':resource')
   async list(
+    @Req() request: RequestWithAdmin,
     @Param('resource') resource: ResourceName,
     @Query('keyword') keyword?: string,
     @Query('startDate') startDate?: string,
@@ -273,6 +325,10 @@ export class ModelingController {
     if (resource === 'schedules' && workshopCode) {
       where.workshopCode = workshopCode
     }
+    const visibleIds = await this.visibleEntityIds(request, resource)
+    if (visibleIds) {
+      Object.assign(where, this.scopeWhere(resource, visibleIds))
+    }
 
     const include = this.includeFor(resource)
     const records = await delegate.findMany({ where, include, orderBy: config.orderBy })
@@ -280,8 +336,9 @@ export class ModelingController {
   }
 
   @Get(':resource/:id')
-  async detail(@Param('resource') resource: ResourceName, @Param('id') id: string) {
+  async detail(@Req() request: RequestWithAdmin, @Param('resource') resource: ResourceName, @Param('id') id: string) {
     this.assertResource(resource)
+    await this.assertVisible(request, resource, id)
     const delegate = getDelegate(this.prisma, resource)
     const where = this.whereById(resource, id)
     const include = this.includeFor(resource)
@@ -291,7 +348,11 @@ export class ModelingController {
   }
 
   @Post(':resource')
-  async create(@Param('resource') resource: ResourceName, @Body() body: Record<string, unknown>) {
+  async create(
+    @Req() request: RequestWithAdmin,
+    @Param('resource') resource: ResourceName,
+    @Body() body: Record<string, unknown>,
+  ) {
     this.assertResource(resource)
     this.assertRequired(resource, body)
     await this.assertRelations(resource, body)
@@ -304,25 +365,37 @@ export class ModelingController {
         },
         include: { steps: { orderBy: { seqNo: 'asc' } } },
       })
+      await upsertOwnership(this.prisma, request.adminUser, this.entityType(resource), this.recordCode(resource, record))
       return this.toDto(resource, record)
     }
 
     const delegate = getDelegate(this.prisma, resource)
-    const record = await delegate.create({ data: this.normalize(resource, body), include: this.includeFor(resource) })
-    await this.syncMultiRelations(resource, this.recordCode(resource, record), body)
+    const normalizedBody = await this.withDevelopmentReceiveImages(resource, body)
+    const record = await delegate.create({ data: this.normalize(resource, normalizedBody), include: this.includeFor(resource) })
+    await upsertOwnership(this.prisma, request.adminUser, this.entityType(resource), this.recordCode(resource, record))
+    await this.syncMultiRelations(resource, this.recordCode(resource, record), normalizedBody)
+    await this.syncCoreBoxForMold(resource, this.recordCode(resource, record), normalizedBody)
+    if (resource === 'molds' && normalizedBody.sourceMoldDevelopmentCode) {
+      await this.prisma.moldDevelopment.updateMany({
+        where: { code: stringValue(normalizedBody.sourceMoldDevelopmentCode) },
+        data: { archivedMoldCode: this.recordCode(resource, record) },
+      })
+    }
     if (this.hasMultiRelations(resource)) {
-      return this.detail(resource, this.recordCode(resource, record))
+      return this.detail(request, resource, this.recordCode(resource, record))
     }
     return this.toDto(resource, record)
   }
 
   @Put(':resource/:id')
   async update(
+    @Req() request: RequestWithAdmin,
     @Param('resource') resource: ResourceName,
     @Param('id') id: string,
     @Body() body: Record<string, unknown>,
   ) {
     this.assertResource(resource)
+    await this.assertVisible(request, resource, id)
     await this.assertRelations(resource, body)
     const existing = await this.findExistingRecord(resource, id)
     if (!existing) throw new NotFoundException('数据不存在或已被删除，请刷新后重试')
@@ -352,15 +425,17 @@ export class ModelingController {
       include: this.includeFor(resource),
     })
     await this.syncMultiRelations(resource, this.recordCode(resource, record), body)
+    await this.syncCoreBoxForMold(resource, this.recordCode(resource, record), body)
     if (this.hasMultiRelations(resource)) {
-      return this.detail(resource, this.recordCode(resource, record))
+      return this.detail(request, resource, this.recordCode(resource, record))
     }
     return this.toDto(resource, record)
   }
 
   @Delete(':resource/:id')
-  async delete(@Param('resource') resource: ResourceName, @Param('id') id: string) {
+  async delete(@Req() request: RequestWithAdmin, @Param('resource') resource: ResourceName, @Param('id') id: string) {
     this.assertResource(resource)
+    await this.assertVisible(request, resource, id)
     await this.assertCanDelete(resource, id)
     const delegate = getDelegate(this.prisma, resource)
     await delegate.delete({ where: this.whereById(resource, id) })
@@ -368,7 +443,7 @@ export class ModelingController {
   }
 
   @Post('schedules/batch-generate')
-  async batchGenerateSchedules(@Body() body: BatchScheduleBody) {
+  async batchGenerateSchedules(@Req() request: RequestWithAdmin, @Body() body: BatchScheduleBody) {
     const startDate = toDate(body.startDate)
     const endDate = toDate(body.endDate)
     if (!startDate || !endDate || !body.workshopCode || !body.shiftCodes?.length || !body.teamCodes?.length) {
@@ -410,8 +485,14 @@ export class ModelingController {
       }
       cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000)
     }
-    await this.prisma.$transaction(operations)
-    return this.list('schedules', undefined, body.startDate, body.endDate, body.workshopCode)
+    const records = (await this.prisma.$transaction(operations)) as Array<{ id?: string }>
+    await Promise.all(
+      records
+        .map((record) => record.id)
+        .filter((id): id is string => Boolean(id))
+        .map((id) => upsertOwnership(this.prisma, request.adminUser, this.entityType('schedules'), id)),
+    )
+    return this.list(request, 'schedules', undefined, body.startDate, body.endDate, body.workshopCode)
   }
 
   private assertResource(resource: string): asserts resource is ResourceName {
@@ -426,7 +507,7 @@ export class ModelingController {
     }
     const code = stringValue(body.code)
     if (code && !codePattern.test(code)) {
-      throw new BadRequestException('编码只能使用英文字母、数字、短横线或下划线')
+      throw new BadRequestException('编码不能包含中文或空格')
     }
   }
 
@@ -434,6 +515,60 @@ export class ModelingController {
     if (resource === 'schedules') return { id }
     if (resource === 'calendars') return { date: toDate(id) }
     return { code: id }
+  }
+
+  private entityType(resource: ResourceName) {
+    return `modeling:${resource}`
+  }
+
+  private async visibleEntityIds(request: RequestWithAdmin, resource: ResourceName) {
+    return visibleOwnershipEntityIds(this.prisma, getAdminContext(request), this.entityType(resource))
+  }
+
+  private async visibleEmployeeIds(request: RequestWithAdmin) {
+    const user = getAdminContext(request)
+    const scopes = user.dataScopes?.length ? user.dataScopes : [user.dataScope]
+    if (scopes.includes('ALL')) return null
+    const userIds = new Set<string>()
+    if (scopes.includes('OWN')) userIds.add(user.id)
+    if (scopes.includes('OWN_DEPARTMENT') && user.departmentId) {
+      const records = await this.prisma.user.findMany({ where: { departmentId: user.departmentId }, select: { id: true } })
+      records.forEach((record) => userIds.add(record.id))
+    }
+    if (scopes.includes('OWN_AND_CHILD_DEPARTMENTS') && user.departmentId) {
+      const departmentIds = await collectDepartmentIds(this.prisma, user.departmentId, true)
+      const records = await this.prisma.user.findMany({ where: { departmentId: { in: departmentIds } }, select: { id: true } })
+      records.forEach((record) => userIds.add(record.id))
+    }
+    if (scopes.includes('CUSTOM_DEPARTMENTS')) {
+      const departmentIds = Array.from(
+        new Set(
+          (
+            await Promise.all(
+              user.customDepartments.map((item) => collectDepartmentIds(this.prisma, item.departmentId, item.includeChildren)),
+            )
+          ).flat(),
+        ),
+      )
+      if (departmentIds.length) {
+        const records = await this.prisma.user.findMany({ where: { departmentId: { in: departmentIds } }, select: { id: true } })
+        records.forEach((record) => userIds.add(record.id))
+      }
+    }
+    return Array.from(userIds)
+  }
+
+  private scopeWhere(resource: ResourceName, visibleIds: string[]) {
+    if (!visibleIds.length) return { id: '__none__' }
+    if (resource === 'schedules') return { id: { in: visibleIds } }
+    if (resource === 'calendars') return { date: { in: visibleIds.map((id) => toDate(id)).filter(Boolean) } }
+    return { code: { in: visibleIds } }
+  }
+
+  private async assertVisible(request: RequestWithAdmin, resource: ResourceName, id: string) {
+    const visibleIds = await this.visibleEntityIds(request, resource)
+    if (!visibleIds) return
+    if (!visibleIds.includes(id)) throw new NotFoundException('数据不存在或无权访问')
   }
 
   private async findExistingRecord(resource: ResourceName, id: string) {
@@ -513,6 +648,12 @@ export class ModelingController {
       return {
         ...common,
         itemCode: stringValue(body.itemCode),
+        moldType: stringValue(body.moldType),
+        supplierCode: stringValue(body.supplierCode),
+        specModel: stringValue(body.specModel),
+        sourceMoldDevelopmentCode: stringValue(body.sourceMoldDevelopmentCode),
+        hasCoreBox: Boolean(body.hasCoreBox),
+        images: toJsonArray(body.images),
         cavityCount: toInt(body.cavityCount),
         maxLife: toInt(body.maxLife),
         usedLife: toInt(body.usedLife) ?? 0,
@@ -522,7 +663,7 @@ export class ModelingController {
       return {
         ...common,
         moldCode: stringValue(body.moldCode),
-        cavityCount: toInt(body.cavityCount),
+        images: toJsonArray(body.images),
         maxLife: toInt(body.maxLife),
         usedLife: toInt(body.usedLife) ?? 0,
       }
@@ -592,6 +733,7 @@ export class ModelingController {
       [body.materialGradeCode, '材质牌号不存在', (code) => this.prisma.materialGrade.findUnique({ where: { code } })],
       [body.itemCode, '物料不存在', (code) => this.prisma.product.findUnique({ where: { code } })],
       [body.moldCode, '模具不存在', (code) => this.prisma.moldMaster.findUnique({ where: { code } })],
+      [body.supplierCode, '供应商不存在', (code) => this.prisma.supplier.findUnique({ where: { code } })],
       [body.shiftCode, '班次不存在', (code) => this.prisma.shiftMaster.findUnique({ where: { code } })],
       [body.teamCode, '班组不存在', (code) => this.prisma.team.findUnique({ where: { code } })],
     ]
@@ -614,6 +756,13 @@ export class ModelingController {
         where: { id: userId, userType: 'EMPLOYEE', deletedAt: null },
       })
       if (!user) throw new BadRequestException('班组成员不存在或不是内部员工')
+    }
+    if (resource === 'teams' && body.leaderUserId) {
+      const memberUserIds = toStringArray(body.memberUserIds)
+      const leaderUserId = stringValue(body.leaderUserId)
+      if (leaderUserId && !memberUserIds.includes(leaderUserId)) {
+        throw new BadRequestException('班组长必须从班组成员中选择')
+      }
     }
     for (const materialGradeCode of toStringArray(body.allowedMaterialCodes)) {
       const material = await this.prisma.materialGrade.findUnique({ where: { code: materialGradeCode } })
@@ -731,6 +880,24 @@ export class ModelingController {
           : [],
       }
     }
+    if (resource === 'molds') {
+      return {
+        ...base,
+        hasCoreBox: Boolean(value.hasCoreBox),
+        images: toJsonArray(value.images),
+        coreBoxes: Array.isArray(value.coreBoxes)
+          ? value.coreBoxes.map((coreBox) => ({
+              ...(coreBox as Record<string, unknown>),
+              id: (coreBox as { code?: string }).code,
+              images: toJsonArray((coreBox as { images?: unknown }).images),
+            }))
+          : [],
+        supplierName:
+          value.supplier && typeof value.supplier === 'object'
+            ? String((value.supplier as { name?: unknown }).name || '')
+            : '',
+      }
+    }
     if ('capacity' in base) return { ...base, capacity: Number(base.capacity || 0) }
     return base
   }
@@ -741,6 +908,7 @@ export class ModelingController {
     if (resource === 'recipes') return { recipeItems: { orderBy: { createdAt: 'asc' } } }
     if (resource === 'calendars') return { shifts: true }
     if (resource === 'routings') return { steps: { orderBy: { seqNo: 'asc' } } }
+    if (resource === 'molds') return { supplier: true, coreBoxes: true }
     return undefined
   }
 
@@ -802,6 +970,55 @@ export class ModelingController {
           skipDuplicates: true,
         })
       }
+    }
+  }
+
+  private async syncCoreBoxForMold(resource: ResourceName, moldCode: string, body: Record<string, unknown>) {
+    if (resource !== 'molds') return
+    const coreBoxCode = stringValue(body.coreBoxCode) || `${moldCode}-COREBOX`
+
+    if (!body.hasCoreBox) {
+      await this.prisma.coreBoxMaster.deleteMany({ where: { moldCode } })
+      return
+    }
+
+    const moldName = stringValue(body.name) || moldCode
+    const coreBoxName = stringValue(body.coreBoxName) || `${moldName}芯盒`
+    const payload = {
+      name: coreBoxName,
+      moldCode,
+      images: toJsonArray(body.coreBoxImages).length ? toJsonArray(body.coreBoxImages) : toJsonArray(body.images),
+      maxLife: toInt(body.coreBoxMaxLife) ?? toInt(body.maxLife),
+      usedLife: toInt(body.coreBoxUsedLife) ?? 0,
+      status: stringValue(body.status) || '启用',
+      remark: stringValue(body.coreBoxRemark) || stringValue(body.remark),
+    }
+
+    await this.prisma.coreBoxMaster.upsert({
+      where: { code: coreBoxCode },
+      update: payload,
+      create: { code: coreBoxCode, ...payload },
+    })
+  }
+
+  private async withDevelopmentReceiveImages(resource: ResourceName, body: Record<string, unknown>) {
+    if (resource !== 'molds' || !body.sourceMoldDevelopmentCode) return body
+    if (toJsonArray(body.images).length) return body
+
+    const receiveRecord = await this.prisma.moldDevelopmentFlowRecord.findFirst({
+      where: {
+        moldDevelopment: { code: stringValue(body.sourceMoldDevelopmentCode) },
+        key: 'RECEIVE',
+        done: true,
+      },
+    })
+    const images = toJsonArray(receiveRecord?.images)
+    if (!images.length) return body
+
+    return {
+      ...body,
+      images,
+      coreBoxImages: toJsonArray(body.coreBoxImages).length ? body.coreBoxImages : images,
     }
   }
 }

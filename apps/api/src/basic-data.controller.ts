@@ -9,12 +9,15 @@ import {
   Patch,
   Post,
   Put,
+  Req,
   UseGuards,
 } from '@nestjs/common'
 import { DataScope, Prisma, SyncProvider } from '@prisma/client'
 import { randomBytes, scryptSync } from 'node:crypto'
 import { PrismaService } from './prisma/prisma.service'
+import { getAdminContext, upsertOwnership, visibleOwnershipEntityIds, type RequestWithAdmin } from './shared/admin-context'
 import { AdminAuthGuard } from './shared/admin-auth.guard'
+import { AdminPermissionGuard } from './shared/admin-permission.guard'
 
 interface DepartmentBody {
   name?: string
@@ -46,9 +49,14 @@ interface SyncDepartmentsBody {
 interface DictionaryBody {
   moldTypes?: string[]
   productUnits?: string[]
-  productTypes?: string[]
+  productTypes?: unknown[]
   positions?: string[]
   workshopTypes?: string[]
+}
+
+interface ProductTypeNode {
+  name: string
+  children?: ProductTypeNode[]
 }
 
 interface PartnerBody {
@@ -66,6 +74,10 @@ interface ProductBody {
   type?: string
   source?: string
   workshop?: string
+  purchaseUnit?: string
+  salesUnit?: string
+  inventoryUnit?: string
+  unitConversions?: unknown
   salePrice?: number
   costPrice?: number
   stockMax?: number
@@ -82,6 +94,7 @@ interface RoleBody {
   description?: string
   permissions?: string[]
   dataScope?: 'self' | 'department' | 'department_tree' | 'organization' | 'custom_departments'
+  dataScopes?: Array<'self' | 'department' | 'department_tree' | 'organization' | 'custom_departments'>
   customDepartments?: Array<{ departmentId: string; includeChildren: boolean }>
   columnPermissions?: string[]
   userIds?: string[]
@@ -116,7 +129,17 @@ const organizationName = '闽大铸件'
 const defaultDictionaries = {
   moldTypes: ['压铸模', '砂型模', '注塑模', '冲压模', '其他'],
   productUnits: ['片', '个', '套', '台', '件'],
-  productTypes: ['自制件', '外购件', '半成品', '成品'],
+  productTypes: [
+    { name: '成品' },
+    { name: '半成品' },
+    { name: '原材料' },
+    {
+      name: '模具工装',
+      children: [{ name: '磨边工装' }, { name: '铝模具' }, { name: '砂芯模具' }],
+    },
+    { name: '辅助材料' },
+    { name: '零辅配件' },
+  ],
   positions: ['生产主管', '销售经理', '运营负责人', '产品经理', '会计', '项目成员'],
   workshopTypes: ['熔炼', '造型', '制芯', '清理', '机加工', '检验'],
 }
@@ -128,12 +151,34 @@ const adminPermissions = [
   'basic.department.create',
   'basic.department.edit',
   'basic.department.delete',
+  'basic.department.sync',
   'basic.user',
+  'basic.user.create',
+  'basic.user.edit',
+  'basic.user.delete',
+  'basic.user.sync',
   'basic.role',
+  'basic.role.create',
+  'basic.role.edit',
+  'basic.role.delete',
+  'basic.role.config',
+  'basic.role.users',
+  'basic.role.copy',
   'basic.customer',
+  'basic.customer.create',
+  'basic.customer.edit',
+  'basic.customer.delete',
   'basic.supplier',
+  'basic.supplier.create',
+  'basic.supplier.edit',
+  'basic.supplier.delete',
   'basic.product',
+  'basic.product.create',
+  'basic.product.edit',
+  'basic.product.delete',
+  'basic.product.view_synced_public',
   'basic.dictionary',
+  'basic.dictionary.edit',
   'mold',
   'mold.development.view',
   'mold.development.create',
@@ -257,6 +302,19 @@ function prismaScope(scope?: RoleBody['dataScope']) {
   return scope ? map[scope] : undefined
 }
 
+function frontendScopes(value: Prisma.JsonValue | null | undefined, fallback: DataScope): NonNullable<RoleBody['dataScopes']> {
+  const dataScopeValues = new Set(Object.values(DataScope))
+  const scopes = Array.isArray(value)
+    ? value.filter((item): item is DataScope => typeof item === 'string' && dataScopeValues.has(item as DataScope))
+    : []
+  return (scopes.length ? scopes : [fallback]).map((scope) => frontendScope(scope)).filter(Boolean) as NonNullable<RoleBody['dataScopes']>
+}
+
+function prismaScopes(scopes?: RoleBody['dataScopes'], fallback?: RoleBody['dataScope']) {
+  const nextScopes = scopes?.length ? scopes : fallback ? [fallback] : []
+  return Array.from(new Set(nextScopes.map((scope) => prismaScope(scope)).filter((scope): scope is DataScope => Boolean(scope))))
+}
+
 function providerValue(provider?: SyncDepartmentsBody['provider'] | SyncUsersBody['provider']) {
   const map: Record<string, SyncProvider> = {
     dingtalk: 'DINGTALK',
@@ -280,6 +338,27 @@ function stringArray(value: Prisma.JsonValue | null | undefined) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
+function productTypeTree(
+  value: Prisma.JsonValue | null | undefined,
+  fallback: ProductTypeNode[] = defaultDictionaries.productTypes,
+): ProductTypeNode[] {
+  if (!Array.isArray(value)) return fallback
+  const normalized = value
+    .map((item) => {
+      if (typeof item === 'string') {
+        const name = item.trim()
+        return name ? { name } : null
+      }
+      if (typeof item !== 'object' || !item || !('name' in item)) return null
+      const name = String((item as { name?: unknown }).name || '').trim()
+      if (!name) return null
+      const children = productTypeTree((item as { children?: Prisma.JsonValue }).children || [], []).filter(Boolean)
+      return children.length ? { name, children } : { name }
+    })
+    .filter((item): item is ProductTypeNode => Boolean(item))
+  return normalized.length ? normalized : fallback
+}
+
 function customDepartments(value: Prisma.JsonValue | null | undefined) {
   if (!Array.isArray(value)) return []
   return value
@@ -298,7 +377,7 @@ function customDepartments(value: Prisma.JsonValue | null | undefined) {
 }
 
 @Controller('admin')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, AdminPermissionGuard)
 export class BasicDataController {
   constructor(private readonly prisma: PrismaService) {}
 
@@ -313,18 +392,19 @@ export class BasicDataController {
     const next = {
       moldTypes: body.moldTypes?.length ? body.moldTypes : defaultDictionaries.moldTypes,
       productUnits: body.productUnits?.length ? body.productUnits : defaultDictionaries.productUnits,
-      productTypes: body.productTypes?.length ? body.productTypes : defaultDictionaries.productTypes,
+      productTypes: productTypeTree(body.productTypes as Prisma.JsonValue),
       positions: body.positions?.length ? body.positions : defaultDictionaries.positions,
       workshopTypes: body.workshopTypes?.length ? body.workshopTypes : defaultDictionaries.workshopTypes,
     }
     await Promise.all(
-      Object.entries(next).map(([key, values]) =>
-        this.prisma.dictionarySetting.upsert({
+      Object.entries(next).map(([key, values]) => {
+        const jsonValues = values as Prisma.InputJsonValue
+        return this.prisma.dictionarySetting.upsert({
           where: { key },
-          update: { values },
-          create: { key, values },
-        }),
-      ),
+          update: { values: jsonValues },
+          create: { key, values: jsonValues },
+        })
+      }),
     )
     return next
   }
@@ -448,13 +528,17 @@ export class BasicDataController {
 
 
   @Get('customers')
-  async customers() {
-    const records = await this.prisma.customer.findMany({ orderBy: { createdAt: 'asc' } })
+  async customers(@Req() request: RequestWithAdmin) {
+    const visibleCodes = await this.visibleEntityIds(request, 'basic:customers')
+    const records = await this.prisma.customer.findMany({
+      where: visibleCodes ? { code: { in: visibleCodes } } : {},
+      orderBy: { createdAt: 'asc' },
+    })
     return records.map((record) => this.toPartner(record))
   }
 
   @Post('customers')
-  async createCustomer(@Body() body: PartnerBody) {
+  async createCustomer(@Body() body: PartnerBody, @Req() request: RequestWithAdmin) {
     if (!body.name?.trim()) throw new BadRequestException('请输入客户名称')
     const code = await this.createNextPartnerCode('CUS', 'customer')
     const record = await this.prisma.customer.create({
@@ -466,6 +550,7 @@ export class BasicDataController {
         phone: body.phone,
       },
     })
+    await upsertOwnership(this.prisma, request.adminUser, 'basic:customers', record.code)
     return this.toPartner(record)
   }
 
@@ -490,13 +575,17 @@ export class BasicDataController {
   }
 
   @Get('suppliers')
-  async suppliers() {
-    const records = await this.prisma.supplier.findMany({ orderBy: { createdAt: 'asc' } })
+  async suppliers(@Req() request: RequestWithAdmin) {
+    const visibleCodes = await this.visibleEntityIds(request, 'basic:suppliers')
+    const records = await this.prisma.supplier.findMany({
+      where: visibleCodes ? { code: { in: visibleCodes } } : {},
+      orderBy: { createdAt: 'asc' },
+    })
     return records.map((record) => this.toPartner(record))
   }
 
   @Post('suppliers')
-  async createSupplier(@Body() body: PartnerBody) {
+  async createSupplier(@Body() body: PartnerBody, @Req() request: RequestWithAdmin) {
     if (!body.name?.trim()) throw new BadRequestException('请输入供应商名称')
     const code = await this.createNextPartnerCode('SUP', 'supplier')
     const record = await this.prisma.supplier.create({
@@ -508,6 +597,7 @@ export class BasicDataController {
         phone: body.phone,
       },
     })
+    await upsertOwnership(this.prisma, request.adminUser, 'basic:suppliers', record.code)
     return this.toPartner(record)
   }
 
@@ -532,13 +622,17 @@ export class BasicDataController {
   }
 
   @Get('products')
-  async products() {
-    const records = await this.prisma.product.findMany({ orderBy: { createdAt: 'asc' } })
+  async products(@Req() request: RequestWithAdmin) {
+    const visibleCodes = await this.visibleEntityIds(request, 'basic:products')
+    const records = await this.prisma.product.findMany({
+      where: visibleCodes ? { code: { in: visibleCodes } } : {},
+      orderBy: { createdAt: 'asc' },
+    })
     return records.map((record) => this.toProduct(record))
   }
 
   @Post('products')
-  async createProduct(@Body() body: ProductBody) {
+  async createProduct(@Body() body: ProductBody, @Req() request: RequestWithAdmin) {
     if (!body.name?.trim() || !body.code?.trim()) throw new BadRequestException('请输入产品名称和编码')
     const record = await this.prisma.product.create({
       data: {
@@ -549,6 +643,10 @@ export class BasicDataController {
         type: body.type,
         source: body.source,
         workshop: body.workshop,
+        purchaseUnit: body.purchaseUnit,
+        salesUnit: body.salesUnit,
+        inventoryUnit: body.inventoryUnit,
+        unitConversions: (body.unitConversions ?? []) as Prisma.InputJsonValue,
         salePrice: toNumber(body.salePrice),
         costPrice: toNumber(body.costPrice),
         stockMax: toInteger(body.stockMax),
@@ -558,6 +656,7 @@ export class BasicDataController {
         remark: body.remark,
       },
     })
+    await upsertOwnership(this.prisma, request.adminUser, 'basic:products', record.code)
     return this.toProduct(record)
   }
 
@@ -573,6 +672,10 @@ export class BasicDataController {
         type: body.type,
         source: body.source,
         workshop: body.workshop,
+        purchaseUnit: body.purchaseUnit,
+        salesUnit: body.salesUnit,
+        inventoryUnit: body.inventoryUnit,
+        unitConversions: (body.unitConversions ?? []) as Prisma.InputJsonValue,
         salePrice: toNumber(body.salePrice),
         costPrice: toNumber(body.costPrice),
         stockMax: toInteger(body.stockMax),
@@ -601,10 +704,12 @@ export class BasicDataController {
   }
 
   @Get('users')
-  async users() {
+  async users(@Req() request: RequestWithAdmin) {
     await this.ensureBasicSeed()
+    const adminUser = getAdminContext(request)
+    const userWhere = await this.userScopeWhere(request)
     const records = await this.prisma.user.findMany({
-      where: { deletedAt: null },
+      where: adminUser.dataScopes?.includes('ALL') || adminUser.dataScope === 'ALL' ? { deletedAt: null } : { deletedAt: null, ...userWhere },
       orderBy: { createdAt: 'asc' },
       include: {
         department: true,
@@ -628,7 +733,7 @@ export class BasicDataController {
   }
 
   @Post('users/sync')
-  async syncUsers(@Body() body: SyncUsersBody) {
+  async syncUsers(@Body() body: SyncUsersBody, @Req() request: RequestWithAdmin) {
     const users = Array.isArray(body.users) ? body.users : []
     if (!users.length) throw new BadRequestException('没有可同步的用户数据')
     const source = providerValue(body.provider)
@@ -669,7 +774,7 @@ export class BasicDataController {
       }
     }
 
-    return this.users()
+    return this.users(request)
   }
 
   @Post('users')
@@ -775,6 +880,7 @@ export class BasicDataController {
         description: body.description,
         app: body.app || '管理端',
         dataScope: prismaScope(body.dataScope) || 'OWN',
+        dataScopes: prismaScopes(body.dataScopes, body.dataScope),
         permissions: body.permissions || [],
         columnPermissions: body.columnPermissions || [],
         customDepartments: body.customDepartments || [],
@@ -796,6 +902,7 @@ export class BasicDataController {
         description: body.description,
         app: body.app,
         dataScope: prismaScope(body.dataScope),
+        dataScopes: body.dataScopes ? prismaScopes(body.dataScopes, body.dataScope) : undefined,
         permissions: body.permissions,
         columnPermissions: body.columnPermissions,
         customDepartments: body.customDepartments,
@@ -821,7 +928,7 @@ export class BasicDataController {
     return {
       moldTypes: map.get('moldTypes')?.length ? map.get('moldTypes') : defaultDictionaries.moldTypes,
       productUnits: map.get('productUnits')?.length ? map.get('productUnits') : defaultDictionaries.productUnits,
-      productTypes: map.get('productTypes')?.length ? map.get('productTypes') : defaultDictionaries.productTypes,
+      productTypes: productTypeTree(records.find((record) => record.key === 'productTypes')?.values),
       positions: map.get('positions')?.length ? map.get('positions') : defaultDictionaries.positions,
       workshopTypes: map.get('workshopTypes')?.length ? map.get('workshopTypes') : defaultDictionaries.workshopTypes,
     }
@@ -858,6 +965,10 @@ export class BasicDataController {
       type: record.type || '',
       source: (record.source || '自制件') as '自制件' | '外购件',
       workshop: record.workshop || '',
+      purchaseUnit: record.purchaseUnit || '',
+      salesUnit: record.salesUnit || '',
+      inventoryUnit: record.inventoryUnit || '',
+      unitConversions: Array.isArray(record.unitConversions) ? record.unitConversions : [],
       salePrice: Number(record.salePrice || 0),
       costPrice: Number(record.costPrice || 0),
       stockMax: record.stockMax || 0,
@@ -967,6 +1078,7 @@ export class BasicDataController {
       createdAt: formatDateTime(record.createdAt),
       permissions: stringArray(record.permissions),
       dataScope: frontendScope(record.dataScope),
+      dataScopes: frontendScopes(record.dataScopes, record.dataScope),
       customDepartments: customDepartments(record.customDepartments),
       columnPermissions: stringArray(record.columnPermissions),
       userIds: record.users.map((userRole) => userRole.userId),
@@ -1000,6 +1112,31 @@ export class BasicDataController {
     })
   }
 
+  private async visibleEntityIds(request: RequestWithAdmin, entityType: string) {
+    return visibleOwnershipEntityIds(this.prisma, getAdminContext(request), entityType)
+  }
+
+  private async userScopeWhere(request: RequestWithAdmin): Promise<Prisma.UserWhereInput> {
+    const user = getAdminContext(request)
+    const scopes = user.dataScopes?.length ? user.dataScopes : [user.dataScope]
+    if (scopes.includes('ALL')) return {}
+    const orConditions: Prisma.UserWhereInput[] = []
+    if (scopes.includes('OWN')) orConditions.push({ id: user.id })
+    if (scopes.includes('OWN_DEPARTMENT') && user.departmentId) orConditions.push({ departmentId: user.departmentId })
+    if (scopes.includes('OWN_AND_CHILD_DEPARTMENTS') && user.departmentId) {
+      const departmentIds = await this.collectDepartmentIds(user.departmentId)
+      orConditions.push({ departmentId: { in: departmentIds } })
+    }
+    if (scopes.includes('CUSTOM_DEPARTMENTS')) {
+      const departmentIds = new Set<string>()
+      for (const item of user.customDepartments) {
+        ;(await this.collectDepartmentIds(item.departmentId, item.includeChildren)).forEach((id) => departmentIds.add(id))
+      }
+      if (departmentIds.size) orConditions.push({ departmentId: { in: Array.from(departmentIds) } })
+    }
+    return orConditions.length ? { OR: orConditions } : { id: '__none__' }
+  }
+
   private async upsertDepartmentTree(department: DepartmentBody, parentId: string | null, source: SyncProvider) {
     if (!department.name?.trim() || !department.code?.trim()) return null
     const record = await this.prisma.department.upsert({
@@ -1026,7 +1163,8 @@ export class BasicDataController {
     return record
   }
 
-  private async collectDepartmentIds(id: string): Promise<string[]> {
+  private async collectDepartmentIds(id: string, includeChildren = true): Promise<string[]> {
+    if (!includeChildren) return [id]
     const children = await this.prisma.department.findMany({
       where: { parentId: id },
       select: { id: true },

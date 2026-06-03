@@ -331,6 +331,28 @@ apps/admin/src/index.css
 
 以树形菜单配置。
 
+功能权限开发约束：
+
+- 每个业务资源必须有独立“数据列表”权限，列表权限只允许查看列表/详情，不隐含新增、编辑、删除、同步、配置等操作。
+- 常规权限命名：`xxx.view` 或历史模块键为数据列表，`xxx.create` 为新增，`xxx.edit` 为编辑或业务推进，`xxx.delete` 为删除。
+- 特殊动作必须单独建权限，例如 `basic.user.sync`、`basic.department.sync`、`basic.role.config`、`basic.role.users`、`basic.role.copy`、`model.schedule.batch`。
+- 页面顶部、筛选区、卡片右上角、表格行、详情底部等所有按钮都必须按权限渲染；按钮不在表格操作列里时也必须受角色权限控制。
+- 操作列按钮必须先按当前用户实际权限过滤，再交给 `TableActions`；“更多”按过滤后的可见操作数量计算。
+- 勾选新增/编辑/删除等操作权限时，可自动补选对应数据列表权限；取消数据列表权限时，不应保留该资源下的操作权限。
+- 后端接口必须作为安全边界：新增接口校验 `*.create`，编辑/流程推进接口校验 `*.edit`，删除接口校验 `*.delete`，同步接口校验 `*.sync`，角色权限保存接口按请求体区分 `basic.role.edit/config/users`。
+- 前端 `/dashboard/*` 路由必须先过登录校验，再通过 `protectedPage('xxx.view', page)` 或等价机制检查查看权限。
+- `/auth/me` 刷新时必须从后端拿最新权限并覆盖本地用户权限，避免角色变更后 localStorage 继续使用旧授权。
+
+基础资料当前权限键：
+
+- 部门管理：`basic.department`、`basic.department.create`、`basic.department.edit`、`basic.department.delete`、`basic.department.sync`
+- 用户管理：`basic.user`、`basic.user.create`、`basic.user.edit`、`basic.user.delete`、`basic.user.sync`
+- 角色权限：`basic.role`、`basic.role.create`、`basic.role.edit`、`basic.role.delete`、`basic.role.config`、`basic.role.users`、`basic.role.copy`
+- 客户管理：`basic.customer`、`basic.customer.create`、`basic.customer.edit`、`basic.customer.delete`
+- 供应商管理：`basic.supplier`、`basic.supplier.create`、`basic.supplier.edit`、`basic.supplier.delete`
+- 物料管理：`basic.product`、`basic.product.create`、`basic.product.edit`、`basic.product.delete`、`basic.product.view_synced_public`
+- 字典设置：`basic.dictionary`、`basic.dictionary.edit`
+
 当前示例权限树包括：
 
 - 管理端

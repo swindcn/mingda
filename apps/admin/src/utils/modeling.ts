@@ -35,7 +35,9 @@ export interface ModelingOptions {
   items: ModelingRecord[]
   materials: ModelingRecord[]
   molds: ModelingRecord[]
+  moldDevelopments: ModelingRecord[]
   shifts: ModelingRecord[]
+  suppliers: ModelingRecord[]
   employees: Array<{ id: string; name: string; phone: string; department: string }>
 }
 

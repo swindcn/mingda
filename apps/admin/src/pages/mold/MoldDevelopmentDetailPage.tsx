@@ -4,14 +4,12 @@ import {
   ExperimentOutlined,
   SafetyCertificateOutlined,
   ToolOutlined,
-  UploadOutlined,
 } from '@ant-design/icons'
 import {
   Button,
   Card,
   DatePicker,
   Form,
-  Image,
   Input,
   Modal,
   Radio,
@@ -19,14 +17,13 @@ import {
   Space,
   Tag,
   Typography,
-  Upload,
   message,
 } from 'antd'
-import type { UploadFile, UploadProps } from 'antd'
 import dayjs from 'dayjs'
 import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useLocation, useNavigate, useParams } from 'react-router'
+import { ImageUploadField } from '../../components/ImageUploadField'
 import { SubPageHeader } from '../../components/SubPageHeader'
 import { apiRequest } from '../../services/api'
 import { loadDictionaries } from '../../utils/dictionaries'
@@ -177,49 +174,10 @@ function getNowText() {
   return dayjs().format('YYYY-MM-DD HH:mm')
 }
 
-function getUploadNames(files: UploadFile[]) {
-  return files.map((file) => file.name)
-}
-
 function formatRecordCount(index: number) {
   const numerals = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
   if (index < numerals.length) return `${numerals[index]}次`
   return `${index + 1}次`
-}
-
-function createMockImageSrc(label = '图片') {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640">
-      <rect width="640" height="640" rx="32" fill="#f3f4f6"/>
-      <rect x="112" y="152" width="416" height="336" rx="24" fill="#ffffff" stroke="#d1d5db" stroke-width="8"/>
-      <path d="M180 420l88-96 70 70 58-62 94 88H180z" fill="#dbeafe"/>
-      <circle cx="422" cy="240" r="46" fill="#bfdbfe"/>
-      <text x="320" y="548" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" fill="#6b7280">${label}</text>
-    </svg>
-  `
-
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-}
-
-function ImagePlaceholder({ label, large = false }: { label?: string; large?: boolean }) {
-  const size = large ? 180 : 72
-
-  return (
-    <Image
-      src={createMockImageSrc(label)}
-      width="100%"
-      height={size}
-      preview={{ src: createMockImageSrc(label) }}
-      style={{
-        minWidth: size,
-        objectFit: 'cover',
-        background: '#f3f4f6',
-        border: '1px solid #e5e7eb',
-        borderRadius: 8,
-      }}
-      fallback={createMockImageSrc(label)}
-    />
-  )
 }
 
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
@@ -249,6 +207,8 @@ function FlowCard({ children }: { children: ReactNode }) {
 export function MoldDevelopmentDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  const fromList = (location.state as { from?: string } | null)?.from || '/dashboard/mold/development'
   const [form] = Form.useForm<EditFormValues>()
   const [shipmentForm] = Form.useForm<ShipmentFormValues>()
   const [productionForm] = Form.useForm<ProductionFormValues>()
@@ -260,11 +220,11 @@ export function MoldDevelopmentDetailPage() {
   const [productionModalType, setProductionModalType] = useState<'trial' | 'batch' | null>(null)
   const [evaluationModalOpen, setEvaluationModalOpen] = useState(false)
   const [terminationModalOpen, setTerminationModalOpen] = useState(false)
-  const [fileList, setFileList] = useState<UploadFile[]>([])
-  const [shipmentImages, setShipmentImages] = useState<UploadFile[]>([])
-  const [receiveImages, setReceiveImages] = useState<UploadFile[]>([])
-  const [productImages, setProductImages] = useState<UploadFile[]>([])
-  const [destructiveImages, setDestructiveImages] = useState<UploadFile[]>([])
+  const [editImages, setEditImages] = useState<string[]>([])
+  const [shipmentImages, setShipmentImages] = useState<string[]>([])
+  const [receiveImages, setReceiveImages] = useState<string[]>([])
+  const [productImages, setProductImages] = useState<string[]>([])
+  const [destructiveImages, setDestructiveImages] = useState<string[]>([])
   const [customers, setCustomers] = useState<PartnerRecord[]>(() => loadCustomers())
   const [products, setProducts] = useState<ProductRecord[]>(() => loadProducts())
   const [suppliers, setSuppliers] = useState<PartnerRecord[]>(() => loadSuppliers())
@@ -452,7 +412,7 @@ export function MoldDevelopmentDetailPage() {
         body: JSON.stringify({
           operator: currentOperator,
           trackingNumber: values.trackingNumber,
-          images: getUploadNames(shipmentImages),
+          images: shipmentImages,
         }),
       })
       applyApiDetail(updated)
@@ -474,7 +434,7 @@ export function MoldDevelopmentDetailPage() {
         method: 'POST',
         body: JSON.stringify({
           operator: currentOperator,
-          images: getUploadNames(receiveImages),
+          images: receiveImages,
         }),
       })
       applyApiDetail(updated)
@@ -519,9 +479,9 @@ export function MoldDevelopmentDetailPage() {
           method: 'POST',
           body: JSON.stringify({
             operator: values.operator,
-            productImages: getUploadNames(productImages),
-            destructiveImages: getUploadNames(destructiveImages),
-            images: [...getUploadNames(productImages), ...getUploadNames(destructiveImages)],
+            productImages,
+            destructiveImages,
+            images: [...productImages, ...destructiveImages],
           }),
         },
       )
@@ -583,11 +543,7 @@ export function MoldDevelopmentDetailPage() {
 
   const renderImagePlaceholders = (images: string[]) =>
     images.length > 0 ? (
-      <Space size={12} wrap>
-        {images.map((image) => (
-          <ImagePlaceholder key={image} label={image} />
-        ))}
-      </Space>
+      <ImageUploadField value={images} readOnly size={72} />
     ) : (
       <Typography.Text type="secondary">暂无图片</Typography.Text>
     )
@@ -621,10 +577,7 @@ export function MoldDevelopmentDetailPage() {
                 <Typography.Text type="secondary">下达人：{currentOperator || '当前用户'}</Typography.Text>
               </Space>
               <Typography.Text type="secondary">下达图片：</Typography.Text>
-              <Space size={12}>
-                <ImagePlaceholder />
-                <ImagePlaceholder />
-              </Space>
+              {renderImagePlaceholders(developmentData.images)}
             </Space>
           </FlowCard>
         ),
@@ -776,13 +729,13 @@ export function MoldDevelopmentDetailPage() {
       expectedDate: developmentData.expectedDate ? dayjs(developmentData.expectedDate) : undefined,
       remark: developmentData.remark,
     })
-    setFileList([])
+    setEditImages(developmentData.images)
     setModalOpen(true)
   }
 
   const closeEditModal = () => {
     setModalOpen(false)
-    setFileList([])
+    setEditImages([])
     form.resetFields()
   }
 
@@ -804,7 +757,7 @@ export function MoldDevelopmentDetailPage() {
           supplierId: values.supplierId,
           supplierName: selectedSupplier?.name || '',
           expectedDate: values.expectedDate?.format('YYYY-MM-DD'),
-          attachments: fileList.map((file) => file.name),
+          attachments: editImages,
           remark: values.remark,
         }),
       })
@@ -816,47 +769,6 @@ export function MoldDevelopmentDetailPage() {
     }
   }
 
-  const uploadProps: UploadProps = {
-    fileList,
-    multiple: true,
-    beforeUpload: () => false,
-    onChange: ({ fileList: nextFileList }) => setFileList(nextFileList),
-  }
-
-  const shipmentUploadProps: UploadProps = {
-    fileList: shipmentImages,
-    multiple: true,
-    maxCount: 3,
-    listType: 'picture-card',
-    beforeUpload: () => false,
-    onChange: ({ fileList: nextFileList }) => setShipmentImages(nextFileList),
-  }
-
-  const receiveUploadProps: UploadProps = {
-    fileList: receiveImages,
-    multiple: true,
-    maxCount: 3,
-    listType: 'picture-card',
-    beforeUpload: () => false,
-    onChange: ({ fileList: nextFileList }) => setReceiveImages(nextFileList),
-  }
-
-  const productUploadProps: UploadProps = {
-    fileList: productImages,
-    multiple: true,
-    listType: 'picture-card',
-    beforeUpload: () => false,
-    onChange: ({ fileList: nextFileList }) => setProductImages(nextFileList),
-  }
-
-  const destructiveUploadProps: UploadProps = {
-    fileList: destructiveImages,
-    multiple: true,
-    listType: 'picture-card',
-    beforeUpload: () => false,
-    onChange: ({ fileList: nextFileList }) => setDestructiveImages(nextFileList),
-  }
-
   return (
     <>
       <SubPageHeader
@@ -865,7 +777,7 @@ export function MoldDevelopmentDetailPage() {
             开发记录详情 <Typography.Text type="secondary">#{developmentData.id}</Typography.Text>
           </>
         }
-        onBack={() => navigate('/dashboard/mold/development')}
+        onBack={() => navigate(fromList)}
         extra={
           <Space>
             {canOperate && (
@@ -910,17 +822,7 @@ export function MoldDevelopmentDetailPage() {
           </Card>
 
           <Card title="模具图片">
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                gap: 16,
-              }}
-            >
-              {developmentData.images.map((image) => (
-                <ImagePlaceholder key={image} label={image} large />
-              ))}
-            </div>
+            <ImageUploadField value={developmentData.images} readOnly size={132} />
           </Card>
         </Space>
 
@@ -1070,9 +972,7 @@ export function MoldDevelopmentDetailPage() {
               <DatePicker style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item label="新增模具图片" style={{ gridColumn: '1 / span 2' }}>
-              <Upload {...uploadProps}>
-                <Button icon={<UploadOutlined />}>上传图片</Button>
-              </Upload>
+              <ImageUploadField value={editImages} onChange={setEditImages} />
             </Form.Item>
             <Form.Item label="备注需求" name="remark" style={{ gridColumn: '1 / span 2' }}>
               <Input.TextArea rows={3} placeholder="请输入备注信息" />
@@ -1100,13 +1000,7 @@ export function MoldDevelopmentDetailPage() {
             <Input placeholder="请输入快递单号" />
           </Form.Item>
           <Form.Item label="发货图片（最多3张）">
-            <Upload {...shipmentUploadProps}>
-              {shipmentImages.length < 3 && (
-                <Button type="link" icon={<UploadOutlined />}>
-                  上传图片
-                </Button>
-              )}
-            </Upload>
+            <ImageUploadField value={shipmentImages} onChange={setShipmentImages} maxCount={3} />
           </Form.Item>
         </Form>
       </Modal>
@@ -1123,13 +1017,7 @@ export function MoldDevelopmentDetailPage() {
       >
         <Form layout="vertical">
           <Form.Item label="收货图片（最多3张）" required>
-            <Upload {...receiveUploadProps}>
-              {receiveImages.length < 3 && (
-                <Button type="link" icon={<UploadOutlined />}>
-                  上传图片
-                </Button>
-              )}
-            </Upload>
+            <ImageUploadField value={receiveImages} onChange={setReceiveImages} maxCount={3} />
           </Form.Item>
         </Form>
       </Modal>
@@ -1158,18 +1046,10 @@ export function MoldDevelopmentDetailPage() {
             />
           </Form.Item>
           <Form.Item label="拍摄产品图片">
-            <Upload {...productUploadProps}>
-              <Button type="link" icon={<UploadOutlined />}>
-                上传图片
-              </Button>
-            </Upload>
+            <ImageUploadField value={productImages} onChange={setProductImages} />
           </Form.Item>
           <Form.Item label="破坏性检测图片">
-            <Upload {...destructiveUploadProps}>
-              <Button type="link" icon={<UploadOutlined />}>
-                上传图片
-              </Button>
-            </Upload>
+            <ImageUploadField value={destructiveImages} onChange={setDestructiveImages} />
           </Form.Item>
         </Form>
       </Modal>

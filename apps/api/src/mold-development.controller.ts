@@ -11,6 +11,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common'
 import {
@@ -21,7 +22,15 @@ import {
 } from '@prisma/client'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { PrismaService } from './prisma/prisma.service'
+import {
+  getAdminContext,
+  hasAdminPermission,
+  upsertOwnership,
+  visibleOwnershipEntityIds,
+  type RequestWithAdmin,
+} from './shared/admin-context'
 import { AdminAuthGuard } from './shared/admin-auth.guard'
+import { extractBearerToken, signAdminToken, verifyAdminToken } from './shared/auth-token'
 
 interface LoginBody {
   username?: string
@@ -72,6 +81,7 @@ interface CreateMoldBody {
   productCode: string
   productName?: string
   customerNotifyDate: string
+  moldName?: string
   moldType: string
   supplierId?: string
   supplierName?: string
@@ -109,12 +119,34 @@ const adminPermissions = [
   'basic.department.create',
   'basic.department.edit',
   'basic.department.delete',
+  'basic.department.sync',
   'basic.user',
+  'basic.user.create',
+  'basic.user.edit',
+  'basic.user.delete',
+  'basic.user.sync',
   'basic.role',
+  'basic.role.create',
+  'basic.role.edit',
+  'basic.role.delete',
+  'basic.role.config',
+  'basic.role.users',
+  'basic.role.copy',
   'basic.customer',
+  'basic.customer.create',
+  'basic.customer.edit',
+  'basic.customer.delete',
   'basic.supplier',
+  'basic.supplier.create',
+  'basic.supplier.edit',
+  'basic.supplier.delete',
   'basic.product',
+  'basic.product.create',
+  'basic.product.edit',
+  'basic.product.delete',
+  'basic.product.view_synced_public',
   'basic.dictionary',
+  'basic.dictionary.edit',
   'mold',
   'mold.development.view',
   'mold.development.create',
@@ -193,6 +225,52 @@ function frontendDataScope(scope: string) {
     CUSTOM_DEPARTMENTS: 'custom_departments',
   }
   return map[scope] || 'self'
+}
+
+function frontendDataScopes(value: unknown, fallback: string) {
+  const scopes = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+  return (scopes.length ? scopes : [fallback]).map(frontendDataScope)
+}
+
+function authUserPayload(user: Prisma.UserGetPayload<{ include: { roles: { include: { role: true } } } }>) {
+  const roles = user.roles.map((item) => item.role)
+  const permissions = Array.from(
+    new Set(
+      roles.flatMap((role) =>
+        Array.isArray(role.permissions)
+          ? role.permissions.filter((permission): permission is string => typeof permission === 'string')
+          : [],
+      ),
+    ),
+  )
+  const columnPermissions = Array.from(
+    new Set(
+      roles.flatMap((role) =>
+        Array.isArray(role.columnPermissions)
+          ? role.columnPermissions.filter((permission): permission is string => typeof permission === 'string')
+          : [],
+      ),
+    ),
+  )
+
+  return {
+    id: user.id,
+    name: user.name,
+    phone: user.phone,
+    userType: user.userType,
+    username: user.username,
+    isSupplierEmployee: user.userType === 'SUPPLIER',
+    roles: roles.map((role) => ({
+      id: role.id,
+      name: role.name,
+      dataScope: frontendDataScope(role.dataScope),
+      dataScopes: frontendDataScopes(role.dataScopes, role.dataScope),
+    })),
+    permissions,
+    dataScope: frontendDataScope(roles[0]?.dataScope || 'OWN'),
+    dataScopes: Array.from(new Set(roles.flatMap((role) => frontendDataScopes(role.dataScopes, role.dataScope)))),
+    columnPermissions,
+  }
 }
 
 function toDate(value: string) {
@@ -311,8 +389,8 @@ function productionTitle(type: MoldProductionRecordType, count: number) {
 
 function isSupplierEmployeeViewer({ viewer, authorization }: ViewerOptions = {}) {
   if (viewer === 'admin') return false
-  if (authorization?.replace(/^Bearer\s+/i, '').startsWith('db-token-')) return false
-  const token = authorization?.replace(/^Bearer\s+/i, '') || ''
+  if (verifyAdminToken(extractBearerToken(authorization))) return false
+  const token = extractBearerToken(authorization)
   return token.startsWith('mock-token-')
 }
 
@@ -337,7 +415,10 @@ function toMobileMold(record: MoldWithRelations, options: ViewerOptions = {}) {
     customerName: shouldMaskSupplierFields ? '' : record.customer.name,
     productCode: shouldMaskSupplierFields ? '' : record.product.code,
     productName: record.product.name,
+    moldName: record.moldName || '',
     moldType: record.moldType,
+    archivedMoldCode: record.archivedMoldCode || '',
+    isArchived: Boolean(record.archivedMoldCode),
     status,
     statusTone: statusTone(status),
     supplierId: record.supplier.code,
@@ -419,8 +500,7 @@ function todoFromMold(record: MoldWithRelations, user?: MobileViewerUser | null)
 }
 
 function requireSupplierEmployee(authorization?: string) {
-  const token = authorization?.replace(/^Bearer\s+/i, '') || ''
-  if (!token.startsWith('db-token-') && !isSupplierEmployeeViewer({ authorization })) {
+  if (!verifyAdminToken(extractBearerToken(authorization)) && !isSupplierEmployeeViewer({ authorization })) {
     throw new ForbiddenException('仅供应商员工可以执行该操作')
   }
 }
@@ -457,44 +537,9 @@ export class MoldDevelopmentController {
         throw new ForbiddenException('账号或密码错误')
       }
 
-      const roles = user.roles.map((item) => item.role)
-      const permissions = Array.from(
-        new Set(
-          roles.flatMap((role) =>
-            Array.isArray(role.permissions)
-              ? role.permissions.filter((permission): permission is string => typeof permission === 'string')
-              : [],
-          ),
-        ),
-      )
-      const columnPermissions = Array.from(
-        new Set(
-          roles.flatMap((role) =>
-            Array.isArray(role.columnPermissions)
-              ? role.columnPermissions.filter((permission): permission is string => typeof permission === 'string')
-              : [],
-          ),
-        ),
-      )
-
       return {
-        token: `db-token-${user.id}`,
-        user: {
-          id: user.id,
-          name: user.name,
-          phone: user.phone,
-          userType: user.userType,
-          username: user.username,
-          isSupplierEmployee: user.userType === 'SUPPLIER',
-          roles: roles.map((role) => ({
-            id: role.id,
-            name: role.name,
-            dataScope: frontendDataScope(role.dataScope),
-          })),
-          permissions,
-          dataScope: frontendDataScope(roles[0]?.dataScope || 'OWN'),
-          columnPermissions,
-        },
+        token: signAdminToken(user.id),
+        user: authUserPayload(user),
       }
     }
 
@@ -577,9 +622,10 @@ export class MoldDevelopmentController {
   }
 
   @Get('mobile/home')
-  async home(@Headers('authorization') authorization?: string) {
+  @UseGuards(AdminAuthGuard)
+  async home(@Req() request: RequestWithAdmin, @Headers('authorization') authorization?: string) {
     const viewerUser = await this.getViewerUser(authorization)
-    const records = await this.findMoldsForViewer(viewerUser)
+    const records = await this.findMoldsForViewer(viewerUser, request)
     const todos = records
       .map((record) => todoFromMold(record, viewerUser))
       .filter((todo): todo is NonNullable<typeof todo> => Boolean(todo))
@@ -591,24 +637,46 @@ export class MoldDevelopmentController {
     }
   }
 
+  @Get('auth/me')
+  @UseGuards(AdminAuthGuard)
+  async me(@Headers('authorization') authorization?: string) {
+    const verifiedToken = verifyAdminToken(extractBearerToken(authorization))
+    if (!verifiedToken) throw new NotFoundException('登录状态已失效')
+    const user = await this.prisma.user.findUnique({
+      where: { id: verifiedToken.userId },
+      include: { roles: { include: { role: true } } },
+    })
+    if (!user) throw new NotFoundException('登录状态已失效')
+    return authUserPayload(user)
+  }
+
   @Get('mobile/todos')
-  async todoList(@Headers('authorization') authorization?: string) {
+  @UseGuards(AdminAuthGuard)
+  async todoList(@Req() request: RequestWithAdmin, @Headers('authorization') authorization?: string) {
     const viewerUser = await this.getViewerUser(authorization)
-    return (await this.findMoldsForViewer(viewerUser))
+    return (await this.findMoldsForViewer(viewerUser, request))
       .map((record) => todoFromMold(record, viewerUser))
       .filter((todo): todo is NonNullable<typeof todo> => Boolean(todo))
   }
 
   @Get('mobile/molds')
+  @UseGuards(AdminAuthGuard)
   async moldList(
+    @Req() request: RequestWithAdmin,
     @Query('keyword') keyword?: string,
     @Query('viewer') viewer?: string,
     @Headers('authorization') authorization?: string,
   ) {
+    if (viewer === 'admin') this.requireMoldPermission(request, 'mold.development.view')
     const viewerUser = await this.getViewerUser(authorization)
-    const records = await this.findMoldsForViewer(viewerUser)
+    const records = await this.findMoldsForViewer(viewerUser, request)
     const normalized = keyword?.trim()
-    const mapped = records.map((record) => toMobileMold(record, { viewer, authorization, user: viewerUser }))
+    const archiveMap = await this.findArchiveMap(records.map((record) => record.code))
+    const mapped = records.map((record) => {
+      const item = toMobileMold(record, { viewer, authorization, user: viewerUser })
+      const archivedMoldCode = item.archivedMoldCode || archiveMap.get(record.code) || ''
+      return { ...item, archivedMoldCode, isArchived: Boolean(archivedMoldCode) }
+    })
 
     if (!normalized) return mapped
     return mapped.filter((item) =>
@@ -624,19 +692,26 @@ export class MoldDevelopmentController {
   }
 
   @Get('mobile/molds/:id')
+  @UseGuards(AdminAuthGuard)
   async moldDetail(
+    @Req() request: RequestWithAdmin,
     @Param('id') id: string,
     @Query('viewer') viewer?: string,
     @Headers('authorization') authorization?: string,
   ) {
+    if (viewer === 'admin') this.requireMoldPermission(request, 'mold.development.view')
     const viewerUser = await this.getViewerUser(authorization)
-    const mold = await this.findMoldForViewer(id, viewerUser)
-    return toMobileMold(mold, { viewer, authorization, user: viewerUser })
+    const mold = await this.findMoldForViewer(id, viewerUser, request)
+    const archiveMap = await this.findArchiveMap([mold.code])
+    const item = toMobileMold(mold, { viewer, authorization, user: viewerUser })
+    const archivedMoldCode = item.archivedMoldCode || archiveMap.get(mold.code) || ''
+    return { ...item, archivedMoldCode, isArchived: Boolean(archivedMoldCode) }
   }
 
   @Post('admin/molds')
   @UseGuards(AdminAuthGuard)
-  async createMold(@Body() body: CreateMoldBody) {
+  async createMold(@Body() body: CreateMoldBody, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.create')
     const customer = await this.upsertCustomer(body.customerId || 'CUS_CUSTOM', body.customerName || body.customerId || '')
     const product = await this.upsertProduct(body.productCode, body.productName || body.productCode)
     const supplier = await this.upsertSupplier(body.supplierId || 'SUP_CUSTOM', body.supplierName || body.supplierId || '')
@@ -653,6 +728,7 @@ export class MoldDevelopmentController {
         productId: product.id,
         supplierId: supplier.id,
         customerNotifyDate: toDate(body.customerNotifyDate),
+        moldName: body.moldName,
         moldType: body.moldType,
         followerName: body.followerName,
         expectedDate: body.expectedDate ? toDate(body.expectedDate) : undefined,
@@ -677,13 +753,16 @@ export class MoldDevelopmentController {
       },
       include: this.moldInclude(),
     })
+    await upsertOwnership(this.prisma, request.adminUser, 'mold:development', mold.code)
 
     return toMobileMold(mold, { viewer: 'admin' })
   }
 
   @Delete('admin/molds/:id')
   @UseGuards(AdminAuthGuard)
-  async deleteMold(@Param('id') id: string) {
+  async deleteMold(@Param('id') id: string, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.delete')
+    await this.assertMoldVisible(id, request)
     const mold = await this.findMold(id)
     if (mold.status !== 'CANCELLED') {
       throw new BadRequestException('仅已中止的模具开发单可以删除')
@@ -698,7 +777,9 @@ export class MoldDevelopmentController {
 
   @Put('admin/molds/:id')
   @UseGuards(AdminAuthGuard)
-  async updateMold(@Param('id') id: string, @Body() body: CreateMoldBody) {
+  async updateMold(@Param('id') id: string, @Body() body: CreateMoldBody, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.edit')
+    await this.assertMoldVisible(id, request)
     const mold = await this.findMold(id)
     const customer = await this.upsertCustomer(body.customerId || 'CUS_CUSTOM', body.customerName || body.customerId || '')
     const product = await this.upsertProduct(body.productCode, body.productName || body.productCode)
@@ -714,6 +795,7 @@ export class MoldDevelopmentController {
         productId: product.id,
         supplierId: supplier.id,
         customerNotifyDate: toDate(body.customerNotifyDate),
+        moldName: body.moldName,
         moldType: body.moldType,
         followerName: body.followerName,
         expectedDate: body.expectedDate ? toDate(body.expectedDate) : null,
@@ -732,7 +814,9 @@ export class MoldDevelopmentController {
 
   @Post('admin/molds/:id/cancel')
   @UseGuards(AdminAuthGuard)
-  async cancelMold(@Param('id') id: string, @Body() body: CancelMoldBody) {
+  async cancelMold(@Param('id') id: string, @Body() body: CancelMoldBody, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.edit')
+    await this.assertMoldVisible(id, request)
     const mold = await this.findMold(id)
     if (mold.status === 'COMPLETED') {
       throw new BadRequestException('已完成的模具开发单不能中止')
@@ -753,37 +837,49 @@ export class MoldDevelopmentController {
 
   @Post('admin/molds/:id/confirm-drawing')
   @UseGuards(AdminAuthGuard)
-  async adminConfirmDrawing(@Param('id') id: string) {
+  async adminConfirmDrawing(@Param('id') id: string, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.edit')
+    await this.assertMoldVisible(id, request)
     return this.confirmDrawingRecord(id, '管理员', { viewer: 'admin' })
   }
 
   @Post('admin/molds/:id/shipping')
   @UseGuards(AdminAuthGuard)
-  async adminShipping(@Param('id') id: string, @Body() body: ShippingBody) {
+  async adminShipping(@Param('id') id: string, @Body() body: ShippingBody, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.edit')
+    await this.assertMoldVisible(id, request)
     return this.shippingRecord(id, body, { viewer: 'admin' })
   }
 
   @Post('admin/molds/:id/receive')
   @UseGuards(AdminAuthGuard)
-  async adminReceive(@Param('id') id: string, @Body() body: ReceiveBody) {
+  async adminReceive(@Param('id') id: string, @Body() body: ReceiveBody, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.edit')
+    await this.assertMoldVisible(id, request)
     return this.receiveRecord(id, body, { viewer: 'admin' })
   }
 
   @Post('admin/molds/:id/trial')
   @UseGuards(AdminAuthGuard)
-  async adminTrial(@Param('id') id: string, @Body() body: ProductionBody) {
+  async adminTrial(@Param('id') id: string, @Body() body: ProductionBody, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.edit')
+    await this.assertMoldVisible(id, request)
     return this.productionRecord(id, 'TRIAL', body, { viewer: 'admin' })
   }
 
   @Post('admin/molds/:id/batch')
   @UseGuards(AdminAuthGuard)
-  async adminBatch(@Param('id') id: string, @Body() body: ProductionBody) {
+  async adminBatch(@Param('id') id: string, @Body() body: ProductionBody, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.edit')
+    await this.assertMoldVisible(id, request)
     return this.productionRecord(id, 'BATCH', body, { viewer: 'admin' })
   }
 
   @Post('admin/molds/:id/evaluation')
   @UseGuards(AdminAuthGuard)
-  async adminEvaluation(@Param('id') id: string, @Body() body: EvaluationBody) {
+  async adminEvaluation(@Param('id') id: string, @Body() body: EvaluationBody, @Req() request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mold.development.edit')
+    await this.assertMoldVisible(id, request)
     return this.evaluationRecord(id, body, { viewer: 'admin' })
   }
 
@@ -972,8 +1068,31 @@ export class MoldDevelopmentController {
     })
   }
 
-  private async findMoldsForViewer(user?: MobileViewerUser | null) {
-    if (!isSupplierUser(user)) return this.findMolds()
+  private async findArchiveMap(developmentCodes: string[]) {
+    const codes = developmentCodes.filter(Boolean)
+    if (!codes.length) return new Map<string, string>()
+    const records = await this.prisma.moldMaster.findMany({
+      where: {
+        sourceMoldDevelopmentCode: { in: codes },
+      },
+      select: { code: true, sourceMoldDevelopmentCode: true },
+    })
+    return new Map(
+      records
+        .map((record) => {
+          const sourceCode = record.sourceMoldDevelopmentCode || ''
+          return [sourceCode, record.code] as const
+        })
+        .filter(([sourceCode]) => codes.includes(sourceCode)),
+    )
+  }
+
+  private async findMoldsForViewer(user?: MobileViewerUser | null, request?: RequestWithAdmin) {
+    if (!isSupplierUser(user)) {
+      const visibleCodes = request ? await this.visibleMoldCodes(request) : null
+      const records = await this.findMolds()
+      return visibleCodes ? records.filter((record) => visibleCodes.includes(record.code)) : records
+    }
     if (!user.belongsTo) return []
     return this.prisma.moldDevelopment.findMany({
       where: { supplier: { OR: [{ code: user.belongsTo }, { name: user.belongsTo }] } },
@@ -993,20 +1112,40 @@ export class MoldDevelopmentController {
     return record
   }
 
-  private async findMoldForViewer(id: string, user?: MobileViewerUser | null) {
+  private async findMoldForViewer(id: string, user?: MobileViewerUser | null, request?: RequestWithAdmin) {
     const record = await this.findMold(id)
     if (isSupplierUser(user) && record.supplier.name !== user.belongsTo && record.supplier.code !== user.belongsTo) {
       throw new NotFoundException('模具开发任务不存在')
     }
+    if (request && !isSupplierUser(user)) {
+      await this.assertMoldVisible(record.code, request)
+    }
     return record
   }
 
+  private requireMoldPermission(request: RequestWithAdmin, permission: string) {
+    if (!hasAdminPermission(getAdminContext(request), permission)) {
+      throw new ForbiddenException('无权执行当前操作')
+    }
+  }
+
+  private async visibleMoldCodes(request: RequestWithAdmin) {
+    return visibleOwnershipEntityIds(this.prisma, getAdminContext(request), 'mold:development')
+  }
+
+  private async assertMoldVisible(id: string, request: RequestWithAdmin) {
+    const mold = await this.findMold(id)
+    const visibleCodes = await this.visibleMoldCodes(request)
+    if (visibleCodes && !visibleCodes.includes(mold.code)) {
+      throw new NotFoundException('模具开发任务不存在')
+    }
+  }
+
   private async getViewerUser(authorization?: string): Promise<MobileViewerUser | null> {
-    const token = authorization?.replace(/^Bearer\s+/i, '') || ''
-    if (!token.startsWith('db-token-')) return null
-    const id = token.replace('db-token-', '')
+    const verifiedToken = verifyAdminToken(extractBearerToken(authorization))
+    if (!verifiedToken) return null
     const user = await this.prisma.user.findFirst({
-      where: { id, deletedAt: null },
+      where: { id: verifiedToken.userId, deletedAt: null },
       select: { id: true, name: true, userType: true, belongsTo: true, status: true, lockStatus: true },
     })
     if (!user) throw new ForbiddenException('登录已失效')
@@ -1087,6 +1226,7 @@ export class MoldDevelopmentController {
       productId: product1.id,
       supplierId: supplier1.id,
       customerNotifyDate: '2026-04-17',
+      moldName: '英沃保险柜门板内板模具',
       moldType: '压铸模',
       followerName: '王五',
       expectedDate: '2026-05-31',
@@ -1104,6 +1244,7 @@ export class MoldDevelopmentController {
       productId: product2.id,
       supplierId: supplier2.id,
       customerNotifyDate: '2026-05-18',
+      moldName: '球墨铸铁泵体模具',
       moldType: '砂型模',
       followerName: '赵六',
       expectedDate: '2026-06-20',
@@ -1121,6 +1262,7 @@ export class MoldDevelopmentController {
     supplierId: string
     customerNotifyDate: string
     moldType: string
+    moldName?: string
     followerName: string
     expectedDate: string
     status: MoldDevelopmentStatus
@@ -1138,6 +1280,7 @@ export class MoldDevelopmentController {
         productId: data.productId,
         supplierId: data.supplierId,
         customerNotifyDate: toDate(data.customerNotifyDate),
+        moldName: data.moldName,
         moldType: data.moldType,
         followerName: data.followerName,
         expectedDate: toDate(data.expectedDate),

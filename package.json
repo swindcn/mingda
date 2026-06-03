@@ -13,6 +13,7 @@
     "lint:admin": "npm --prefix apps/admin run lint",
     "preview:admin": "npm --prefix apps/admin run preview",
     "prisma:generate": "npm --prefix apps/api run prisma:generate",
-    "prisma:migrate": "npm --prefix apps/api run prisma:migrate"
+    "prisma:migrate": "npm --prefix apps/api run prisma:migrate",
+    "test:permissions": "node scripts/test-permissions.mjs"
   }
 }

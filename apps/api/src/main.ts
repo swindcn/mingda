@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
+import { json, urlencoded } from 'express'
 import { AppModule } from './app.module'
 import { HttpExceptionFilter } from './shared/http-exception.filter'
 import { ResponseInterceptor } from './shared/response.interceptor'
@@ -9,6 +10,9 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule)
   const configService = app.get(ConfigService)
   const port = configService.get<number>('PORT') ?? 3000
+
+  app.use(json({ limit: '25mb' }))
+  app.use(urlencoded({ limit: '25mb', extended: true }))
 
   app.setGlobalPrefix('api')
   const corsOrigin = configService.get<string>('CORS_ORIGIN')

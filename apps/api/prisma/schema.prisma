@@ -124,6 +124,7 @@ model Role {
   description        String?
   app                String       @default("admin")
   dataScope          DataScope    @default(OWN)
+  dataScopes         Json         @default("[]")
   permissions        Json         @default("[]")
   columnPermissions  Json         @default("[]")
   customDepartments  Json         @default("[]")
@@ -172,6 +173,7 @@ model Supplier {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   molds     MoldDevelopment[]
+  moldMasters MoldMaster[]
 }
 
 model Product {
@@ -183,6 +185,10 @@ model Product {
   type          String?
   source        String?
   workshop      String?
+  purchaseUnit  String?
+  salesUnit     String?
+  inventoryUnit String?
+  unitConversions Json  @default("[]")
   salePrice     Decimal? @db.Decimal(12, 2)
   costPrice     Decimal? @db.Decimal(12, 2)
   stockMax      Int?
@@ -208,10 +214,12 @@ model MoldDevelopment {
   supplierId            String
   supplier              Supplier              @relation(fields: [supplierId], references: [id])
   customerNotifyDate    DateTime
+  moldName              String?
   moldType              String
   followerName          String?
   expectedDate          DateTime?
   status                MoldDevelopmentStatus @default(WAITING_SUPPLIER_CONFIRM)
+  archivedMoldCode      String?
   supplierPromiseDate   DateTime?
   shippedAt             DateTime?
   trackingNumber        String?
@@ -409,6 +417,12 @@ model MoldMaster {
   code          String   @unique
   name          String
   itemCode      String
+  moldType      String?
+  supplierCode  String?
+  specModel     String?
+  sourceMoldDevelopmentCode String?
+  hasCoreBox    Boolean  @default(false)
+  images        Json     @default("[]")
   cavityCount   Int?
   maxLife       Int?
   usedLife      Int      @default(0)
@@ -417,9 +431,12 @@ model MoldMaster {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   item          Product @relation(fields: [itemCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  supplier      Supplier? @relation(fields: [supplierCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
   coreBoxes     CoreBoxMaster[]
 
   @@index([itemCode])
+  @@index([supplierCode])
+  @@index([sourceMoldDevelopmentCode])
   @@index([status])
 }
 
@@ -428,6 +445,7 @@ model CoreBoxMaster {
   code        String   @unique
   name        String
   moldCode    String
+  images      Json     @default("[]")
   cavityCount Int?
   maxLife     Int?
   usedLife    Int      @default(0)
