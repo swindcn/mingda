@@ -1,0 +1,52 @@
+name: mingda-casting
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mingda-postgres-dev
+    environment:
+      POSTGRES_DB: mingda_casting
+      POSTGRES_USER: mingda
+      POSTGRES_PASSWORD: mingda_dev_password
+      TZ: Asia/Shanghai
+    ports:
+      - "5433:5432"
+    volumes:
+      - mingda-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mingda -d mingda_casting"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    container_name: mingda-api-dev
+    environment:
+      DATABASE_URL: postgresql://mingda:mingda_dev_password@postgres:5432/mingda_casting?schema=public
+      PORT: 3000
+      JWT_SECRET: local-docker-change-me
+      MARKITDOWN_BIN: markitdown
+      TZ: Asia/Shanghai
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  admin:
+    build:
+      context: .
+      dockerfile: docker/admin.Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: mingda-admin-dev
+    ports:
+      - "${ADMIN_PORT:-8080}:80"
+    depends_on:
+      - api
+
+volumes:
+  mingda-postgres-data:

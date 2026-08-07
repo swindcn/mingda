@@ -14,6 +14,11 @@
     "preview:admin": "npm --prefix apps/admin run preview",
     "prisma:generate": "npm --prefix apps/api run prisma:generate",
     "prisma:migrate": "npm --prefix apps/api run prisma:migrate",
+    "docker:up": "node scripts/docker-local.mjs up",
+    "docker:down": "node scripts/docker-local.mjs down",
+    "docker:logs": "node scripts/docker-local.mjs logs",
+    "docker:ps": "node scripts/docker-local.mjs ps",
+    "docker:config": "node scripts/docker-local.mjs config",
     "test:permissions": "node scripts/test-permissions.mjs"
   }
 }
