@@ -16,6 +16,7 @@ import type {
   ScrapCoreBatchBody,
   StartCoreTaskBody,
   UnlockCoreBatchBody,
+  MobileCoreExecutionOptionsDto,
 } from './coremaking.types'
 
 type DatabaseClient = PrismaService | Prisma.TransactionClient
@@ -643,6 +644,31 @@ export class CoremakingService {
         workshopCode: item.workshopCode,
         workshopName: item.workshop.name,
       })),
+      shifts: shifts.map((item) => ({ code: item.code, name: item.name, status: item.status })),
+      dryingEquipment: dryingEquipment
+        .filter((item) => /(芯|烘干)/.test(item.equipmentType))
+        .map((item) => ({
+          code: item.code,
+          name: item.name,
+          status: item.status,
+          workshopCode: item.workshopCode || '',
+          workshopName: item.workshop?.name || '',
+          equipmentType: item.equipmentType,
+        })),
+    }
+  }
+
+  async getMobileCoreExecutionOptions(request: RequestWithAdmin, id: string): Promise<MobileCoreExecutionOptionsDto> {
+    await this.assertTaskAccess(request, id, true)
+    const [shifts, dryingEquipment] = await Promise.all([
+      this.prisma.shiftMaster.findMany({ where: { status: '启用' }, orderBy: { code: 'asc' } }),
+      this.prisma.furnace.findMany({
+        where: { status: '启用' },
+        include: { workshop: true },
+        orderBy: { code: 'asc' },
+      }),
+    ])
+    return {
       shifts: shifts.map((item) => ({ code: item.code, name: item.name, status: item.status })),
       dryingEquipment: dryingEquipment
         .filter((item) => /(芯|烘干)/.test(item.equipmentType))

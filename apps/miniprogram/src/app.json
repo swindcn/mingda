@@ -15,7 +15,8 @@
     "pages/core/list/index",
     "pages/core/detail/index",
     "pages/core/report/index",
-    "pages/core/dry/index"
+    "pages/core/dry/index",
+    "pages/core/label/index"
   ],
   "window": {
     "navigationBarTitleText": "闽大铸件",

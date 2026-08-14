@@ -4,14 +4,19 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const dist = path.resolve(__dirname, '../dist')
+const src = path.resolve(__dirname, '../src')
 
 function read(file) {
   return fs.readFileSync(path.join(dist, file), 'utf8')
 }
 
+function readSource(file) {
+  return fs.readFileSync(path.join(src, file), 'utf8')
+}
+
 test('registers all coremaking pages with pull-down refresh where data is loaded', () => {
   const app = JSON.parse(read('app.json'))
-  for (const page of ['list', 'detail', 'report', 'dry']) {
+  for (const page of ['list', 'detail', 'report', 'dry', 'label']) {
     assert.ok(app.pages.includes(`pages/core/${page}/index`))
   }
   for (const page of ['list', 'detail', 'dry']) {
@@ -89,9 +94,90 @@ test('latest request gate prevents delayed responses from replacing records or l
   await stale
   assert.deepEqual(state, { records: ['COMPLETED'], loading: false })
 
-  const list = read('pages/core/list/index.js')
-  assert.match(list, /createLatestRequestGate/)
-  assert.match(list, /isCurrent\(requestId\)/)
+  const unloading = gate.next()
+  gate.invalidate()
+  assert.equal(gate.isCurrent(unloading), false)
+
+  for (const page of ['list', 'detail', 'report', 'dry']) {
+    const logic = read(`pages/core/${page}/index.js`)
+    assert.match(logic, /createLatestRequestGate/)
+    assert.match(logic, /isCurrent\(requestId\)/)
+    assert.match(logic, /onUnload/)
+    assert.match(logic, /invalidate/)
+  }
+})
+
+test('renders protected batch labels with a deterministic QR matrix', () => {
+  const detail = read('pages/core/detail/index.wxml')
+  const labelLogic = read('pages/core/label/index.js')
+  const labelView = read('pages/core/label/index.wxml')
+  assert.match(detail, /标签/)
+  assert.match(labelLogic, /getCoreTaskDetail/)
+  assert.match(labelLogic, /qrContent/)
+  assert.match(labelLogic, /createQrMatrix/)
+  assert.doesNotMatch(labelLogic, /\/labels?\b|base64/)
+  assert.match(labelView, /canvas type="2d" id="labelQr"/)
+  for (const label of ['批次', '芯盒', '产品', '数量', '生产时间', '烘干状态', '失效时间']) {
+    assert.match(labelView, new RegExp(label))
+  }
+
+  const qrPath = path.join(dist, 'utils/qr-code.js')
+  assert.ok(fs.existsSync(qrPath), 'QR matrix generator output must exist')
+  const { createQrMatrix } = require(qrPath)
+  const first = createQrMatrix('CORE-BATCH-001')
+  const second = createQrMatrix('CORE-BATCH-001')
+  assert.deepEqual(first, second)
+  assert.ok(first.length >= 21)
+  assert.ok(first.every((row) => row.length === first.length && row.every((cell) => typeof cell === 'boolean')))
+  assert.deepEqual(first.slice(0, 7).map((row) => row.slice(0, 7)), [
+    [true, true, true, true, true, true, true],
+    [true, false, false, false, false, false, true],
+    [true, false, true, true, true, false, true],
+    [true, false, true, true, true, false, true],
+    [true, false, true, true, true, false, true],
+    [true, false, false, false, false, false, true],
+    [true, true, true, true, true, true, true],
+  ])
+})
+
+test('preserves request status for unified conflict handling and refreshes in place', () => {
+  const requestPath = path.join(dist, 'utils/request.js')
+  const { RequestError, isConflict } = require(requestPath)
+  assert.equal(isConflict(new RequestError('版本冲突', 409)), true)
+  assert.equal(isConflict(new RequestError('普通失败', 400)), false)
+  assert.equal(isConflict(new Error('409')), false)
+
+  for (const page of ['detail', 'report', 'dry']) {
+    const source = readSource(`pages/core/${page}/index.ts`)
+    assert.match(source, /isConflict\(error\)/)
+    assert.match(source, /await this\.load(?:Detail|Data)\(\)/)
+    const catches = [...source.matchAll(/catch \(error\) \{([\s\S]*?)\n    \} finally/g)]
+    const actionCatch = catches.at(-1)?.[1] || ''
+    assert.match(actionCatch, /if \(isConflict\(error\)\) await this\.load(?:Detail|Data)\(\)[\s\S]*wx\.showToast/)
+    assert.doesNotMatch(actionCatch, /navigateBack|navigateTo|redirectTo/)
+  }
+})
+
+test('safely decodes scanned batch values without throwing on malformed escapes', () => {
+  const scanPath = path.join(dist, 'utils/scan-code.js')
+  assert.ok(fs.existsSync(scanPath), 'safe scan-code output must exist')
+  const { extractScannedCode } = require(scanPath)
+  assert.equal(extractScannedCode('https://example.test?a=1&code=SAND%20001'), 'SAND 001')
+  assert.equal(extractScannedCode('https://example.test?batch=%E0%A4%A'), '%E0%A4%A')
+  assert.equal(extractScannedCode('  SAND-002  '), 'SAND-002')
+  assert.match(read('pages/core/report/index.js'), /extractScannedCode/)
+})
+
+test('uses split mobile task DTOs and includes protected label fields on batches', () => {
+  const types = readSource('types/business.ts')
+  const api = readSource('services/api.ts')
+  assert.match(types, /interface MobileCoreTaskSummary/)
+  assert.match(types, /interface MobileCoreTaskDetail extends MobileCoreTaskSummary/)
+  assert.match(types, /qrContent:\s*string/)
+  assert.match(types, /reportedAt:\s*string/)
+  assert.match(api, /request<MobileCoreTaskSummary\[]>/)
+  assert.match(api, /request<MobileCoreTaskDetail>/)
+  assert.doesNotMatch(api, /\bMobileCoreTask\b/)
 })
 
 test('report uses current user, two quantity inputs, real shift and scannable sand batch', () => {

@@ -151,10 +151,14 @@ export interface CoreProductionReport {
 export interface CoreInventoryBatch {
   id: string
   code: string
+  qrContent: string
   taskId: string
   taskCode: string
   coreBoxCode: string
   coreBoxName: string
+  productCode: string
+  productName: string
+  reportedAt: string
   initialQuantity: number
   currentQuantity: number
   dryingRequired: boolean
@@ -173,7 +177,7 @@ export interface CoreInventoryBatch {
   expiresAtText?: string
 }
 
-export interface MobileCoreTask {
+export interface MobileCoreTaskSummary {
   id: string
   code: string
   workOrderId: string
@@ -206,11 +210,14 @@ export interface MobileCoreTask {
   canStart: boolean
   canReport: boolean
   canDry: boolean
-  reports: CoreProductionReport[]
-  batches: CoreInventoryBatch[]
   statusText?: string
   statusTone?: string
   plannedStartText?: string
+}
+
+export interface MobileCoreTaskDetail extends MobileCoreTaskSummary {
+  reports: CoreProductionReport[]
+  batches: CoreInventoryBatch[]
 }
 
 export interface CoreExecutionOptions {
@@ -219,7 +226,7 @@ export interface CoreExecutionOptions {
 }
 
 export interface CoreReportResult {
-  task: MobileCoreTask
+  task: MobileCoreTaskSummary
   report: CoreProductionReport
   batch: CoreInventoryBatch
 }

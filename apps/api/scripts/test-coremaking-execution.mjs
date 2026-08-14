@@ -374,6 +374,7 @@ try {
   const memberMiniList = await request(baseUrl, '/mini/production/core-tasks?status=WAITING', { headers: miniMemberHeaders })
   if (!memberMiniList.some((item) => item.id === miniTask.id)) throw new Error('班组成员未看到派工给本班组的制芯任务')
   if (memberMiniList.some((item) => item.id === foreignMiniTask.id)) throw new Error('班组成员看到了派工给其他班组的制芯任务')
+  if (memberMiniList.some((item) => 'reports' in item || 'batches' in item)) throw new Error('mini 制芯列表泄露了详情数组')
   const outsiderMiniList = await request(baseUrl, '/mini/production/core-tasks?status=WAITING', { headers: miniOutsiderHeaders })
   if (outsiderMiniList.some((item) => item.id === miniTask.id)) throw new Error('非班组成员看到了制芯任务')
   await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}`, { headers: miniOutsiderHeaders }, 404)
@@ -389,6 +390,9 @@ try {
     throw new Error('mini 制芯详情动作标识或执行明细结构错误')
   }
   const miniOptions = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/execution-options`, { headers: miniMemberHeaders })
+  if (JSON.stringify(Object.keys(miniOptions).sort()) !== JSON.stringify(['dryingEquipment', 'shifts'])) {
+    throw new Error(`mini 制芯执行选项泄露了非执行字段: ${Object.keys(miniOptions).sort().join(',')}`)
+  }
   if (!miniOptions.shifts.some((item) => item.code === miniShift.code) || !miniOptions.dryingEquipment.some((item) => item.code === dryer.code)) {
     throw new Error('mini 制芯执行选项未返回真实班次或烘干设备')
   }
@@ -396,6 +400,7 @@ try {
     method: 'POST', headers: miniMemberHeaders, body: JSON.stringify({ versionNo: miniTask.versionNo }),
   })
   if (miniStarted.status !== 'IN_PROGRESS' || miniStarted.canStart || !miniStarted.canReport) throw new Error('mini 开始制芯状态或动作标识错误')
+  if ('reports' in miniStarted || 'batches' in miniStarted) throw new Error('mini 开始制芯响应错误返回了详情数组')
   await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/start`, {
     method: 'POST', headers: miniMemberHeaders, body: JSON.stringify({ versionNo: miniTask.versionNo }),
   }, 409)
@@ -408,6 +413,9 @@ try {
   if (dryingBatches.length !== 1 || dryingBatches[0].id !== miniReported.batch.id || !dryingBatches[0].canDry) throw new Error('mini 待烘干批次列表错误')
   const detailAfterReport = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}`, { headers: miniMemberHeaders })
   if (!detailAfterReport.canDry || detailAfterReport.batches.length !== 1) throw new Error('mini 制芯详情未开放可用的烘干动作')
+  if (detailAfterReport.batches[0].qrContent !== miniReported.batch.code || !detailAfterReport.batches[0].reportedAt) {
+    throw new Error('mini 制芯详情批次缺少受保护标签二维码或生产时间')
+  }
   await request(baseUrl, `/mini/production/core-batches/${miniReported.batch.id}/dry`, {
     method: 'POST', headers: miniOutsiderHeaders, body: JSON.stringify({ versionNo: miniReported.batch.versionNo, equipmentCode: dryer.code }),
   }, 404)

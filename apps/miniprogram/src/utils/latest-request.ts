@@ -9,5 +9,8 @@ export function createLatestRequestGate() {
     isCurrent(candidate: number) {
       return candidate === requestId
     },
+    invalidate() {
+      requestId += 1
+    },
   }
 }

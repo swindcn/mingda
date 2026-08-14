@@ -1,16 +1,14 @@
 import { getCoreExecutionOptions, getCoreTaskDetail, reportCoreTask } from '../../../services/api'
-import { CoreExecutionOptions, MobileCoreTask } from '../../../types/business'
+import { CoreExecutionOptions, MobileCoreTaskDetail } from '../../../types/business'
+import { createLatestRequestGate } from '../../../utils/latest-request'
+import { isConflict } from '../../../utils/request'
+import { extractScannedCode } from '../../../utils/scan-code'
 
-function scannedCode(raw: string) {
-  const text = raw.trim()
-  const queryCode = text.match(/[?&](?:code|batch)=([^&]+)/)?.[1]
-  if (queryCode) return decodeURIComponent(queryCode)
-  return text.split('/').filter(Boolean).pop() || text
-}
+const latestRequest = createLatestRequestGate()
 
 Page({
   data: {
-    id: '', versionNo: 0, task: null as MobileCoreTask | null, options: null as CoreExecutionOptions | null,
+    id: '', versionNo: 0, task: null as MobileCoreTaskDetail | null, options: null as CoreExecutionOptions | null,
     operatorName: '', qualifiedQuantity: '', scrapQuantity: '0', defectReason: '', remark: '',
     shiftIndex: -1, shiftCode: '', sandBatchCode: '', dryingRequired: true, loading: false, submitting: false,
   },
@@ -22,18 +20,22 @@ Page({
     })
     void this.loadData()
   },
+  onUnload() { latestRequest.invalidate() },
   onPullDownRefresh() { void this.loadData().finally(() => wx.stopPullDownRefresh()) },
   async loadData() {
     if (!this.data.id) return
+    const requestId = latestRequest.next()
     this.setData({ loading: true })
     try {
       const [task, options] = await Promise.all([getCoreTaskDetail(this.data.id), getCoreExecutionOptions(this.data.id)])
+      if (!latestRequest.isCurrent(requestId)) return
       const shiftIndex = options.shifts.findIndex((item) => item.code === this.data.shiftCode)
       this.setData({ task, options, versionNo: task.versionNo, shiftIndex, shiftCode: shiftIndex >= 0 ? this.data.shiftCode : '' })
     } catch (error) {
+      if (!latestRequest.isCurrent(requestId)) return
       wx.showToast({ title: error instanceof Error ? error.message : '报工数据加载失败', icon: 'none' })
     } finally {
-      this.setData({ loading: false })
+      if (latestRequest.isCurrent(requestId)) this.setData({ loading: false })
     }
   },
   inputQualified(event: WechatMiniprogram.Input) { this.setData({ qualifiedQuantity: event.detail.value }) },
@@ -48,7 +50,7 @@ Page({
   scanSandBatch() {
     wx.scanCode({
       scanType: ['qrCode', 'barCode'],
-      success: (result) => this.setData({ sandBatchCode: scannedCode(result.result) }),
+      success: (result) => this.setData({ sandBatchCode: extractScannedCode(result.result) }),
       fail: (error) => { if (!error.errMsg.includes('cancel')) wx.showToast({ title: '扫码失败，请手工输入', icon: 'none' }) },
     })
   },
@@ -71,6 +73,7 @@ Page({
       wx.showToast({ title: '报工成功', icon: 'success' })
       setTimeout(() => wx.navigateBack(), 600)
     } catch (error) {
+      if (isConflict(error)) await this.loadData()
       wx.showToast({ title: error instanceof Error ? error.message : '报工失败，请刷新重试', icon: 'none' })
     } finally {
       this.setData({ submitting: false })

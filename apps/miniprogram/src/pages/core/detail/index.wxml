@@ -35,6 +35,7 @@
       <view class="row-head"><text class="batch-code">{{item.code}}</text><text class="batch-status">{{item.statusText}}</text></view>
       <view class="row-data">当前 {{item.currentQuantity}} / 初始 {{item.initialQuantity}}</view>
       <view class="row-note">失效时间：{{item.expiresAtText}}</view>
+      <view class="batch-actions"><button class="label-button" data-id="{{item.id}}" catchtap="openLabel">标签</button></view>
     </view>
     <view wx:if="{{!record.batches.length}}" class="empty-inline">暂无砂芯批次</view>
   </view>

@@ -4,7 +4,8 @@ import {
   CoreExecutionOptions,
   CoreInventoryBatch,
   CoreReportResult,
-  MobileCoreTask,
+  MobileCoreTaskDetail,
+  MobileCoreTaskSummary,
   MobileHeatOrder,
   TodoItem,
 } from '../types/business'
@@ -156,11 +157,11 @@ export function completeHeatProduction(id: string, data: { versionNo: number; ac
 }
 
 export function getCoreTasks(status?: string) {
-  return request<MobileCoreTask[]>({ url: `/mini/production/core-tasks${status ? `?status=${encodeURIComponent(status)}` : ''}` })
+  return request<MobileCoreTaskSummary[]>({ url: `/mini/production/core-tasks${status ? `?status=${encodeURIComponent(status)}` : ''}` })
 }
 
 export function getCoreTaskDetail(id: string) {
-  return request<MobileCoreTask>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}` })
+  return request<MobileCoreTaskDetail>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}` })
 }
 
 export function getCoreExecutionOptions(id: string) {
@@ -168,7 +169,7 @@ export function getCoreExecutionOptions(id: string) {
 }
 
 export function startCoreTask(id: string, data: { versionNo: number }) {
-  return request<MobileCoreTask>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}/start`, method: 'POST', data })
+  return request<MobileCoreTaskSummary>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}/start`, method: 'POST', data })
 }
 
 export function reportCoreTask(id: string, data: {

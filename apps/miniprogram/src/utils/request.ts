@@ -12,6 +12,17 @@ interface UploadOptions<T> {
   name: string
 }
 
+export class RequestError extends Error {
+  constructor(message: string, readonly statusCode: number, readonly code?: number) {
+    super(message)
+    this.name = 'RequestError'
+  }
+}
+
+export function isConflict(error: unknown): error is RequestError {
+  return error instanceof RequestError && error.statusCode === 409
+}
+
 export function request<T>({ url, method = 'GET', data }: RequestOptions<T>) {
   const app = getApp<IAppOption>()
   const token = app.globalData.token
@@ -33,14 +44,14 @@ export function request<T>({ url, method = 'GET', data }: RequestOptions<T>) {
           wx.removeStorageSync('mingda_permissions')
           app.globalData.token = ''
           wx.redirectTo({ url: '/pages/login/index' })
-          reject(new Error('登录已失效，请重新登录'))
+          reject(new RequestError('登录已失效，请重新登录', response.statusCode, body.code))
           return
         }
         if (body.code === 0) {
           resolve(resolveAssetUrls(body.data as T, app.globalData.apiBaseUrl))
           return
         }
-        reject(new Error(body.message || '请求失败'))
+        reject(new RequestError(body.message || '请求失败', response.statusCode, body.code))
       },
       fail: (error) => reject(new Error(error.errMsg.includes('timeout') ? '请求超时，请稍后重试' : '网络请求失败，请检查网络')),
     })
@@ -64,14 +75,14 @@ export function uploadFile<T>({ url, filePath, name }: UploadOptions<T>) {
         try {
           body = JSON.parse(response.data) as { code?: number; data?: T; message?: string }
         } catch {
-          reject(new Error('上传响应解析失败'))
+          reject(new RequestError('上传响应解析失败', response.statusCode))
           return
         }
         if (body.code === 0) {
           resolve(resolveAssetUrls(body.data as T, app.globalData.apiBaseUrl))
           return
         }
-        reject(new Error(body.message || '上传失败'))
+        reject(new RequestError(body.message || '上传失败', response.statusCode, body.code))
       },
       fail: reject,
     })

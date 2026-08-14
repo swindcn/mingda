@@ -69,3 +69,20 @@ export interface ScrapCoreBatchBody {
   versionNo?: number
   reason?: string
 }
+
+export interface MobileCoreExecutionOption {
+  code: string
+  name: string
+  status: string
+}
+
+export interface MobileCoreDryingEquipmentOption extends MobileCoreExecutionOption {
+  equipmentType: string
+  workshopCode: string
+  workshopName: string
+}
+
+export interface MobileCoreExecutionOptionsDto {
+  shifts: MobileCoreExecutionOption[]
+  dryingEquipment: MobileCoreDryingEquipmentOption[]
+}

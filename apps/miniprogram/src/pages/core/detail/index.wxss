@@ -21,5 +21,8 @@
 .batch-code { min-width: 0; overflow: hidden; color: #111827; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .row-data { margin-top: 12rpx; color: #111827; font-size: 27rpx; }
 .row-note { margin-top: 8rpx; color: #667085; font-size: 25rpx; overflow-wrap: anywhere; }
+.batch-actions { display: flex; justify-content: flex-end; margin-top: 12rpx; margin-left: auto; }
+.label-button { flex: 0 0 auto; min-width: 112rpx; height: 60rpx; padding: 0 22rpx; margin: 0; color: #1677ff; font-size: 25rpx; line-height: 60rpx; background: #fff; border: 1rpx solid #1677ff; border-radius: 8rpx; }
+.label-button::after { border: 0; }
 .empty-inline, .empty-page { padding: 48rpx 0; color: #98a2b3; font-size: 27rpx; text-align: center; }
 .empty-page { padding-top: 180rpx; }

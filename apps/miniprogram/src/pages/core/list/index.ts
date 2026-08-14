@@ -1,5 +1,5 @@
 import { getCoreTasks } from '../../../services/api'
-import { CoreTaskStatus, MobileCoreTask } from '../../../types/business'
+import { CoreTaskStatus, MobileCoreTaskSummary } from '../../../types/business'
 import { createLatestRequestGate } from '../../../utils/latest-request'
 
 const latestRequest = createLatestRequestGate()
@@ -18,7 +18,7 @@ const tones: Record<CoreTaskStatus, string> = {
   PENDING_DISPATCH: 'muted', WAITING: 'waiting', IN_PROGRESS: 'active', COMPLETED: 'done', CANCELED: 'muted',
 }
 
-function display(records: MobileCoreTask[]) {
+function display(records: MobileCoreTaskSummary[]) {
   return [...records]
     .sort((left, right) => new Date(right.plannedStartAt || right.createdAt).getTime() - new Date(left.plannedStartAt || left.createdAt).getTime())
     .map((record) => ({
@@ -30,8 +30,9 @@ function display(records: MobileCoreTask[]) {
 }
 
 Page({
-  data: { tabs, activeTab: 'WAITING' as CoreTaskStatus, records: [] as MobileCoreTask[], loading: false },
+  data: { tabs, activeTab: 'WAITING' as CoreTaskStatus, records: [] as MobileCoreTaskSummary[], loading: false },
   onShow() { void this.loadRecords() },
+  onUnload() { latestRequest.invalidate() },
   onPullDownRefresh() { void this.loadRecords().finally(() => wx.stopPullDownRefresh()) },
   async loadRecords() {
     const requestId = latestRequest.next()

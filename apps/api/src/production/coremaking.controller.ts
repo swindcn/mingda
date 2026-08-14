@@ -130,7 +130,7 @@ export class MobileCoremakingController {
 
   @Get('core-tasks/:id/execution-options')
   executionOptions(@Req() request: RequestWithAdmin, @Param('id') id: string) {
-    return this.coremaking.getCoreTaskOptions(request, id, true)
+    return this.coremaking.getMobileCoreExecutionOptions(request, id)
   }
 
   @Get('core-tasks/:id/drying-batches')
