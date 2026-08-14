@@ -5,6 +5,13 @@ import { getAdminContext, hasAdminPermission, type RequestWithAdmin } from '../s
 function permissionFor(request: Request) {
   const path = request.path
   const isMiniProgram = path.includes('/mini/production/')
+  if (path.includes('/core-tasks')) {
+    if (/\/work-orders\/[^/]+\/core-tasks\/preview$/.test(path)) return 'production.core_task.create'
+    if (/\/work-orders\/[^/]+\/core-tasks$/.test(path) && request.method === 'POST') return 'production.core_task.create'
+    if (/\/core-tasks\/[^/]+\/dispatch$/.test(path)) return 'production.core_task.dispatch'
+    if (/\/core-tasks\/[^/]+\/cancel$/.test(path)) return 'production.core_task.cancel'
+    return 'production.core_task.view'
+  }
   if (path.includes('/work-orders')) {
     if (/\/work-orders\/[^/]+\/close$/.test(path)) return 'production.work_order.close'
     if (request.method === 'POST') return 'production.work_order.create'

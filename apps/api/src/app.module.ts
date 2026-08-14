@@ -16,6 +16,8 @@ import { HeatExecutionController, MobileHeatExecutionController } from './produc
 import { ProductionPermissionGuard } from './production/production-permission.guard'
 import { ProductionService } from './production/production.service'
 import { WorkOrderController } from './production/work-order.controller'
+import { CoremakingController } from './production/coremaking.controller'
+import { CoremakingService } from './production/coremaking.service'
 
 @Module({
   imports: [
@@ -41,7 +43,8 @@ import { WorkOrderController } from './production/work-order.controller'
     EquipmentScheduleController,
     HeatExecutionController,
     MobileHeatExecutionController,
+    CoremakingController,
   ],
-  providers: [ResourceParserService, ProductionService, ProductionPermissionGuard],
+  providers: [ResourceParserService, ProductionService, CoremakingService, ProductionPermissionGuard],
 })
 export class AppModule {}

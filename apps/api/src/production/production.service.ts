@@ -22,6 +22,7 @@ import {
 import type { AdjustHeatScheduleBody, CompleteHeatOrderBody, HeatConflictBody, HeatOrderBody, StartHeatOrderBody, TransferHeatOrderBody, VersionedActionBody, WorkOrderBody } from './production.types'
 
 const enabledProductTypes = ['成品', '半成品']
+type ProductionDatabaseClient = PrismaService | Prisma.TransactionClient
 
 type MeltPoolFurnaceOption = {
   code: string
@@ -76,10 +77,17 @@ function dateTime(value: unknown, label: string) {
 export class ProductionService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async lockWorkOrder(tx: Prisma.TransactionClient, id: string) {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "WorkOrder" WHERE "id" = ${id} FOR UPDATE
+    `)
+    if (!rows.length) throw new NotFoundException('生产工单不存在')
+  }
+
   private workOrderInclude() {
     return {
       createdBy: { select: { id: true, name: true } },
-      bomVersion: { include: { bom: true } },
+      bomVersion: { include: { bom: true, coreBoxes: { select: { coreBoxCode: true } } } },
       routingVersion: {
         include: {
           routing: true,
@@ -97,6 +105,7 @@ export class ProductionService {
         include: { heatOrder: { include: { actualFurnace: true, transfers: true, startedBy: true, completedBy: true } } },
         orderBy: { createdAt: 'asc' as const },
       },
+      coreTasks: { select: { id: true, status: true, coreBoxCode: true } },
     }
   }
 
@@ -219,6 +228,17 @@ export class ProductionService {
 
   private workOrderDto(record: any) {
     const remainingQuantity = Math.max(0, record.plannedQuantity - record.scheduledQuantity)
+    const requiresCoremaking = Boolean(record.routingVersion?.nodes?.some((node: any) => node.operation.section === '制芯'))
+    const coreTasks = record.coreTasks || []
+    const coreBoxCount = record.bomVersion?.coreBoxes?.length || 0
+    const coreTaskSummary = {
+      total: coreTasks.length,
+      pendingDispatch: coreTasks.filter((task: any) => task.status === 'PENDING_DISPATCH').length,
+      waiting: coreTasks.filter((task: any) => task.status === 'WAITING').length,
+      inProgress: coreTasks.filter((task: any) => task.status === 'IN_PROGRESS').length,
+      completed: coreTasks.filter((task: any) => task.status === 'COMPLETED').length,
+      canceled: coreTasks.filter((task: any) => task.status === 'CANCELED').length,
+    }
     return {
       id: record.id,
       code: record.code,
@@ -266,6 +286,10 @@ export class ProductionService {
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
       canEdit: record.scheduledQuantity === 0 && record.productionStatus === 'RELEASED',
+      requiresCoremaking,
+      canGenerateCoreTasks: requiresCoremaking && (coreBoxCount === 0 || coreTasks.length < coreBoxCount),
+      coreTaskCount: coreTasks.length,
+      coreTaskSummary,
       routingNodes: record.routingVersion?.nodes?.map((node: any) => ({
         id: node.id,
         seqNo: node.seqNo,
@@ -321,12 +345,12 @@ export class ProductionService {
     return { products }
   }
 
-  async productPreview(productCode: string, bomVersionId?: string, routingVersionId?: string) {
-    const product = await this.prisma.product.findUnique({ where: { code: productCode } })
+  async productPreview(productCode: string, bomVersionId?: string, routingVersionId?: string, client: ProductionDatabaseClient = this.prisma) {
+    const product = await client.product.findUnique({ where: { code: productCode } })
     if (!product || !enabledProductTypes.some((type) => product.type === type || product.type?.startsWith(`${type}/`))) {
       throw new BadRequestException('请选择启用的成品或半成品')
     }
-    const bomVersion = await this.prisma.castingBomVersion.findFirst({
+    const bomVersion = await client.castingBomVersion.findFirst({
       where: {
         ...(bomVersionId ? { id: bomVersionId } : {}),
         status: 'ACTIVE',
@@ -338,27 +362,27 @@ export class ProductionService {
     if (!bomVersion) throw new BadRequestException('该产品没有已生效的铸造 BOM')
 
     let routingVersion = routingVersionId
-      ? await this.prisma.processRoutingVersion.findFirst({
+      ? await client.processRoutingVersion.findFirst({
           where: { id: routingVersionId, status: 'ACTIVE', products: { some: { productCode } } },
           include: { routing: true, nodes: { include: { operation: true, equipmentLinks: { include: { equipment: true } } }, orderBy: { seqNo: 'asc' } }, edges: true },
         })
       : null
     if (!routingVersion) {
-      const defaultRouting = await this.prisma.productDefaultRouting.findUnique({
+      const defaultRouting = await client.productDefaultRouting.findUnique({
         where: { productCode },
         include: { routingVersion: { include: { routing: true, nodes: { include: { operation: true, equipmentLinks: { include: { equipment: true } } }, orderBy: { seqNo: 'asc' } }, edges: true } } },
       })
       if (defaultRouting?.routingVersion.status === 'ACTIVE') routingVersion = defaultRouting.routingVersion
     }
     if (!routingVersion) {
-      routingVersion = await this.prisma.processRoutingVersion.findFirst({
+      routingVersion = await client.processRoutingVersion.findFirst({
         where: { status: 'ACTIVE', products: { some: { productCode } } },
         include: { routing: true, nodes: { include: { operation: true, equipmentLinks: { include: { equipment: true } } }, orderBy: { seqNo: 'asc' } }, edges: true },
         orderBy: { updatedAt: 'desc' },
       })
     }
     if (!routingVersion) throw new BadRequestException('该产品没有可用的已生效工艺路线')
-    const recipeCount = await this.prisma.meltRecipe.count({ where: { materialGradeCode: bomVersion.materialGradeCode, status: 'ACTIVE' } })
+    const recipeCount = await client.meltRecipe.count({ where: { materialGradeCode: bomVersion.materialGradeCode, status: 'ACTIVE' } })
     if (!recipeCount) throw new BadRequestException('该材质没有已生效的熔炼配方')
 
     return {
@@ -389,11 +413,11 @@ export class ProductionService {
     }
   }
 
-  private async preparedWorkOrder(body: WorkOrderBody) {
+  private async preparedWorkOrder(body: WorkOrderBody, client: ProductionDatabaseClient = this.prisma) {
     const productCode = String(body.productCode || '').trim()
     const plannedQuantity = Number(body.plannedQuantity)
     if (!Number.isInteger(plannedQuantity) || plannedQuantity <= 0) throw new BadRequestException('计划件数必须为大于 0 的整数')
-    const preview = await this.productPreview(productCode, String(body.bomVersionId || ''), String(body.routingVersionId || ''))
+    const preview = await this.productPreview(productCode, String(body.bomVersionId || ''), String(body.routingVersionId || ''), client)
     const plannedStartDate = dateOnly(body.plannedStartDate, false)
     const plannedDeliveryDate = dateOnly(body.plannedDeliveryDate, true)!
     return {
@@ -496,15 +520,38 @@ export class ProductionService {
     await this.assertVisible(request, id)
     const versionNo = Number(body.versionNo)
     if (!Number.isInteger(versionNo)) throw new BadRequestException('缺少有效的数据版本，请刷新后重试')
-    const prepared = await this.preparedWorkOrder(body)
     await this.prisma.$transaction(async (tx) => {
+      await this.lockWorkOrder(tx, id)
+      const prepared = await this.preparedWorkOrder(body, tx)
+      const current = await tx.workOrder.findUnique({
+        where: { id },
+        select: { productCode: true, bomVersionId: true, routingVersionId: true, plannedQuantity: true, _count: { select: { coreTasks: true } } },
+      })
+      if (!current) throw new NotFoundException('生产工单不存在')
       const activeAllocations = await tx.heatOrderAllocation.count({
         where: { workOrderId: id, heatOrder: { status: { not: 'CANCELED' } } },
       })
       if (activeAllocations) throw new BadRequestException('工单已产生炉次分配，请先撤销待生产炉次')
+      const structuralChanges = [
+        current.productCode !== prepared.data.productCode ? '产品' : '',
+        current.bomVersionId !== prepared.data.bomVersionId ? 'BOM 版本' : '',
+        current.routingVersionId !== prepared.data.routingVersionId ? '工艺路线' : '',
+        current.plannedQuantity !== prepared.data.plannedQuantity ? '计划数量' : '',
+      ].filter(Boolean)
+      if (current._count.coreTasks > 0 && structuralChanges.length) {
+        throw new BadRequestException(`工单已生成制芯任务，不能修改${structuralChanges.join('、')}`)
+      }
+      const updateData = current._count.coreTasks > 0
+        ? {
+            plannedStartDate: prepared.data.plannedStartDate,
+            plannedDeliveryDate: prepared.data.plannedDeliveryDate,
+            priority: prepared.data.priority,
+            remark: prepared.data.remark,
+          }
+        : { ...prepared.data, scheduledQuantity: 0, scheduleStatus: 'PENDING' as const }
       const result = await tx.workOrder.updateMany({
         where: { id, versionNo, productionStatus: 'RELEASED' },
-        data: { ...prepared.data, versionNo: { increment: 1 }, scheduledQuantity: 0, scheduleStatus: 'PENDING' },
+        data: { ...updateData, versionNo: { increment: 1 } },
       })
       if (!result.count) throw new ConflictException('数据已被其他用户更新，请刷新后重试')
     })
@@ -514,15 +561,22 @@ export class ProductionService {
   async closeWorkOrder(request: RequestWithAdmin, id: string, versionNo: number, reason: string) {
     await this.assertVisible(request, id)
     if (!reason.trim()) throw new BadRequestException('请填写关闭原因')
-    const activeHeatCount = await this.prisma.heatOrderAllocation.count({
-      where: { workOrderId: id, heatOrder: { status: { in: ['WAITING', 'IN_PROGRESS', 'TRANSFERRING'] } } },
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockWorkOrder(tx, id)
+      const activeCoreTaskCount = await tx.coreProductionTask.count({
+        where: { workOrderId: id, status: { notIn: ['COMPLETED', 'CANCELED'] } },
+      })
+      if (activeCoreTaskCount) throw new BadRequestException('请先完成或取消该工单的制芯任务')
+      const activeHeatCount = await tx.heatOrderAllocation.count({
+        where: { workOrderId: id, heatOrder: { status: { in: ['WAITING', 'IN_PROGRESS', 'TRANSFERRING'] } } },
+      })
+      if (activeHeatCount) throw new BadRequestException('请先撤销待生产炉次，生产中炉次不能关闭')
+      const result = await tx.workOrder.updateMany({
+        where: { id, versionNo, productionStatus: { notIn: ['CLOSED', 'COMPLETED'] } },
+        data: { productionStatus: 'CLOSED', closedAt: new Date(), closeReason: reason.trim(), versionNo: { increment: 1 } },
+      })
+      if (!result.count) throw new ConflictException('数据已被其他用户更新，请刷新后重试')
     })
-    if (activeHeatCount) throw new BadRequestException('请先撤销待生产炉次，生产中炉次不能关闭')
-    const result = await this.prisma.workOrder.updateMany({
-      where: { id, versionNo, productionStatus: { notIn: ['CLOSED', 'COMPLETED'] } },
-      data: { productionStatus: 'CLOSED', closedAt: new Date(), closeReason: reason.trim(), versionNo: { increment: 1 } },
-    })
-    if (!result.count) throw new ConflictException('数据已被其他用户更新，请刷新后重试')
     return this.workOrderDto(await this.findWorkOrder(id))
   }
 
