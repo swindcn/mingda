@@ -5,13 +5,24 @@ import { useRef } from 'react'
 import { uploadImageFile } from '../services/api'
 
 interface ImageUploadFieldProps {
-  value?: string[]
+  value?: unknown
   onChange?: (value: string[]) => void
   maxCount?: number
   readOnly?: boolean
   size?: number
   maxImageSize?: number
   quality?: number
+}
+
+function normalizeImageList(value: unknown) {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean)
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(String(value))
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
+  } catch {
+    return []
+  }
 }
 
 function createImageFallback(label = '图片') {
@@ -88,14 +99,15 @@ export function ImageUploadField({
   quality = 0.78,
 }: ImageUploadFieldProps) {
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const canUpload = !readOnly && (!maxCount || value.length < maxCount)
+  const imageList = normalizeImageList(value)
+  const canUpload = !readOnly && (!maxCount || imageList.length < maxCount)
 
   const handleFiles = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
     if (!files.length) return
 
-    const remaining = maxCount ? Math.max(maxCount - value.length, 0) : files.length
+    const remaining = maxCount ? Math.max(maxCount - imageList.length, 0) : files.length
     const acceptedFiles = files.slice(0, remaining)
     if (maxCount && files.length > remaining) {
       message.warning(`最多上传${maxCount}张图片`)
@@ -109,23 +121,23 @@ export function ImageUploadField({
           return uploaded.url
         }),
       )
-      onChange?.([...value, ...images])
+      onChange?.([...imageList, ...images])
     } catch {
       message.error('图片处理失败，请重新选择图片')
     }
   }
 
   const removeImage = (index: number) => {
-    onChange?.(value.filter((_, currentIndex) => currentIndex !== index))
+    onChange?.(imageList.filter((_, currentIndex) => currentIndex !== index))
   }
 
-  if (readOnly && value.length === 0) {
+  if (readOnly && imageList.length === 0) {
     return <span className="image-upload-empty">暂无图片</span>
   }
 
   return (
     <div className="image-upload-field">
-      {value.map((image, index) => {
+      {imageList.map((image, index) => {
         const src = resolveImageSrc(image)
         return (
           <div className="image-upload-thumb" style={{ width: size, height: size }} key={`${image}-${index}`}>

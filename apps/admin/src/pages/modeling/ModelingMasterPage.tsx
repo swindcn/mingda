@@ -107,6 +107,21 @@ function parseJsonField(value: unknown) {
   }
 }
 
+function isImageField(field: ModelingField) {
+  return field.name.toLowerCase().includes('images')
+}
+
+function normalizeImageList(value: unknown) {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean)
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(String(value))
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
 function toTimeValue(value: unknown) {
   if (!value) return undefined
   if (dayjs.isDayjs(value)) return value
@@ -382,12 +397,14 @@ export function ModelingMasterPage({
 
   const recordToFormValues = (record: ModelingRecord) => {
     const values = fields.reduce<Record<string, unknown>>((result, field) => {
-        const value = record[field.name]
-        result[field.name] = field.type === 'json' && Array.isArray(value)
+      const value = record[field.name]
+      result[field.name] = isImageField(field)
+        ? normalizeImageList(value)
+        : field.type === 'json' && Array.isArray(value)
           ? JSON.stringify(value, null, 2)
           : value
-        return result
-      }, {})
+      return result
+    }, {})
     if (resource === 'molds') {
       const coreBoxes = Array.isArray(record.coreBoxes) ? (record.coreBoxes as ModelingRecord[]) : []
       const coreBox = coreBoxes[0]
@@ -647,7 +664,7 @@ export function ModelingMasterPage({
                 )
               }
               if (field.type === 'textarea' || field.type === 'json') {
-                if (field.name.toLowerCase().includes('images')) {
+                if (isImageField(field)) {
                   return (
                     <Form.Item
                       key={field.name}
