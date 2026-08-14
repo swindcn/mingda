@@ -12,9 +12,9 @@
       <view class="wide"><text class="label">计划时间</text><text class="value">{{record.plannedStartText}}</text></view>
     </view>
     <view class="action-row">
-      <button wx:if="{{record.canStart && canStartLocal}}" class="action-button primary" loading="{{starting}}" bindtap="startTask">开始生产</button>
-      <button wx:if="{{record.canReport && canReportLocal}}" class="action-button primary" bindtap="openReport">报工</button>
-      <button wx:if="{{record.canDry && canDryLocal}}" class="action-button outline" bindtap="openDry">确认烘干</button>
+      <button wx:if="{{record.canStart}}" class="action-button primary" loading="{{starting}}" bindtap="startTask">开始生产</button>
+      <button wx:if="{{record.canReport}}" class="action-button primary" bindtap="openReport">报工</button>
+      <button wx:if="{{record.canDry}}" class="action-button outline" bindtap="openDry">确认烘干</button>
     </view>
   </view>
 

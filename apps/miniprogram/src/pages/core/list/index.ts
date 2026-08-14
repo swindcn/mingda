@@ -1,5 +1,8 @@
 import { getCoreTasks } from '../../../services/api'
 import { CoreTaskStatus, MobileCoreTask } from '../../../types/business'
+import { createLatestRequestGate } from '../../../utils/latest-request'
+
+const latestRequest = createLatestRequestGate()
 
 const tabs: Array<{ key: CoreTaskStatus; label: string }> = [
   { key: 'WAITING', label: '待生产' },
@@ -31,13 +34,18 @@ Page({
   onShow() { void this.loadRecords() },
   onPullDownRefresh() { void this.loadRecords().finally(() => wx.stopPullDownRefresh()) },
   async loadRecords() {
+    const requestId = latestRequest.next()
+    const status = this.data.activeTab
     this.setData({ loading: true })
     try {
-      this.setData({ records: display(await getCoreTasks(this.data.activeTab)) })
+      const records = await getCoreTasks(status)
+      if (!latestRequest.isCurrent(requestId)) return
+      this.setData({ records: display(records) })
     } catch (error) {
+      if (!latestRequest.isCurrent(requestId)) return
       wx.showToast({ title: error instanceof Error ? error.message : '制芯任务加载失败', icon: 'none' })
     } finally {
-      this.setData({ loading: false })
+      if (latestRequest.isCurrent(requestId)) this.setData({ loading: false })
     }
   },
   changeTab(event: WechatMiniprogram.TouchEvent) {

@@ -23,24 +23,12 @@ function decorate(record: MobileCoreTask) {
   }
 }
 
-function permissions() {
-  return wx.getStorageSync('mingda_permissions') || []
-}
-
 Page({
   data: {
     id: '', record: null as ReturnType<typeof decorate> | null, loading: false, starting: false,
-    canStartLocal: false, canReportLocal: false, canDryLocal: false,
   },
   onLoad(query: Record<string, string>) { this.setData({ id: query.id || '' }) },
   onShow() {
-    const current = permissions()
-    const superUser = wx.getStorageSync('mingda_user_type') === 'SUPER_ADMIN'
-    this.setData({
-      canStartLocal: superUser || current.includes('mini.production.core.start'),
-      canReportLocal: superUser || current.includes('mini.production.core.report'),
-      canDryLocal: superUser || current.includes('mini.production.core.dry'),
-    })
     if (this.data.id) void this.loadDetail()
   },
   onPullDownRefresh() { void this.loadDetail().finally(() => wx.stopPullDownRefresh()) },
@@ -56,7 +44,7 @@ Page({
   },
   async startTask() {
     const record = this.data.record
-    if (!record || this.data.starting || !record.canStart || !this.data.canStartLocal) return
+    if (!record || this.data.starting || !record.canStart) return
     const modal = await wx.showModal({ title: '开始制芯', content: `确认开始任务 ${record.code}？`, confirmText: '确认开始' })
     if (!modal.confirm) return
     this.setData({ starting: true })
@@ -72,10 +60,10 @@ Page({
   },
   openReport() {
     const record = this.data.record
-    if (record?.canReport && this.data.canReportLocal) wx.navigateTo({ url: `/pages/core/report/index?id=${record.id}&versionNo=${record.versionNo}` })
+    if (record?.canReport) wx.navigateTo({ url: `/pages/core/report/index?id=${record.id}&versionNo=${record.versionNo}` })
   },
   openDry() {
     const record = this.data.record
-    if (record?.canDry && this.data.canDryLocal) wx.navigateTo({ url: `/pages/core/dry/index?id=${record.id}` })
+    if (record?.canDry) wx.navigateTo({ url: `/pages/core/dry/index?id=${record.id}` })
   },
 })

@@ -51,17 +51,47 @@ test('renders three task tabs, planned time ordering, cards and empty state', ()
   assert.match(view, /暂无制芯任务/)
 })
 
-test('detail combines backend flags and local permissions for start report and dry', () => {
+test('detail actions trust backend flags without a second local permission gate', () => {
   const logic = read('pages/core/detail/index.js')
   const view = read('pages/core/detail/index.wxml')
-  assert.match(logic, /mini\.production\.core\.start/)
-  assert.match(logic, /mini\.production\.core\.report/)
-  assert.match(logic, /mini\.production\.core\.dry/)
-  assert.match(view, /canStart/)
-  assert.match(view, /canReport/)
-  assert.match(view, /canDry/)
+  assert.match(view, /wx:if="\{\{record\.canStart\}\}"/)
+  assert.match(view, /wx:if="\{\{record\.canReport\}\}"/)
+  assert.match(view, /wx:if="\{\{record\.canDry\}\}"/)
+  assert.doesNotMatch(view, /can(?:Start|Report|Dry)Local/)
+  assert.doesNotMatch(logic, /SUPER_ADMIN|mingda_permissions|can(?:Start|Report|Dry)Local/)
   assert.match(view, /报工记录/)
   assert.match(view, /砂芯批次/)
+})
+
+test('latest request gate prevents delayed responses from replacing records or loading', async () => {
+  const gatePath = path.join(dist, 'utils/latest-request.js')
+  assert.ok(fs.existsSync(gatePath), 'latest request gate output must exist')
+  const { createLatestRequestGate } = require(gatePath)
+  const gate = createLatestRequestGate()
+  const state = { records: [], loading: false }
+
+  async function load(label, delay) {
+    const requestId = gate.next()
+    state.loading = true
+    try {
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      if (!gate.isCurrent(requestId)) return
+      state.records = [label]
+    } finally {
+      if (gate.isCurrent(requestId)) state.loading = false
+    }
+  }
+
+  const stale = load('WAITING', 20)
+  const current = load('COMPLETED', 0)
+  await current
+  assert.deepEqual(state, { records: ['COMPLETED'], loading: false })
+  await stale
+  assert.deepEqual(state, { records: ['COMPLETED'], loading: false })
+
+  const list = read('pages/core/list/index.js')
+  assert.match(list, /createLatestRequestGate/)
+  assert.match(list, /isCurrent\(requestId\)/)
 })
 
 test('report uses current user, two quantity inputs, real shift and scannable sand batch', () => {
