@@ -22,6 +22,11 @@ import { ProductionPermissionGuard } from './production-permission.guard'
 export class CoremakingController {
   constructor(private readonly coremaking: CoremakingService) {}
 
+  @Get('work-orders/:id/core-readiness')
+  readiness(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.coremaking.getCoreReadiness(request, id)
+  }
+
   @Post('work-orders/:id/core-tasks/preview')
   preview(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: CoreTaskPreviewBody) {
     return this.coremaking.previewTasks(request, id, body)

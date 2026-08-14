@@ -20,6 +20,11 @@ import type {
 
 type DatabaseClient = PrismaService | Prisma.TransactionClient
 
+export type CoreConsumptionOperator = {
+  id: string
+  name: string
+}
+
 function decimal(value: Prisma.Decimal | number | null | undefined) {
   return value === null || value === undefined ? null : Number(value)
 }
@@ -691,7 +696,7 @@ export class CoremakingService {
     return coreBatchStatus(now, record.expiresAt) as CoreBatchStatus
   }
 
-  private async refreshInventoryStatuses(where: Prisma.CoreInventoryBatchWhereInput) {
+  async refreshInventoryStatuses(where: Prisma.CoreInventoryBatchWhereInput = {}) {
     const now = new Date()
     const warningAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
     await this.prisma.$transaction([
@@ -713,6 +718,208 @@ export class CoremakingService {
         data: { status: 'AVAILABLE' },
       }),
     ])
+  }
+
+  async getCoreReadiness(request: RequestWithAdmin, workOrderId: string) {
+    await this.assertWorkOrderVisible(request, workOrderId)
+    const workOrder = await this.loadWorkOrder(this.prisma, workOrderId)
+    const coreBoxCodes = workOrder.bomVersion.coreBoxes.map((item) => item.coreBoxCode)
+    const inventoryWhere: Prisma.CoreInventoryBatchWhereInput = {
+      productCodeSnapshot: workOrder.productCode,
+      coreBoxCodeSnapshot: { in: coreBoxCodes },
+      report: {
+        task: {
+          bomVersionId: workOrder.bomVersionId,
+          workOrder: { productCode: workOrder.productCode, bomVersionId: workOrder.bomVersionId },
+        },
+      },
+    }
+    if (coreBoxCodes.length) await this.refreshInventoryStatuses(inventoryWhere)
+    const inventory = coreBoxCodes.length
+      ? await this.prisma.coreInventoryBatch.groupBy({
+        by: ['coreBoxCodeSnapshot', 'status'],
+        where: { AND: [inventoryWhere, { currentQuantity: { gt: 0 } }] },
+        _sum: { currentQuantity: true },
+        _min: { expiresAt: true },
+      })
+      : []
+    const now = Date.now()
+    const rows = workOrder.bomVersion.coreBoxes.map((item) => {
+      const groups = inventory.filter((group) => group.coreBoxCodeSnapshot === item.coreBoxCode)
+      const usableGroups = groups.filter((group) => ['AVAILABLE', 'WARNING'].includes(group.status))
+      const requiredQuantity = Number((workOrder.plannedQuantity * Number(item.quantityPerProduct)).toFixed(4))
+      const availableQuantity = usableGroups.reduce((sum, group) => sum + Number(group._sum.currentQuantity || 0), 0)
+      const undriedQuantity = groups
+        .filter((group) => group.status === 'UNDRIED')
+        .reduce((sum, group) => sum + Number(group._sum.currentQuantity || 0), 0)
+      const shortageQuantity = Number(Math.max(requiredQuantity - availableQuantity, 0).toFixed(4))
+      const expirations = usableGroups.map((group) => group._min.expiresAt).filter((value): value is Date => value !== null)
+      const minExpiresAt = expirations.length ? new Date(Math.min(...expirations.map((value) => value.getTime()))) : null
+      return {
+        coreBoxCode: item.coreBoxCode,
+        coreBoxName: item.coreBoxNameSnapshot || item.coreBox.name,
+        quantityPerProduct: Number(item.quantityPerProduct),
+        requiredQuantity,
+        availableQuantity,
+        undriedQuantity,
+        shortageQuantity,
+        minRemainingHours: minExpiresAt ? Number(Math.max((minExpiresAt.getTime() - now) / 3_600_000, 0).toFixed(2)) : null,
+        readinessStatus: shortageQuantity === 0 ? 'READY' : availableQuantity > 0 || undriedQuantity > 0 ? 'PARTIAL' : 'SHORTAGE',
+      }
+    })
+    const totalRequiredQuantity = Number(rows.reduce((sum, row) => sum + row.requiredQuantity, 0).toFixed(4))
+    const totalAvailableQuantity = rows.reduce((sum, row) => sum + row.availableQuantity, 0)
+    const totalUndriedQuantity = rows.reduce((sum, row) => sum + row.undriedQuantity, 0)
+    const totalShortageQuantity = Number(rows.reduce((sum, row) => sum + row.shortageQuantity, 0).toFixed(4))
+    const readinessRate = totalRequiredQuantity === 0
+      ? 100
+      : Number((((totalRequiredQuantity - totalShortageQuantity) / totalRequiredQuantity) * 100).toFixed(2))
+    return {
+      workOrderId: workOrder.id,
+      workOrderCode: workOrder.code,
+      rows,
+      totalRequiredQuantity,
+      totalAvailableQuantity,
+      totalUndriedQuantity,
+      totalShortageQuantity,
+      readinessRate,
+    }
+  }
+
+  private consumptionOperator(value: CoreConsumptionOperator | undefined) {
+    const id = String(value?.id || '').trim()
+    const name = String(value?.name || '').trim()
+    if (!id || !name) throw new BadRequestException('领用操作人信息不完整')
+    return { id, name }
+  }
+
+  private async consumptionContext(client: DatabaseClient, workOrderId: string, batchCode: string, quantity: number) {
+    const [workOrder, batch] = await Promise.all([
+      client.workOrder.findUnique({
+        where: { id: workOrderId },
+        select: {
+          id: true,
+          code: true,
+          productCode: true,
+          bomVersionId: true,
+          bomVersion: { select: { coreBoxes: { select: { coreBoxCode: true } } } },
+        },
+      }),
+      client.coreInventoryBatch.findUnique({
+        where: { code: batchCode },
+        include: {
+          report: {
+            include: {
+              task: {
+                select: {
+                  workOrderId: true,
+                  bomVersionId: true,
+                  coreBoxCode: true,
+                  productCodeSnapshot: true,
+                  workOrder: { select: { productCode: true, bomVersionId: true } },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ])
+    if (!workOrder) throw new NotFoundException('生产工单不存在')
+    if (!batch) throw new NotFoundException('砂芯批次不存在')
+    const sourceTask = batch.report.task
+    if (
+      batch.productCodeSnapshot !== workOrder.productCode
+      || sourceTask.productCodeSnapshot !== workOrder.productCode
+      || sourceTask.workOrder.productCode !== workOrder.productCode
+    ) {
+      throw new BadRequestException('砂芯批次产品与目标工单不匹配')
+    }
+    if (sourceTask.bomVersionId !== workOrder.bomVersionId || sourceTask.workOrder.bomVersionId !== workOrder.bomVersionId) {
+      throw new BadRequestException('砂芯批次 BOM 与目标工单锁定 BOM 不匹配')
+    }
+    const allowedCoreBoxes = new Set(workOrder.bomVersion.coreBoxes.map((item) => item.coreBoxCode))
+    if (batch.coreBoxCodeSnapshot !== sourceTask.coreBoxCode || !allowedCoreBoxes.has(sourceTask.coreBoxCode)) {
+      throw new BadRequestException('砂芯批次芯盒不属于目标工单锁定 BOM')
+    }
+    const status = this.liveBatchStatus(batch, new Date())
+    if (!['AVAILABLE', 'WARNING'].includes(status)) throw new ConflictException('砂芯批次当前状态不可领用')
+    if (batch.currentQuantity < quantity) throw new ConflictException('砂芯批次库存不足')
+    return { workOrder, batch, status }
+  }
+
+  async validateCoreConsumption(
+    workOrderId: string,
+    batchCode: string,
+    quantity: number,
+    operatorContext?: CoreConsumptionOperator,
+  ) {
+    const normalizedWorkOrderId = textValue(workOrderId, '生产工单', true)
+    const normalizedBatchCode = textValue(batchCode, '砂芯批次', true)
+    const normalizedQuantity = requiredInteger(quantity, '领用数量', 1)
+    if (operatorContext !== undefined) this.consumptionOperator(operatorContext)
+    await this.refreshInventoryStatuses({ code: normalizedBatchCode })
+    const { batch, status } = await this.consumptionContext(this.prisma, normalizedWorkOrderId, normalizedBatchCode, normalizedQuantity)
+    return {
+      workOrderId: normalizedWorkOrderId,
+      batchId: batch.id,
+      batchCode: batch.code,
+      coreBoxCode: batch.coreBoxCodeSnapshot,
+      requestedQuantity: normalizedQuantity,
+      availableQuantity: batch.currentQuantity,
+      status,
+      recommendationPriority: status === 'WARNING' ? 'FIRST' : 'NORMAL',
+      versionNo: batch.versionNo,
+    }
+  }
+
+  async consumeCoreBatch(
+    workOrderId: string,
+    batchCode: string,
+    quantity: number,
+    operatorContext: CoreConsumptionOperator,
+  ) {
+    const normalizedWorkOrderId = textValue(workOrderId, '生产工单', true)
+    const normalizedBatchCode = textValue(batchCode, '砂芯批次', true)
+    const normalizedQuantity = requiredInteger(quantity, '领用数量', 1)
+    const operator = this.consumptionOperator(operatorContext)
+    const batchId = await this.serializable(async (tx) => {
+      const target = await tx.coreInventoryBatch.findUnique({ where: { code: normalizedBatchCode }, select: { id: true } })
+      if (!target) throw new NotFoundException('砂芯批次不存在')
+      await this.lockBatchRecord(tx, target.id)
+      const { batch, status } = await this.consumptionContext(tx, normalizedWorkOrderId, normalizedBatchCode, normalizedQuantity)
+      if (status !== batch.status) {
+        await tx.coreInventoryBatch.updateMany({ where: { id: batch.id, status: batch.status }, data: { status } })
+      }
+      const quantityAfter = batch.currentQuantity - normalizedQuantity
+      const updated = await tx.coreInventoryBatch.updateMany({
+        where: {
+          id: batch.id,
+          versionNo: batch.versionNo,
+          currentQuantity: { gte: normalizedQuantity },
+          status: { in: ['AVAILABLE', 'WARNING'] },
+        },
+        data: {
+          currentQuantity: { decrement: normalizedQuantity },
+          status: quantityAfter === 0 ? 'CONSUMED' : status,
+          versionNo: { increment: 1 },
+        },
+      })
+      if (!updated.count) throw new ConflictException('砂芯批次已被其他操作领用，请刷新后重试')
+      await tx.coreInventoryLedger.create({
+        data: {
+          batchId: batch.id,
+          action: 'CONSUMED',
+          quantityChange: -normalizedQuantity,
+          quantityAfter,
+          sourceType: 'WORK_ORDER',
+          sourceId: normalizedWorkOrderId,
+          operatorUserId: operator.id,
+          operatorNameSnapshot: operator.name,
+        },
+      })
+      return batch.id
+    })
+    return this.batchDto(await this.refreshBatchStatus(batchId))
   }
 
   private async validateStartResources(

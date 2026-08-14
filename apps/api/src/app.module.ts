@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
+import { ScheduleModule } from '@nestjs/schedule'
 import { AppController } from './app.controller'
 import { BasicDataController } from './basic-data.controller'
 import { CastingBomController } from './casting-bom.controller'
@@ -18,6 +19,7 @@ import { ProductionService } from './production/production.service'
 import { WorkOrderController } from './production/work-order.controller'
 import { CoremakingController } from './production/coremaking.controller'
 import { CoremakingService } from './production/coremaking.service'
+import { CoreInventoryScheduler } from './production/core-inventory.scheduler'
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { CoremakingService } from './production/coremaking.service'
       isGlobal: true,
       envFilePath: ['.env', '.env.local'],
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
   ],
   controllers: [
@@ -45,6 +48,6 @@ import { CoremakingService } from './production/coremaking.service'
     MobileHeatExecutionController,
     CoremakingController,
   ],
-  providers: [ResourceParserService, ProductionService, CoremakingService, ProductionPermissionGuard],
+  providers: [ResourceParserService, ProductionService, CoremakingService, CoreInventoryScheduler, ProductionPermissionGuard],
 })
 export class AppModule {}
