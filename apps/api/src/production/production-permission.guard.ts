@@ -5,16 +5,25 @@ import { getAdminContext, hasAdminPermission, type RequestWithAdmin } from '../s
 function permissionFor(request: Request) {
   const path = request.path
   const isMiniProgram = path.includes('/mini/production/')
+  if (/\/work-orders\/[^/]+\/core-readiness$/.test(path)) return 'production.work_order.view'
   if (path.includes('/core-tasks')) {
     if (/\/work-orders\/[^/]+\/core-tasks\/preview$/.test(path)) return 'production.core_task.create'
     if (/\/work-orders\/[^/]+\/core-tasks$/.test(path) && request.method === 'POST') return 'production.core_task.create'
     if (/\/core-tasks\/[^/]+\/dispatch$/.test(path)) return 'production.core_task.dispatch'
     if (/\/core-tasks\/[^/]+\/cancel$/.test(path)) return 'production.core_task.cancel'
-    if (/\/core-tasks\/[^/]+\/start$/.test(path)) return 'production.core_task.start'
-    if (/\/core-tasks\/[^/]+\/report$/.test(path)) return 'production.core_task.report'
-    return 'production.core_task.view'
+    const corePermissionPrefix = isMiniProgram ? 'mini.production.core' : 'production.core_task'
+    if (/\/core-tasks\/[^/]+\/start$/.test(path)) return `${corePermissionPrefix}.start`
+    if (/\/core-tasks\/[^/]+\/report$/.test(path)) return `${corePermissionPrefix}.report`
+    return `${corePermissionPrefix}.view`
   }
-  if (path.includes('/core-batches')) return 'production.core_inventory.manage'
+  if (path.includes('/core-batches')) {
+    if (/\/core-batches\/[^/]+\/dry$/.test(path)) {
+      return isMiniProgram ? 'mini.production.core.dry' : 'production.core_inventory.dry'
+    }
+    if (/\/core-batches\/[^/]+\/(?:lock|unlock)$/.test(path)) return 'production.core_inventory.lock'
+    if (/\/core-batches\/[^/]+\/scrap$/.test(path)) return 'production.core_inventory.scrap'
+    return 'production.core_inventory.view'
+  }
   if (path.includes('/core-inventory')) return 'production.core_inventory.view'
   if (path.includes('/work-orders')) {
     if (/\/work-orders\/[^/]+\/close$/.test(path)) return 'production.work_order.close'

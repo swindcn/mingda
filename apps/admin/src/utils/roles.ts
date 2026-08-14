@@ -43,6 +43,18 @@ export const productionPermissionKeys = [
   'production.work_order.edit',
   'production.work_order.close',
   'production.work_order.view_synced_public',
+  'production.core_task.view',
+  'production.core_task.create',
+  'production.core_task.dispatch',
+  'production.core_task.edit',
+  'production.core_task.cancel',
+  'production.core_task.start',
+  'production.core_task.report',
+  'production.core_task.dry',
+  'production.core_inventory.view',
+  'production.core_inventory.dry',
+  'production.core_inventory.lock',
+  'production.core_inventory.scrap',
   'production.schedule.view',
   'production.schedule.create',
   'production.schedule.adjust',
@@ -60,6 +72,10 @@ export const miniProgramPermissionKeys = [
   'mini.production.heat.start',
   'mini.production.heat.transfer',
   'mini.production.heat.complete',
+  'mini.production.core.view',
+  'mini.production.core.start',
+  'mini.production.core.report',
+  'mini.production.core.dry',
 ] as const
 
 export const modelingPermissionKeys = [
@@ -325,6 +341,30 @@ export const adminPermissionTree: DataNode[] = [
             ],
           },
           {
+            title: '制芯任务',
+            key: 'group.production.core_task',
+            children: [
+              { title: '制芯任务-数据列表', key: 'production.core_task.view' },
+              { title: '制芯任务-生成', key: 'production.core_task.create' },
+              { title: '制芯任务-派工', key: 'production.core_task.dispatch' },
+              { title: '制芯任务-编辑', key: 'production.core_task.edit' },
+              { title: '制芯任务-取消', key: 'production.core_task.cancel' },
+              { title: '制芯任务-开始', key: 'production.core_task.start' },
+              { title: '制芯任务-报工', key: 'production.core_task.report' },
+              { title: '制芯任务-烘干', key: 'production.core_task.dry' },
+            ],
+          },
+          {
+            title: '砂芯库存',
+            key: 'group.production.core_inventory',
+            children: [
+              { title: '砂芯库存-数据列表', key: 'production.core_inventory.view' },
+              { title: '砂芯库存-烘干', key: 'production.core_inventory.dry' },
+              { title: '砂芯库存-锁定/解锁', key: 'production.core_inventory.lock' },
+              { title: '砂芯库存-报废', key: 'production.core_inventory.scrap' },
+            ],
+          },
+          {
             title: '合炉排产',
             key: 'group.production.schedule',
             children: [
@@ -445,6 +485,16 @@ export const miniProgramPermissionTree: DataNode[] = [
               { title: '熔炼任务-开始生产', key: 'mini.production.heat.start' },
               { title: '熔炼任务-转运出炉', key: 'mini.production.heat.transfer' },
               { title: '熔炼任务-完成生产', key: 'mini.production.heat.complete' },
+            ],
+          },
+          {
+            title: '制芯任务',
+            key: 'group.mini.production.core',
+            children: [
+              { title: '制芯任务-数据列表', key: 'mini.production.core.view' },
+              { title: '制芯任务-开始生产', key: 'mini.production.core.start' },
+              { title: '制芯任务-报工', key: 'mini.production.core.report' },
+              { title: '制芯任务-烘干', key: 'mini.production.core.dry' },
             ],
           },
         ],

@@ -28,6 +28,11 @@ import { HeatOrderListPage } from './pages/production/HeatOrderListPage'
 import { MeltSchedulingPage } from './pages/production/MeltSchedulingPage'
 import { WorkOrderListPage } from './pages/production/WorkOrderListPage'
 import { WorkOrderWorkbenchPage } from './pages/production/WorkOrderWorkbenchPage'
+import {
+  CoreInventoryPlaceholderPage,
+  CoreTaskDetailPlaceholderPage,
+  CoreTaskListPlaceholderPage,
+} from './pages/production/CoremakingPlaceholderPages'
 import { apiRequest } from './services/api'
 import { hasPermission } from './utils/roles'
 
@@ -146,6 +151,9 @@ export default function App() {
         <Route path="production/work-orders/new" element={protectedPage('production.work_order.create', <WorkOrderWorkbenchPage />)} />
         <Route path="production/work-orders/:id" element={protectedPage('production.work_order.view', <WorkOrderWorkbenchPage />)} />
         <Route path="production/work-orders/:id/edit" element={protectedPage('production.work_order.edit', <WorkOrderWorkbenchPage />)} />
+        <Route path="production/core-tasks" element={protectedPage('production.core_task.view', <CoreTaskListPlaceholderPage />)} />
+        <Route path="production/core-tasks/:id" element={protectedPage('production.core_task.view', <CoreTaskDetailPlaceholderPage />)} />
+        <Route path="production/core-inventory" element={protectedPage('production.core_inventory.view', <CoreInventoryPlaceholderPage />)} />
         <Route path="production/melt-scheduling" element={protectedPage('production.schedule.view', <MeltSchedulingPage />)} />
         <Route path="production/heat-orders" element={protectedPage('production.heat.view', <HeatOrderListPage />)} />
         <Route path="production/heat-orders/:id" element={protectedPage('production.heat.view', <HeatOrderDetailPage />)} />

@@ -118,6 +118,18 @@ const allMenuItems: AppMenuItem[] = [
         permission: 'production.work_order.view',
       },
       {
+        key: '/dashboard/production/core-tasks',
+        icon: <ClipboardList size={18} />,
+        label: '制芯任务',
+        permission: 'production.core_task.view',
+      },
+      {
+        key: '/dashboard/production/core-inventory',
+        icon: <PackageSearch size={18} />,
+        label: '砂芯库存',
+        permission: 'production.core_inventory.view',
+      },
+      {
         key: '/dashboard/production/melt-scheduling',
         icon: <Factory size={18} />,
         label: '合炉排产',
