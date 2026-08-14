@@ -432,3 +432,54 @@ npm run build:miniprogram
 - BOM API：`apps/api/src/casting-bom.controller.ts`
 - 数据结构：`apps/api/prisma/schema.prisma`
 - 接口回归：`apps/api/scripts/test-mold-coreboxes.mjs`、`apps/api/scripts/test-casting-boms.mjs`
+
+## 制芯计划、报工与砂芯库存（2026-08-15）
+
+完整业务关系：
+
+```text
+生产工单锁定 bomVersionId / routingVersionId
+  -> CastingBomVersionCoreBox（quantityPerProduct / shelfLifeHours）
+  -> 手动生成 CoreProductionTask（生产工单 + 芯盒唯一）
+  -> 多次 CoreProductionReport
+  -> 每次报工唯一 CoreInventoryBatch
+  -> 每次库存变化写 CoreInventoryLedger
+  -> 未来造型 validateCoreConsumption / consumeCoreBatch
+```
+
+- 工单提交时只锁定已生效 BOM、默认路线和快照，不自动生成制芯任务。`apps/api/src/production/production.service.ts` 只在锁定路线存在 `operation.section === '制芯'` 的节点时返回 `requiresCoremaking=true`；`apps/admin/src/pages/production/WorkOrderWorkbenchPage.tsx` 才显示手动“生成制芯任务”入口。无制芯节点显示“该工单无需制芯”，全部 BOM 芯盒已有任务后只保留查看入口。
+- 任务按 `生产工单 + 芯盒编码` 拆分，数据库约束为 `CoreProductionTask.@@unique([workOrderId, coreBoxCode])`。一个 BOM 有多套芯盒时生成多条任务；同一工单、同一芯盒不能重复生成。
+- 每套芯盒的计划量为 `ceil(工单计划数量 × quantityPerProduct × (1 + expectedScrapRate))`，计划压盒次数为 `ceil(计划量 ÷ CoreBoxMaster.cavityCount)`。`apps/api/src/production/coremaking.calculations.ts` 使用 `Prisma.Decimal` 缩放和整数运算避免浮点边界误差，任务保存芯件比、穴数、保质期、BOM、路线和工序快照。
+- 生成时必须选工单锁定路线中的制芯节点；设备必须是该节点绑定的启用设备，班组必须启用且与设备同车间。设备、班组、计划开始时间齐全时进入 `WAITING`，否则为 `PENDING_DISPATCH`，可在无报工时补派或调整。
+- 任务状态为 `PENDING_DISPATCH -> WAITING -> IN_PROGRESS -> COMPLETED`，未报工且未完成时可进入 `CANCELED`。任务允许多次报工；每次报工在同一可串行化事务中累计任务数量，新增一条 `CoreProductionReport`、一条 `reportId` 唯一的 `CoreInventoryBatch` 和一条 `PRODUCED` 流水。累计合格数达到计划量即完成，允许保留超产数量。
+
+库存与保质期：
+
+- 免烘干报工：从 `reportedAt` 起算保质期，批次直接按实时剩余时间进入 `AVAILABLE` 或 `WARNING`。
+- 需要烘干报工：先进入 `UNDRIED`，不计可用库存；确认烘干后从 `driedAt` 起算，进入 `AVAILABLE` 或 `WARNING`。
+- 剩余时间 `<= 24h` 为 `WARNING`，到期为 `EXPIRED`；过期、待烘干、冻结、报废和耗尽批次不可领用。保质期为空表示长期有效，但需烘干批次仍要先完成烘干。
+- `CoreInventoryScheduler` 每 10 分钟批量刷新临期/过期状态；库存读取、齐套和领用校验还会实时刷新，不能只依赖定时任务。
+- 批次可 `LOCKED / UNLOCKED / SCRAPPED / CONSUMED`；入库、冻结、解冻、报废和未来领用都写 `CoreInventoryLedger`。报废清零，领用扣减到零后转 `CONSUMED`。
+- 齐套按目标工单锁定 BOM 的芯盒逐行计算，只统计同产品、同芯盒、状态为 `AVAILABLE/WARNING` 且数量大于 `0` 的库存。同产品的旧/新 BOM 或其他工单若包含同一芯盒，可以共用有效批次；不同产品即使芯盒相同也不兼容。
+
+页面、路由与真实接口：
+
+- 管理端页面：`/dashboard/production/core-tasks`、`/dashboard/production/core-tasks/:id`、`/dashboard/production/core-inventory`；工单详情内嵌生成工作台和 `CoreReadinessPanel`。实现位于 `apps/admin/src/pages/production/CoreTaskListPage.tsx`、`CoreTaskDetailPage.tsx`、`CoreTaskGenerationModal.tsx`、`CoreInventoryPage.tsx`、`CoreBatchLabel.tsx` 和 `CoreReadinessPanel.tsx`。
+- 管理端 API 位于 `apps/api/src/production/coremaking.controller.ts`：`POST /admin/production/work-orders/:id/core-tasks/preview`、`POST /admin/production/work-orders/:id/core-tasks`、`GET /admin/production/work-orders/:id/core-readiness`，以及 `/admin/production/core-tasks`、`/admin/production/core-inventory` 下的详情/动作接口和 `POST /admin/production/core-batches/:id/dry`、`lock`、`unlock`、`scrap`。
+- 小程序页面：`pages/core/list/index`、`detail/index`、`report/index`、`dry/index`、`label/index`；接口为 `/mini/production/core-tasks*` 和 `/mini/production/core-batches/:id/dry`。支持开始、分批报工、混砂批次扫码、烘干和本地生成二维码标签，不提供派工、取消、冻结或报废。
+- 小程序普通员工只能查看和操作所属执行班组任务；超级管理员例外。功能权限和班组关系由后端同时校验，越权统一按任务不存在处理。
+
+权限键：
+
+- 管理端任务：`production.core_task.view/create/dispatch/edit/cancel/start/report/dry`。
+- 管理端库存：`production.core_inventory.view/dry/lock/scrap`。
+- 小程序：`mini.production.core.view/start/report/dry`。
+- `production.core_task.edit` 已在权限树和默认权限中注册；当前没有通用任务编辑接口，实际业务修改分别使用 `dispatch/cancel/start/report/dry` 专用权限。
+- 路由、菜单、按钮和 API 必须使用对应最小权限；`ProductionPermissionGuard` 先去除尾斜杠再匹配，带或不带尾斜杠不能绕过动作权限。
+
+统一防呆与一期边界：
+
+- 任务和库存动作必须携带最新 `versionNo`；旧版本返回 `409`，管理端和小程序原地刷新后提示重试。列表、详情、标签、报工和烘干使用 latest-request gate，页面卸载或筛选切换后的旧响应不得覆盖新状态。
+- 任务生成锁工单，开始/报工锁任务，烘干/库存动作/未来消费锁批次；任务与批次编码通过事务序列生成，报工、批次和流水整体成功或整体回滚。
+- `apps/api/src/production/coremaking.service.ts` 已预留无页面依赖的 `validateCoreConsumption(...)` 和 `consumeCoreBatch(...)`，包含产品、目标锁定 BOM 芯盒、状态、数量、行锁、乐观锁和 `CONSUMED` 流水校验。
+- 一期只有 `GET /admin/production/work-orders/:id/core-readiness` 暴露为 HTTP；`validateCoreConsumption`、`consumeCoreBatch` 尚未挂控制器。当前不做造型任务、造型排产或下芯领用页面，后续造型模块应复用这两个领域方法，不能绕过库存流水直接改数量。

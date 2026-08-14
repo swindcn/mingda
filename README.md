@@ -1,6 +1,6 @@
 # 闽大铸件
 
-生产执行模块现已覆盖生产工单提交、BOM/工艺路线版本锁定、同材质合炉排产、按整数件拆单、熔炼任务下发，以及管理端和小程序班组执行。详细关系与状态规则见 [生产工单与熔炼执行开发记录](docs/product/production-execution-context.md)。
+生产执行模块现已覆盖生产工单提交、BOM/工艺路线版本锁定、同材质合炉排产、按整数件拆单、熔炼任务下发、制芯任务与砂芯批次库存，以及管理端和小程序班组执行。生产工单与熔炼关系见 [生产工单与熔炼执行开发记录](docs/product/production-execution-context.md)，制芯实现见 [生产建模模块开发记录](docs/product/modeling-context.md)。
 
 闽大铸件是面向铸件生产企业的业务管理与生产协同系统。系统当前已包含管理端 Web、后端 API、PostgreSQL 数据库和微信小程序端，重点覆盖基础资料、组织权限、模具开发协同、生产建模、工艺管理以及供应商小程序协同。
 
@@ -112,6 +112,16 @@ scripts/          项目脚本
 - 工单联动：炉次状态、操作人、时间、转运累计和最终重量同步回写工单关联信息；熔炼完成不等于整单最终完工。
 - 移动端执行：班组成员通过小程序查看任务、选择或扫码炉号与包号并完成熔炼操作，权限与管理端独立配置。
 
+### 制芯计划与砂芯库存
+
+- 手动生成：生产工单锁定路线含制芯节点时，工单详情按锁定 BOM 的每套芯盒手动生成任务；同一工单和芯盒只能有一条任务。
+- 计划计算：`计划量 = ceil(工单数量 × BOM芯件比 × (1 + 预计废品率))`，`压盒次数 = ceil(计划量 ÷ 芯盒穴数)`，后端使用 Decimal 缩放整数计算。
+- 派工执行：任务支持待派工、待生产、生产中、已完成和已取消；设备限定为路线节点绑定设备，班组限定为设备同车间班组。
+- 多次报工：每次报工生成唯一砂芯批次和入库流水；免烘干从报工时起算保质期，需烘干从确认烘干时起算。
+- 库存状态：支持待烘干、可用、24 小时临期、过期、冻结、报废和耗尽；过期批次不可领用，所有库存变化保留流水。
+- 齐套预留：工单详情按锁定 BOM 芯盒展示可用量与缺口；领域服务已预留未来造型批次校验和并发扣减，一期不提供造型或下芯领用页面。
+- 移动端执行：小程序支持班组任务、开始、分批报工、混砂批次扫码、烘干和二维码标签，按独立 mini 权限和班组关系隔离。
+
 ### 模具与工装档案
 
 - 模具档案：维护模具编码、名称、关联物料、型腔数、寿命上限、已用寿命、状态。
@@ -133,6 +143,7 @@ scripts/          项目脚本
   - 收货后可提交试模、量产、模具评判
   - 试模和量产分别上传产品图片、破坏性检测图片
 - 移动端限制：小程序端不提供编辑和中止功能。
+- 制芯执行：小程序提供制芯任务列表、详情、报工、烘干和批次标签；普通用户仅能访问所属执行班组任务。
 
 ## 功能关系
 
@@ -183,6 +194,14 @@ scripts/          项目脚本
 
 模具档案
   └─ 芯盒档案
+
+生产工单（锁定 BOM / 路线）
+  └─ BOM 芯盒（芯件比 / 保质期）
+      └─ 手动制芯任务（一工单 + 芯盒唯一）
+          └─ 多次报工
+              └─ 每次唯一砂芯批次
+                  └─ 库存流水
+                      └─ 未来造型校验 / 消费
 ```
 
 ## 后端与数据
@@ -204,10 +223,14 @@ scripts/          项目脚本
 - `/api/admin/production/work-orders`：生产工单
 - `/api/admin/production/melt-scheduling`：合炉排产和设备排程
 - `/api/admin/production/heat-orders`：管理端熔炼执行
+- `/api/admin/production/core-tasks`：管理端制芯任务、派工、开始和报工
+- `/api/admin/production/core-inventory`：管理端砂芯库存、流水和状态管理
+- `/api/admin/production/work-orders/:id/core-readiness`：生产工单砂芯齐套
 - `/api/mobile/home`：小程序首页
 - `/api/mobile/todos`：小程序待办
 - `/api/mobile/molds`：小程序模具开发任务
 - `/api/mobile/production/heat-orders`：小程序熔炼任务与执行
+- `/api/mini/production/core-tasks`：小程序制芯任务与班组执行
 
 核心数据模型：
 
@@ -248,9 +271,23 @@ scripts/          项目脚本
 - HeatOrderAllocation
 - HeatOrderTransfer
 - HeatOrderRecord
+- CoreProductionTask
+- CoreProductionReport
+- CoreInventoryBatch
+- CoreInventoryLedger
 - DocumentSequence
 
 ## 测试环境
+
+本地非 Docker 开发地址：
+
+```text
+管理端（Vite）：http://localhost:5173
+API：http://localhost:3000/api
+健康检查：http://localhost:3000/api/health
+```
+
+本地 Docker 地址由主环境验收使用：管理端 `http://localhost:8080`，API 健康检查 `http://localhost:3000/api/health`。
 
 ```text
 管理端：http://124.223.2.193
@@ -276,6 +313,22 @@ npm --prefix apps/api run build
 npm --prefix apps/api run prisma:generate
 npm run build:miniprogram
 npm run typecheck:miniprogram
+```
+
+制芯快速验证：
+
+```bash
+npm --prefix apps/api run test:coremaking-calculations
+node --test apps/admin/tests/coremaking-permissions.test.mjs apps/admin/tests/coremaking-ui.test.mjs
+npm --prefix apps/miniprogram test
+```
+
+以下集成命令需要可访问的本地 PostgreSQL，使用并清理独立临时 schema；Docker 启停和环境验收由主代理执行：
+
+```bash
+npm --prefix apps/api run test:coremaking-tasks
+npm --prefix apps/api run test:coremaking-execution
+npm --prefix apps/api run test:core-readiness
 ```
 
 ## 设计来源

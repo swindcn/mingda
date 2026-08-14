@@ -110,6 +110,29 @@
 | MDM-091 | 铸造 BOM 工装 | 保质期校验 | 分别提交 0 和负数保质期 | 后端拒绝并提示保质期必须大于 0 小时 |
 | MDM-092 | 铸造 BOM 工装 | 保质期版本继承 | 创建 BOM 新版本并调用生产需求计算接口 | 新版本和计算结果原样返回每套芯盒的保质期小时数 |
 
+### 制芯自动化与手工用例
+
+| 编号 | 方式 | 模块 | 用例 | 操作 | 预期 |
+|---|---|---|---|---|---|
+| MDM-093 | 自动化 | 制芯入口 | 路线节点决定生成入口 | 分别创建锁定路线含/不含 `operation.section=制芯` 的工单并读取详情 | 仅含制芯节点的工单返回 `requiresCoremaking=true`；无制芯节点不显示手动生成按钮并提示无需制芯 |
+| MDM-094 | 自动化 | 制芯生成 | 一工单多芯盒与唯一约束 | 为含三套 BOM 芯盒的工单预览并手动生成任务，再重复提交同一芯盒及并发生成 | 首次按芯盒生成三条任务；同一 `workOrderId + coreBoxCode` 只能有一条，重复/并发请求一个成功、其余返回 `409` |
+| MDM-095 | 自动化 | 制芯计算 | Decimal 需求量和压盒次数 | 运行 `test:coremaking-calculations`，覆盖 `100×2×1.03`、`3×1.5`、穴数 4/2 及四位小数和溢出边界 | 计划量分别向上取整为 206、5，206/4 压盒 52 次；浮点边界稳定，非法精度和溢出被拒绝 |
+| MDM-096 | 自动化 | 制芯派工 | 节点、设备、班组和版本校验 | 生成待派工任务，分别选择未绑定/停用设备、跨车间班组、缺失时间和正确组合，再用旧 `versionNo` 重复派工 | 非法组合被拒绝；完整派工进入 `WAITING`；旧版本返回 `409` 且不覆盖新派工 |
+| MDM-097 | 自动化 | 制芯报工 | 多次报工、唯一批次与原子流水 | 对同一 `IN_PROGRESS` 任务分两次报工并检查数据库，再并发提交相同旧版本 | 每次各生成一条 `CoreProductionReport`、唯一 `CoreInventoryBatch` 和 `PRODUCED` 流水；累计合格数达标后完成；并发仅一次成功且事务不留孤儿记录 |
+| MDM-098 | 自动化 | 烘干/保质期 | 两种保质期起算时间 | 免烘干报工一批；需烘干报工一批后选择启用烘干设备确认 | 免烘干从 `reportedAt` 起算；需烘干先为 `UNDRIED` 且不可用，确认后从 `driedAt` 起算；每次动作递增 `versionNo` |
+| MDM-099 | 自动化 | 临期/过期 | 24 小时边界与禁止领用 | 把批次失效时间置于 24 小时边界、边界外和当前时间，再调用刷新及 `validateCoreConsumption` | 剩余 `<=24h` 为 `WARNING` 且可领，`>24h` 为 `AVAILABLE`，到期为 `EXPIRED` 且 validate/consume 均拒绝 |
+| MDM-100 | 自动化 | 砂芯库存 | 状态筛选、冻结、解冻、报废 | 查询分页库存，依次冻结、用旧版本重试、解冻、报废并查看详情流水 | 列表按状态/关键词分页；冻结/解冻数量不变并恢复实时状态；报废清零；流水含 `PRODUCED/LOCKED/UNLOCKED/SCRAPPED` |
+| MDM-101 | 自动化 | 砂芯齐套 | 多芯盒需求、待烘干和缺口 | 调用 `/admin/production/work-orders/:id/core-readiness`，准备可用、临期、待烘干、过期、冻结和报废库存 | 只汇总 `AVAILABLE/WARNING`；逐芯盒返回需求、可用、待烘干、缺口、最短剩余时间及 `READY/PARTIAL/SHORTAGE` |
+| MDM-102 | 自动化 | 跨 BOM 兼容 | 同产品跨 BOM 同芯盒使用 | 旧 BOM 工单生产同一芯盒批次，目标工单锁定新 BOM 且仍包含该芯盒；再换成不同产品或目标 BOM 不含该芯盒 | 同产品且目标锁定 BOM 含同芯盒时可计入齐套并通过消费校验；不同产品或目标 BOM 不含时拒绝 |
+| MDM-103 | 自动化 | 未来造型服务 | 库存消费并发 | 对同一可用批次并发调用 `consumeCoreBatch`，请求总量超过库存 | 批次行锁、可串行化事务和条件更新阻止负库存；成功扣减各写一条 `CONSUMED` 流水，耗尽后状态为 `CONSUMED` |
+| MDM-104 | 自动化 | 制芯权限 | 管理端权限键与尾斜杠 | 按 `view/create/dispatch/cancel/start/report/dry` 和库存 `view/dry/lock/scrap` 逐项访问接口，并对动作 URL 追加 `/` | 无最小动作权限返回 `403`；查看权限不隐含写操作；带或不带尾斜杠的权限结果一致 |
+| MDM-105 | 自动化 | 班组隔离 | 小程序任务关系双重校验 | 给用户 `mini.production.core.view/start/report/dry`，分别加入任务班组、仅加入其他班组、移出班组后访问列表与已知 ID | 只有当前执行班组成员可见可操作；非成员列表不返回，详情/动作按不存在处理；超级管理员例外 |
+| MDM-106 | 手工+自动化 | 小程序扫码/标签 | 混砂批次扫码与二维码标签 | 在报工页扫描 URL 编码、普通编码和畸形转义内容；从详情打开批次标签并重复生成二维码 | 扫码安全提取批次值且畸形内容不崩溃；标签使用后端 `qrContent` 本地生成稳定二维码，展示批次、芯盒、产品、数量、生产/烘干/失效信息 |
+| MDM-107 | 自动化 | 请求竞态 | 旧响应和卸载页面隔离 | 快速切换任务状态/详情/库存标签，使旧请求后返回；动作请求未完成时卸载旧页并打开新页 | latest-request gate 只允许最新请求回写；旧响应不覆盖记录或 loading，卸载页不 `setData`，旧动作 `409` 不刷新新页面 |
+| MDM-108 | 手工 | 管理端页面 | 路由、列表和打印标准 | 访问制芯任务列表/详情、砂芯库存和工单详情，筛选状态、拖列宽、触发超过 3 个授权操作并打印标签 | 路由受查看权限保护；列表使用 `ResizableTable`、固定右侧操作列和 `TableActions`；打印区域含真实二维码且不破坏现有图片、编码、标签页规则 |
+| MDM-109 | 手工 | 一期范围 | 未来造型边界 | 检查菜单、路由和控制器，并尝试查找造型任务、下芯领用页面及 validate/consume HTTP 入口 | 仅齐套接口已暴露；领域服务存在，但一期无造型页面、造型任务、领用页面和 validate/consume HTTP 控制器，不出现假入口 |
+| MDM-110 | 手工 | Docker 验收 | 本地容器端到端回归 | 由环境验收代理执行 `npm run docker:up`，访问 `http://localhost:8080` 和 `http://localhost:3000/api/health`，再运行三组制芯集成脚本 | 管理端/API/数据库健康；任务、报工、库存和齐套脚本通过且临时 schema 被清理；本次文档代理不启动或修改 Docker |
+
 ## 自动化验证点
 
 - 所有新增接口必须返回统一 `{ code, message, data }`。
@@ -127,3 +150,10 @@
 - 自动化命令：`npm --prefix apps/api run test:casting-boms`，测试数据结束后必须自动清理。
 - 多芯盒自动化命令：`npm --prefix apps/api run test:mold-coreboxes`，覆盖事务、归属、开发单唯一关联、冲突回滚、历史芯盒停用和旧请求兼容。
 - 工序与路线自动化命令：`npm --prefix apps/api run test:process-routings`，覆盖图校验、多产品/多设备、已生效路线适用产品增减、停用只读、默认关系清理、版本、克隆和自动清理。
+- 制芯纯计算命令：`npm --prefix apps/api run test:coremaking-calculations`，覆盖 Decimal 计划量、压盒次数、保质期起算和 24 小时边界。
+- 制芯任务命令：`npm --prefix apps/api run test:coremaking-tasks`，覆盖生成入口、多芯盒拆分、任务快照、派工校验、唯一约束和并发 `409`。
+- 制芯执行命令：`npm --prefix apps/api run test:coremaking-execution`，覆盖多次/并发报工、唯一批次、库存流水、烘干、临期/过期、冻结/解冻/报废、权限和班组隔离。
+- 砂芯齐套命令：`npm --prefix apps/api run test:core-readiness`，覆盖齐套、跨工单/跨 BOM 同芯盒兼容、validate/consume 校验、并发消费和负库存防护。
+- 管理端制芯命令：`node --test apps/admin/tests/coremaking-permissions.test.mjs apps/admin/tests/coremaking-ui.test.mjs`，覆盖菜单/路由/按钮权限、尾斜杠、latest-request、标签二维码和列表标准。
+- 小程序制芯命令：`npm --prefix apps/miniprogram test`，覆盖真实 mini API、班组动作标志、扫码、二维码、`409` 原地刷新和旧响应隔离。
+- `test:coremaking-tasks`、`test:coremaking-execution`、`test:core-readiness` 只允许本地 PostgreSQL 或显式授权环境，均使用独立临时 schema 并在结束时删除，不得改写 `public` 业务数据。

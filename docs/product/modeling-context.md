@@ -1,6 +1,6 @@
 # 生产建模模块开发记录
 
-更新时间：2026-08-12
+更新时间：2026-08-15
 
 生产建模数据已被生产工单与熔炼执行模块正式引用，运行期关系和状态规则见 `docs/product/production-execution-context.md`。
 
@@ -242,6 +242,102 @@ CastingBomVersion -> CastingBomVersionCoreBox -> CoreBoxMaster（芯盒工装）
 - 支持车间切换。
 - 支持单日新增、编辑、删除排班。
 - 支持一键生成排班。
+
+## 制芯计划与砂芯库存实现
+
+### 上下游关系与生成规则
+
+生产工单提交后锁定 `bomVersionId` 和 `routingVersionId`，制芯模块只读取锁定版本及快照，不回读产品当前生效版本：
+
+```text
+WorkOrder（锁定 BOM / 路线）
+  -> CastingBomVersionCoreBox（quantityPerProduct / shelfLifeHours）
+  -> CoreProductionTask（手动生成，workOrderId + coreBoxCode 唯一）
+  -> CoreProductionReport（允许多次）
+  -> CoreInventoryBatch（每次报工唯一）
+  -> CoreInventoryLedger（入库及后续库存动作）
+  -> 未来造型 validateCoreConsumption / consumeCoreBatch
+```
+
+- 工单创建不自动产生制芯任务。只有锁定路线含 `operation.section === '制芯'` 的节点时，工单详情才显示手动生成入口；无制芯节点显示“该工单无需制芯”。判定在 `apps/api/src/production/production.service.ts`，入口在 `apps/admin/src/pages/production/WorkOrderWorkbenchPage.tsx`。
+- 同一工单按 BOM 芯盒逐行生成任务，一套芯盒一条任务；多套芯盒生成多条。数据库使用 `CoreProductionTask.@@unique([workOrderId, coreBoxCode])`，服务还通过工单行锁、可串行化事务和冲突重试阻止重复生成。
+- 计划需求量：`ceil(工单计划数量 × BOM芯件比 × (1 + 预计废品率))`。
+- 计划压盒次数：`ceil(计划需求量 ÷ 芯盒穴数)`。
+- `apps/api/src/production/coremaking.calculations.ts` 将最多四位小数转换为 `Prisma.Decimal` 缩放整数计算，避免 `1.1 × 100` 一类浮点误差；非法精度、溢出、非正芯件比和非正整数穴数均拒绝。
+- 任务保存产品、工单、BOM、路线、工序、芯盒、模具、芯件比、穴数和保质期快照。后续 BOM 升版、路线适用范围变化或芯盒档案调整不修改历史任务。
+- 生成和派工只能选择工单锁定路线中的制芯节点；设备必须启用且绑定该节点，班组必须启用并与设备同车间。设备、班组、计划开始时间未补齐为 `PENDING_DISPATCH`，补齐后为 `WAITING`；已有报工后禁止改派。
+
+### 报工、库存与状态机
+
+- 任务状态：`PENDING_DISPATCH` 待派工、`WAITING` 待生产、`IN_PROGRESS` 生产中、`COMPLETED` 已完成、`CANCELED` 已取消。开始前重新校验设备、班组、车间和父工单状态。
+- `IN_PROGRESS` 任务可多次报工。每次报工在同一可串行化事务内累计合格/报废数，并生成一条 `CoreProductionReport`、一条 `reportId` 唯一的 `CoreInventoryBatch` 和一条 `CoreInventoryLedger(PRODUCED)`；累计合格数达到计划量后完成，超产数量保留。
+- 免烘干批次从报工时间 `reportedAt` 起算保质期，直接成为 `AVAILABLE` 或 `WARNING`。需烘干批次先为 `UNDRIED`，确认烘干后从 `driedAt` 起算并转为 `AVAILABLE` 或 `WARNING`。
+- 保质期为空表示不自动失效；剩余时间 `<= 24h` 为 `WARNING`，到期为 `EXPIRED`。`UNDRIED`、`EXPIRED`、`LOCKED`、`SCRAPPED`、`CONSUMED` 均不可领用，`WARNING` 可用且未来造型应优先使用。
+- `apps/api/src/production/core-inventory.scheduler.ts` 每 10 分钟集合更新状态；库存列表、详情、齐套和领用仍按当前时间实时计算。
+- 冻结和解冻不改变数量，报废将当前数量清零，未来领用扣减数量并在归零后转 `CONSUMED`。入库、冻结、解冻、报废和领用均写不可变 `CoreInventoryLedger`，保存变化量、结存、来源、操作人和原因。
+
+### 齐套与未来造型边界
+
+- `GET /admin/production/work-orders/:id/core-readiness` 按目标工单锁定 BOM 的每套芯盒返回需求量、可用量、待烘干量、缺口、最短剩余小时和 `READY/PARTIAL/SHORTAGE`。
+- 齐套和消费兼容规则是“同产品 + 目标锁定 BOM 包含同一芯盒”，不要求库存来自当前工单。因此同一产品跨工单、跨 BOM 版本的同芯盒有效库存可以共用；不同产品即使芯盒编码相同也拒绝。
+- `apps/api/src/production/coremaking.service.ts` 已实现领域方法 `validateCoreConsumption(workOrderId, batchCode, quantity, operatorContext?)` 和 `consumeCoreBatch(workOrderId, batchCode, quantity, operatorContext)`。消费使用批次行锁、`versionNo` 和库存条件更新，写 `CONSUMED` 流水，禁止并发负库存。
+- 一期只暴露齐套 HTTP 接口；上述 validate/consume 方法尚未挂接控制器。本期不提供造型任务、造型排产、下芯领用或造型扫码页面，未来造型模块应直接复用领域方法并补自己的鉴权控制器。
+
+### 页面、接口与权限
+
+管理端路由：
+
+- `/dashboard/production/core-tasks`：制芯任务列表。
+- `/dashboard/production/core-tasks/:id`：任务详情、派工、开始、报工、烘干。
+- `/dashboard/production/core-inventory`：库存筛选、详情、流水、标签、烘干、冻结/解冻和报废。
+- `/dashboard/production/work-orders/:id`：工单详情中的生成入口、任务汇总和齐套面板。
+
+管理端接口由 `apps/api/src/production/coremaking.controller.ts` 提供：
+
+- `POST /admin/production/work-orders/:id/core-tasks/preview`
+- `POST /admin/production/work-orders/:id/core-tasks`
+- `GET /admin/production/work-orders/:id/core-readiness`
+- `GET /admin/production/core-tasks`、`GET /admin/production/core-tasks/:id`、`GET /admin/production/core-tasks/:id/options`
+- `PUT /admin/production/core-tasks/:id/dispatch`
+- `POST /admin/production/core-tasks/:id/cancel`
+- `POST /admin/production/core-tasks/:id/start`
+- `POST /admin/production/core-tasks/:id/report`
+- `GET /admin/production/core-inventory`、`GET /admin/production/core-inventory/options`、`GET /admin/production/core-inventory/:id`
+- `POST /admin/production/core-batches/:id/dry`
+- `POST /admin/production/core-batches/:id/lock`
+- `POST /admin/production/core-batches/:id/unlock`
+- `POST /admin/production/core-batches/:id/scrap`
+
+小程序页面在 `apps/miniprogram/src/pages/core/` 下，包括 `list`、`detail`、`report`、`dry`、`label`；真实接口为 `/mini/production/core-tasks*`、`/mini/production/core-tasks/:id/execution-options`、`/drying-batches` 和 `/mini/production/core-batches/:id/dry`。小程序支持班组任务查看、开始、多次报工、混砂批次扫码、烘干和二维码标签，不提供派工、取消、库存冻结或报废。
+
+完整权限键：
+
+- 管理端任务：`production.core_task.view/create/dispatch/edit/cancel/start/report/dry`。
+- 管理端库存：`production.core_inventory.view/dry/lock/scrap`。
+- 小程序任务：`mini.production.core.view/start/report/dry`。
+
+`production.core_task.edit` 已在角色权限树和系统管理员默认权限中注册，但当前没有通用任务编辑接口；现有任务修改分别由 `dispatch`、`cancel`、`start`、`report`、`dry` 专用权限保护。
+
+管理端任务继续使用 `production:core_tasks` 数据归属；库存可见范围跟随来源任务。小程序普通用户还必须是任务执行班组成员，超级管理员例外；无班组关系时列表不返回，已知 ID 访问也按不存在处理。
+
+### 统一防并发与交互防呆
+
+- 派工、取消、开始、报工、烘干、冻结、解冻、报废都提交最新 `versionNo`。旧版本或重复动作返回 `409`，管理端和小程序在当前页面刷新最新详情后提示重试。
+- 管理端 `apps/admin/src/utils/latestRequest.ts` 与小程序 `apps/miniprogram/src/utils/latest-request.ts` 隔离列表、详情、标签和动作请求；后返回的旧响应、已卸载页面和旧筛选结果不能覆盖当前页面。
+- 生成任务锁 `WorkOrder`，开始/报工锁 `CoreProductionTask`，烘干及库存消费锁 `CoreInventoryBatch`；任务编码和批次编码使用 `DocumentSequence` 事务序列。任何报工失败必须同时回滚任务累计、报工、批次和流水。
+- `apps/api/src/production/production-permission.guard.ts` 在权限匹配前统一移除请求尾斜杠，`/report` 与 `/report/`、`/dry` 与 `/dry/` 使用同一最小权限，不能通过尾斜杠退化为查看权限。
+- 现有图片上传/预览、编码校验、详情标签页、`ResizableTable`、固定操作列和 `TableActions` 标准继续适用，制芯页面不得另建冲突规则。
+
+制芯快速验证命令：
+
+```bash
+npm --prefix apps/api run test:coremaking-calculations
+npm --prefix apps/api run test:coremaking-tasks
+npm --prefix apps/api run test:coremaking-execution
+npm --prefix apps/api run test:core-readiness
+node --test apps/admin/tests/coremaking-permissions.test.mjs apps/admin/tests/coremaking-ui.test.mjs
+npm --prefix apps/miniprogram test
+```
 
 ## 验证情况
 
