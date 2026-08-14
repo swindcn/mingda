@@ -575,13 +575,18 @@ export class CoremakingService {
       .map((link) => link.equipment)
       .filter((item, index, records) => item.status === '启用' && records.findIndex((record) => record.code === item.code) === index)
     const workshopCodes = Array.from(new Set(equipment.map((item) => item.workshopCode).filter((code): code is string => Boolean(code))))
-    const [teams, shifts] = await Promise.all([
+    const [teams, shifts, dryingEquipment] = await Promise.all([
       workshopCodes.length ? this.prisma.team.findMany({
         where: { status: '启用', workshopCode: { in: workshopCodes } },
         include: { workshop: true },
         orderBy: { code: 'asc' },
       }) : [],
       this.prisma.shiftMaster.findMany({ where: { status: '启用' }, orderBy: { code: 'asc' } }),
+      this.prisma.furnace.findMany({
+        where: { status: '启用' },
+        include: { workshop: true },
+        orderBy: { code: 'asc' },
+      }),
     ])
     return {
       equipment: equipment.map((item) => ({
@@ -600,6 +605,16 @@ export class CoremakingService {
         workshopName: item.workshop.name,
       })),
       shifts: shifts.map((item) => ({ code: item.code, name: item.name, status: item.status })),
+      dryingEquipment: dryingEquipment
+        .filter((item) => /(芯|烘干)/.test(item.equipmentType))
+        .map((item) => ({
+          code: item.code,
+          name: item.name,
+          status: item.status,
+          workshopCode: item.workshopCode || '',
+          workshopName: item.workshop?.name || '',
+          equipmentType: item.equipmentType,
+        })),
     }
   }
 
@@ -699,6 +714,7 @@ export class CoremakingService {
       productCode: record.productCodeSnapshot,
       productName: record.productNameSnapshot,
       workOrderCode: record.workOrderCodeSnapshot,
+      reportedAt: record.report?.reportedAt?.toISOString() || record.createdAt.toISOString(),
       initialQuantity: record.initialQuantity,
       currentQuantity: record.currentQuantity,
       dryingRequired: record.dryingRequired,

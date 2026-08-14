@@ -111,6 +111,18 @@ function compilePermissionResolver() {
   return exports.permissionFor
 }
 
+function compileProductionPermissionMatcher() {
+  const source = sourceFile('apps/api/src/production/production-permission.guard.ts')
+  const declaration = source.statements.find((statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === 'hasAnyProductionPermission')
+  assert.ok(declaration, 'guard should use a standalone has-any permission matcher')
+  const output = ts.transpileModule(`${declaration.getText(source)}\nexports.hasAnyProductionPermission = hasAnyProductionPermission`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const exports = {}
+  Function('exports', 'hasAdminPermission', output)(exports, (user, permission) => user.permissions.includes(permission))
+  return exports.hasAnyProductionPermission
+}
+
 function compileFirstAccessibleRoute() {
   const source = sourceFile('apps/admin/src/layouts/AppLayout.tsx', ts.ScriptKind.TSX)
   const declaration = source.statements.find(
@@ -292,7 +304,7 @@ test('production guard resolves the minimum permission for every coremaking path
     ['POST', '/admin/production/core-tasks/task-1/report', 'production.core_task.report'],
     ['GET', '/admin/production/core-inventory', 'production.core_inventory.view'],
     ['GET', '/admin/production/core-inventory/batch-1', 'production.core_inventory.view'],
-    ['POST', '/admin/production/core-batches/batch-1/dry', 'production.core_inventory.dry'],
+    ['POST', '/admin/production/core-batches/batch-1/dry', ['production.core_task.dry', 'production.core_inventory.dry']],
     ['POST', '/admin/production/core-batches/batch-1/lock', 'production.core_inventory.lock'],
     ['POST', '/admin/production/core-batches/batch-1/unlock', 'production.core_inventory.lock'],
     ['POST', '/admin/production/core-batches/batch-1/scrap', 'production.core_inventory.scrap'],
@@ -304,11 +316,11 @@ test('production guard resolves the minimum permission for every coremaking path
   ]
 
   for (const [method, requestPath, permission] of cases) {
-    assert.equal(permissionFor({ method, path: requestPath }), permission, `${method} ${requestPath}`)
+    assert.deepEqual(permissionFor({ method, path: requestPath }), permission, `${method} ${requestPath}`)
   }
   for (const [method, requestPath, permission] of cases.filter(([method]) => method !== 'GET')) {
-    assert.equal(permissionFor({ method, path: `${requestPath}/` }), permission, `${method} ${requestPath}/`)
-    assert.equal(permissionFor({ method, path: `${requestPath}///?source=test` }), permission, `${method} ${requestPath} query`)
+    assert.deepEqual(permissionFor({ method, path: `${requestPath}/` }), permission, `${method} ${requestPath}/`)
+    assert.deepEqual(permissionFor({ method, path: `${requestPath}///?source=test` }), permission, `${method} ${requestPath} query`)
   }
 
   const rejectedCases = [
@@ -328,10 +340,20 @@ test('production guard resolves the minimum permission for every coremaking path
   for (const [method, requestPath] of rejectedCases) {
     assert.throws(() => permissionFor({ method, path: requestPath }), undefined, `${method} ${requestPath}`)
   }
-  const operationPermissions = cases.filter(([method]) => method !== 'GET').map(([, , permission]) => permission)
+  const operationPermissions = cases.filter(([method]) => method !== 'GET').flatMap(([, , permission]) => permission)
   assert.equal(operationPermissions.includes('production.core_task.view'), false)
   assert.equal(operationPermissions.includes('production.core_inventory.view'), false)
   assert.equal(operationPermissions.includes('production.core_inventory.manage'), false)
+})
+
+test('admin batch drying accepts task or inventory dry permission but never view permission', () => {
+  const permissionFor = compilePermissionResolver()
+  const hasAnyProductionPermission = compileProductionPermissionMatcher()
+  const requirement = permissionFor({ method: 'POST', path: '/admin/production/core-batches/batch-1/dry' })
+  assert.equal(hasAnyProductionPermission({ permissions: ['production.core_task.dry'] }, requirement), true)
+  assert.equal(hasAnyProductionPermission({ permissions: ['production.core_inventory.dry'] }, requirement), true)
+  assert.equal(hasAnyProductionPermission({ permissions: ['production.core_task.view', 'production.core_inventory.view'] }, requirement), false)
+  assert.equal(hasAnyProductionPermission({ permissions: [] }, requirement), false)
 })
 
 test('coremaking admin client covers task, readiness, reporting and paginated inventory APIs', () => {

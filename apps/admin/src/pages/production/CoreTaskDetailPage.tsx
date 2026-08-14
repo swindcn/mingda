@@ -6,9 +6,12 @@ import {
   PrinterOutlined,
   SendOutlined,
 } from '@ant-design/icons'
-import { Alert, Button, Card, DatePicker, Descriptions, Empty, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, DatePicker, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography, message } from 'antd'
+import type { FormInstance } from 'antd'
 import dayjs from 'dayjs'
-import { useEffect, useState } from 'react'
+import type { Dayjs } from 'dayjs'
+import type { RefObject } from 'react'
+import { createRef, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { SubPageHeader } from '../../components/SubPageHeader'
 import { ApiRequestError } from '../../services/api'
@@ -17,7 +20,6 @@ import {
   dispatchCoreTask,
   dryCoreBatch,
   fetchCoreInventoryBatch,
-  fetchCoreInventoryOptions,
   fetchCoreTask,
   fetchCoreTaskOptions,
   reportCoreTask,
@@ -26,6 +28,7 @@ import {
   type CoreTaskOptions,
   type CoreTaskRecord,
 } from '../../utils/coremaking'
+import { createLatestRequestGate } from '../../utils/latestRequest'
 import { hasPermission } from '../../utils/roles'
 import { CoreBatchLabel } from './CoreBatchLabel'
 
@@ -38,6 +41,8 @@ export const coreTaskStatusColors = {
 
 type RefreshAction = () => Promise<void>
 type Capability = 'canDispatch' | 'canCancel' | 'canStart' | 'canReport'
+type DispatchFormValues = { equipmentCode: string; teamCode: string; plannedStartAt: Dayjs; remark?: string }
+type ReportFormValues = { qualifiedQuantity: number; scrapQuantity: number; shiftCode: string; sandBatchCode?: string; dryingRequired: boolean; defectReason?: string; remark?: string }
 
 async function latestCoreTask(record: CoreTaskRecord, capability: Capability, refresh: RefreshAction) {
   const latest = await fetchCoreTask(record.id)
@@ -62,49 +67,40 @@ async function submitWithConflictRefresh(action: () => Promise<void>, refresh: R
   }
 }
 
-function DispatchFields({ record, options, onChange }: { record: CoreTaskRecord; options: CoreTaskOptions; onChange: (value: { equipmentCode: string; teamCode: string; plannedStartAt: string; remark: string }) => void }) {
+function DispatchFields({ record, options, formRef }: { record: CoreTaskRecord; options: CoreTaskOptions; formRef: RefObject<FormInstance<DispatchFormValues> | null> }) {
   const [equipmentCode, setEquipmentCode] = useState(record.equipmentCode)
-  const [teamCode, setTeamCode] = useState(record.teamCode)
-  const [plannedStartAt, setPlannedStartAt] = useState(record.plannedStartAt)
-  const [remark, setRemark] = useState(record.remark)
   const equipment = options.equipment.find((item) => item.code === equipmentCode)
-  const change = (next: Partial<{ equipmentCode: string; teamCode: string; plannedStartAt: string; remark: string }>) => {
-    const value = { equipmentCode, teamCode, plannedStartAt, remark, ...next }
-    setEquipmentCode(value.equipmentCode); setTeamCode(value.teamCode); setPlannedStartAt(value.plannedStartAt); setRemark(value.remark); onChange(value)
-  }
-  return <div className="core-action-form">
-    <label>设备</label><Select showSearch optionFilterProp="label" value={equipmentCode || undefined} placeholder="请选择设备" options={options.equipment.map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} onChange={(value) => change({ equipmentCode: value, teamCode: '' })} />
-    <label>班组</label><Select showSearch optionFilterProp="label" disabled={!equipment} value={teamCode || undefined} placeholder="请选择班组" options={options.teams.filter((item) => item.workshopCode === equipment?.workshopCode).map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} onChange={(value) => change({ teamCode: value })} />
-    <label>计划时间</label><DatePicker showTime value={plannedStartAt ? dayjs(plannedStartAt) : null} onChange={(value) => change({ plannedStartAt: value?.toISOString() || '' })} />
-    <label>备注</label><Input.TextArea rows={2} value={remark} maxLength={200} onChange={(event) => change({ remark: event.target.value })} />
-  </div>
+  return <Form ref={formRef} layout="vertical" initialValues={{ equipmentCode: record.equipmentCode || undefined, teamCode: record.teamCode || undefined, plannedStartAt: record.plannedStartAt ? dayjs(record.plannedStartAt) : undefined, remark: record.remark }}>
+    <Form.Item name="equipmentCode" label="设备" rules={[{ required: true, message: '请选择设备' }]}><Select showSearch optionFilterProp="label" placeholder="请选择设备" options={options.equipment.map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} onChange={(value) => { setEquipmentCode(value); formRef.current?.setFieldValue('teamCode', undefined) }} /></Form.Item>
+    <Form.Item name="teamCode" label="班组" rules={[{ required: true, message: '请选择班组' }]}><Select showSearch optionFilterProp="label" disabled={!equipment} placeholder="请选择班组" options={options.teams.filter((item) => item.workshopCode === equipment?.workshopCode).map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} /></Form.Item>
+    <Form.Item name="plannedStartAt" label="计划时间" rules={[{ required: true, message: '请选择计划时间' }]}><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
+    <Form.Item name="remark" label="备注"><Input.TextArea rows={2} maxLength={200} /></Form.Item>
+  </Form>
 }
 
-function ReportFields({ options, onChange }: { options: CoreTaskOptions; onChange: (value: { qualifiedQuantity: number; scrapQuantity: number; shiftCode: string; sandBatchCode: string; dryingRequired: boolean; defectReason: string; remark: string }) => void }) {
-  const [value, setValue] = useState({ qualifiedQuantity: 0, scrapQuantity: 0, shiftCode: '', sandBatchCode: '', dryingRequired: true, defectReason: '', remark: '' })
-  const change = (next: Partial<typeof value>) => { const merged = { ...value, ...next }; setValue(merged); onChange(merged) }
-  return <div className="core-action-form">
-    <label>合格数</label><InputNumber min={1} precision={0} value={value.qualifiedQuantity || null} placeholder="请输入合格数" onChange={(next) => change({ qualifiedQuantity: Number(next || 0) })} />
-    <label>报废数</label><InputNumber min={0} precision={0} value={value.scrapQuantity} onChange={(next) => change({ scrapQuantity: Number(next || 0) })} />
-    <label>班次</label><Select showSearch optionFilterProp="label" value={value.shiftCode || undefined} placeholder="请选择班次" options={options.shifts.map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} onChange={(shiftCode) => change({ shiftCode })} />
-    <label>混砂批次</label><Input value={value.sandBatchCode} placeholder="选填" onChange={(event) => change({ sandBatchCode: event.target.value })} />
-    <label>是否烘干</label><Switch checked={value.dryingRequired} checkedChildren="需要" unCheckedChildren="无需" onChange={(dryingRequired) => change({ dryingRequired })} />
-    <label>缺陷原因</label><Input value={value.defectReason} placeholder="有报废时填写" onChange={(event) => change({ defectReason: event.target.value })} />
-    <label>备注</label><Input.TextArea rows={2} value={value.remark} onChange={(event) => change({ remark: event.target.value })} />
-  </div>
+function ReportFields({ options, formRef }: { options: CoreTaskOptions; formRef: RefObject<FormInstance<ReportFormValues> | null> }) {
+  return <Form ref={formRef} layout="vertical" initialValues={{ qualifiedQuantity: 0, scrapQuantity: 0, dryingRequired: true }}>
+    <Form.Item name="qualifiedQuantity" label="合格数" rules={[{ required: true, type: 'number', min: 1, message: '合格数必须大于 0' }]}><InputNumber min={1} precision={0} placeholder="请输入合格数" style={{ width: '100%' }} /></Form.Item>
+    <Form.Item name="scrapQuantity" label="报废数" rules={[{ required: true, type: 'number', min: 0, message: '报废数不能小于 0' }]}><InputNumber min={0} precision={0} style={{ width: '100%' }} /></Form.Item>
+    <Form.Item name="shiftCode" label="班次" rules={[{ required: true, message: '请选择班次' }]}><Select showSearch optionFilterProp="label" placeholder="请选择班次" options={options.shifts.map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} /></Form.Item>
+    <Form.Item name="sandBatchCode" label="混砂批次"><Input placeholder="选填" /></Form.Item>
+    <Form.Item name="dryingRequired" label="是否烘干" valuePropName="checked"><Switch checkedChildren="需要" unCheckedChildren="无需" /></Form.Item>
+    <Form.Item name="defectReason" label="缺陷原因" dependencies={['scrapQuantity']} rules={[({ getFieldValue }) => ({ validator: (_, value) => getFieldValue('scrapQuantity') > 0 && !String(value || '').trim() ? Promise.reject(new Error('存在报废数量时请填写缺陷原因')) : Promise.resolve() })]}><Input placeholder="有报废时填写" /></Form.Item>
+    <Form.Item name="remark" label="备注"><Input.TextArea rows={2} maxLength={200} /></Form.Item>
+  </Form>
 }
 
 export async function openCoreDispatch(record: CoreTaskRecord, refresh: RefreshAction) {
   const latest = await latestCoreTask(record, 'canDispatch', refresh)
   if (!latest) return
   const options = await fetchCoreTaskOptions(latest.id)
-  let values = { equipmentCode: latest.equipmentCode, teamCode: latest.teamCode, plannedStartAt: latest.plannedStartAt, remark: latest.remark }
+  const formRef = createRef<FormInstance<DispatchFormValues>>()
   Modal.confirm({
     title: '派工', width: 560, okText: '确认派工', cancelText: '取消',
-    content: <DispatchFields record={latest} options={options} onChange={(next) => { values = next }} />,
+    content: <DispatchFields record={latest} options={options} formRef={formRef} />,
     onOk: async () => {
-      if (!values.equipmentCode || !values.teamCode || !values.plannedStartAt) throw new Error('请完整选择设备、班组和计划时间')
-      const submitted = await submitWithConflictRefresh(() => dispatchCoreTask(latest.id, { versionNo: latest.versionNo, ...values }).then(() => undefined), refresh)
+      const values = await formRef.current!.validateFields()
+      const submitted = await submitWithConflictRefresh(() => dispatchCoreTask(latest.id, { versionNo: latest.versionNo, ...values, plannedStartAt: values.plannedStartAt.toISOString() }).then(() => undefined), refresh)
       if (submitted) { message.success('派工已更新'); await refresh() }
     },
   })
@@ -113,8 +109,8 @@ export async function openCoreDispatch(record: CoreTaskRecord, refresh: RefreshA
 export async function openCoreCancel(record: CoreTaskRecord, refresh: RefreshAction) {
   const latest = await latestCoreTask(record, 'canCancel', refresh)
   if (!latest) return
-  let reason = ''
-  Modal.confirm({ title: '取消制芯任务', content: <Input.TextArea rows={3} placeholder="请输入取消理由" onChange={(event) => { reason = event.target.value }} />, okText: '确认取消', cancelText: '返回', okButtonProps: { danger: true }, onOk: async () => { if (!reason.trim()) throw new Error('请输入取消理由'); const submitted = await submitWithConflictRefresh(() => cancelCoreTask(latest.id, { versionNo: latest.versionNo, reason }).then(() => undefined), refresh); if (submitted) { message.success('任务已取消'); await refresh() } } })
+  const formRef = createRef<FormInstance<{ reason: string }>>()
+  Modal.confirm({ title: '取消制芯任务', content: <Form ref={formRef} layout="vertical"><Form.Item name="reason" label="取消理由" rules={[{ required: true, whitespace: true, message: '请输入取消理由' }]}><Input.TextArea rows={3} maxLength={200} placeholder="请输入取消理由" /></Form.Item></Form>, okText: '确认取消', cancelText: '返回', okButtonProps: { danger: true }, onOk: async () => { const { reason } = await formRef.current!.validateFields(); const submitted = await submitWithConflictRefresh(() => cancelCoreTask(latest.id, { versionNo: latest.versionNo, reason }).then(() => undefined), refresh); if (submitted) { message.success('任务已取消'); await refresh() } } })
 }
 
 export async function openCoreStart(record: CoreTaskRecord, refresh: RefreshAction) {
@@ -127,14 +123,12 @@ export async function openCoreReport(record: CoreTaskRecord, refresh: RefreshAct
   const latest = await latestCoreTask(record, 'canReport', refresh)
   if (!latest) return
   const options = await fetchCoreTaskOptions(latest.id)
-  let values = { qualifiedQuantity: 0, scrapQuantity: 0, shiftCode: '', sandBatchCode: '', dryingRequired: true, defectReason: '', remark: '' }
+  const formRef = createRef<FormInstance<ReportFormValues>>()
   Modal.confirm({
     title: '制芯报工', width: 560, okText: '提交报工', cancelText: '取消',
-    content: <ReportFields options={options} onChange={(next) => { values = next }} />,
+    content: <ReportFields options={options} formRef={formRef} />,
     onOk: async () => {
-      if (values.qualifiedQuantity < 1) throw new Error('合格数必须大于 0')
-      if (!values.shiftCode) throw new Error('请选择班次')
-      if (values.scrapQuantity > 0 && !values.defectReason.trim()) throw new Error('存在报废数量时请填写缺陷原因')
+      const values = await formRef.current!.validateFields()
       const submitted = await submitWithConflictRefresh(() => reportCoreTask(latest.id, { versionNo: latest.versionNo, ...values }).then(() => undefined), refresh)
       if (submitted) { message.success('报工已提交并生成砂芯批次'); await refresh() }
     },
@@ -148,29 +142,65 @@ export function CoreTaskDetailPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [labelBatch, setLabelBatch] = useState<CoreBatchRecord | null>(null)
+  const [taskRequestGate] = useState(() => createLatestRequestGate())
+  const [labelRequestGate] = useState(() => createLatestRequestGate())
+  const currentIdRef = useRef(id)
   const canDispatch = hasPermission('production.core_task.dispatch')
   const canCancel = hasPermission('production.core_task.cancel')
   const canStart = hasPermission('production.core_task.start')
   const canReport = hasPermission('production.core_task.report')
-  const canDry = hasPermission('production.core_inventory.dry')
+  const canDry = hasPermission('production.core_task.dry')
   const canViewInventory = hasPermission('production.core_inventory.view')
 
   const refresh = async () => {
+    const requestedId = id
+    if (currentIdRef.current !== requestedId) return
     setLoading(true); setError('')
-    try { setRecord(await fetchCoreTask(id)) } catch (reason) { setError(reason instanceof Error ? reason.message : '制芯任务详情加载失败') } finally { setLoading(false) }
+    await taskRequestGate.run(
+      () => fetchCoreTask(requestedId),
+      {
+        success: (result) => { if (currentIdRef.current === requestedId) setRecord(result) },
+        error: (reason) => { if (currentIdRef.current === requestedId) setError(reason instanceof Error ? reason.message : '制芯任务详情加载失败') },
+        settled: () => { if (currentIdRef.current === requestedId) setLoading(false) },
+      },
+    )
   }
-  // Refresh when route identity changes.
-  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { void refresh() }, [id])
+  useEffect(() => { currentIdRef.current = id }, [id])
+
+  useEffect(() => {
+    // Route identity changes invalidate the displayed record before loading its replacement.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRecord(null)
+    void refresh()
+    return () => { taskRequestGate.invalidate(); labelRequestGate.invalidate() }
+    // Refresh intentionally snapshots the route id for request identity checks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   const showLabel = async (batchId: string) => {
-    try { setLabelBatch(await fetchCoreInventoryBatch(batchId)) } catch (reason) { message.error(reason instanceof Error ? reason.message : '批次标签加载失败') }
+    await labelRequestGate.run(
+      () => fetchCoreInventoryBatch(batchId),
+      {
+        success: setLabelBatch,
+        error: (reason) => message.error(reason instanceof Error ? reason.message : '批次标签加载失败'),
+      },
+    )
   }
   const dryBatch = async (batch: NonNullable<NonNullable<CoreTaskRecord['reports']>[number]['batch']>) => {
-    const latest = await fetchCoreInventoryBatch(batch.id)
-    const options = await fetchCoreInventoryOptions()
-    let equipmentCode = ''
-    Modal.confirm({ title: '确认烘干', content: <Select showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="请选择烘干设备" options={options.dryingEquipment.map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} onChange={(value) => { equipmentCode = value }} />, okText: '确认烘干', cancelText: '取消', onOk: async () => { if (!equipmentCode) throw new Error('请选择烘干设备'); const submitted = await submitWithConflictRefresh(() => dryCoreBatch(latest.id, { versionNo: latest.versionNo, equipmentCode }).then(() => undefined), refresh); if (submitted) { message.success('批次已确认烘干'); await refresh() } } })
+    const taskId = record?.id
+    if (!taskId) return
+    const options = await fetchCoreTaskOptions(taskId)
+    const formRef = createRef<FormInstance<{ equipmentCode: string }>>()
+    Modal.confirm({
+      title: '确认烘干',
+      content: <Form ref={formRef} layout="vertical"><Form.Item name="equipmentCode" label="烘干设备" rules={[{ required: true, message: '请选择烘干设备' }]}><Select showSearch optionFilterProp="label" placeholder="请选择烘干设备" options={options.dryingEquipment.map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} /></Form.Item></Form>,
+      okText: '确认烘干', cancelText: '取消',
+      onOk: async () => {
+        const { equipmentCode } = await formRef.current!.validateFields()
+        const submitted = await submitWithConflictRefresh(() => dryCoreBatch(batch.id, { versionNo: batch.versionNo, equipmentCode }).then(() => undefined), refresh)
+        if (submitted) { message.success('批次已确认烘干'); await refresh() }
+      },
+    })
   }
   const run = (action: Promise<void>) => void action.catch((reason) => message.error(reason instanceof Error ? reason.message : '操作失败'))
 

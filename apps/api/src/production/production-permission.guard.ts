@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, NotFound
 import type { Request } from 'express'
 import { getAdminContext, hasAdminPermission, type RequestWithAdmin } from '../shared/admin-context'
 
-function permissionFor(request: Request) {
+function permissionFor(request: Request): string | string[] {
   const path = request.path.split(/[?#]/, 1)[0].replace(/\/+$/, '') || '/'
   const method = request.method.toUpperCase()
   const isMiniProgram = path.includes('/mini/production/')
@@ -42,7 +42,9 @@ function permissionFor(request: Request) {
   }
   if (path.includes('/core-batches')) {
     if (/\/core-batches\/[^/]+\/dry$/.test(path)) {
-      if (method === 'POST') return isMiniProgram ? 'mini.production.core.dry' : 'production.core_inventory.dry'
+      if (method === 'POST') return isMiniProgram
+        ? 'mini.production.core.dry'
+        : ['production.core_task.dry', 'production.core_inventory.dry']
       throw new NotFoundException('生产管理资源不存在')
     }
     if (/\/core-batches\/[^/]+\/(?:lock|unlock)$/.test(path)) {
@@ -81,13 +83,18 @@ function permissionFor(request: Request) {
   throw new NotFoundException('生产管理资源不存在')
 }
 
+function hasAnyProductionPermission(user: ReturnType<typeof getAdminContext>, requirement: string | string[]) {
+  const permissions = Array.isArray(requirement) ? requirement : [requirement]
+  return permissions.some((permission) => hasAdminPermission(user, permission))
+}
+
 @Injectable()
 export class ProductionPermissionGuard implements CanActivate {
   canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<RequestWithAdmin>()
     const user = getAdminContext(request)
     const permission = permissionFor(request)
-    if (!hasAdminPermission(user, permission)) throw new ForbiddenException('无权执行当前操作')
+    if (!hasAnyProductionPermission(user, permission)) throw new ForbiddenException('无权执行当前操作')
     return true
   }
 }

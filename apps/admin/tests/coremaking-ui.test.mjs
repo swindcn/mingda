@@ -3,10 +3,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import ts from 'typescript'
 
 const adminRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(adminRoot, '../..')
+const nodeRequire = createRequire(import.meta.url)
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8')
@@ -31,6 +33,57 @@ function compileCoremakingClient() {
   Function('require', 'module', 'exports', output)(require, module, module.exports)
   return { client: module.exports, calls }
 }
+
+function compileLatestRequest() {
+  const filePath = path.join(adminRoot, 'src/utils/latestRequest.ts')
+  assert.equal(fs.existsSync(filePath), true, 'latest-request helper should exist')
+  const output = ts.transpileModule(fs.readFileSync(filePath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: filePath,
+  }).outputText
+  const module = { exports: {} }
+  Function('module', 'exports', output)(module, module.exports)
+  return module.exports
+}
+
+function compileBatchLabel() {
+  const filePath = path.join(adminRoot, 'src/pages/production/CoreBatchLabel.tsx')
+  const output = ts.transpileModule(fs.readFileSync(filePath, 'utf8'), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      jsx: ts.JsxEmit.ReactJSX,
+      esModuleInterop: true,
+    },
+    fileName: filePath,
+  }).outputText
+  const module = { exports: {} }
+  const require = (specifier) => specifier === '../../utils/roles' ? { hasPermission: () => true } : nodeRequire(specifier)
+  Function('require', 'module', 'exports', output)(require, module, module.exports)
+  return module.exports
+}
+
+test('latest request gate ignores delayed stale responses and invalidated unmount responses', async () => {
+  const { createLatestRequestGate } = compileLatestRequest()
+  const gate = createLatestRequestGate()
+  const values = []
+  let resolveFirst
+  let resolveSecond
+  const first = gate.run(() => new Promise((resolve) => { resolveFirst = resolve }), { success: (value) => values.push(value) })
+  const second = gate.run(() => new Promise((resolve) => { resolveSecond = resolve }), { success: (value) => values.push(value) })
+  resolveSecond('new')
+  await second
+  resolveFirst('old')
+  await first
+  assert.deepEqual(values, ['new'])
+
+  let resolveUnmounted
+  const unmounted = gate.run(() => new Promise((resolve) => { resolveUnmounted = resolve }), { success: (value) => values.push(value) })
+  gate.invalidate()
+  resolveUnmounted('after-unmount')
+  await unmounted
+  assert.deepEqual(values, ['new'])
+})
 
 test('core plan preview calculation follows backend decimal scrap-rate semantics', () => {
   const { client } = compileCoremakingClient()
@@ -58,6 +111,28 @@ test('remaining shelf-life calculation handles undried, permanent and expired ba
   assert.equal(client.remainingCoreHours('', now), null)
   assert.equal(client.remainingCoreHours('2026-08-14T20:30:00.000Z', now), 12.5)
   assert.equal(client.remainingCoreHours('2026-08-14T07:00:00.000Z', now), 0)
+})
+
+test('inventory pagination converges empty out-of-range pages without looping', () => {
+  const { client } = compileCoremakingClient()
+  assert.equal(client.resolveCoreInventoryPage(3, 0, 2), 2)
+  assert.equal(client.resolveCoreInventoryPage(4, 20, 2), 2)
+  assert.equal(client.resolveCoreInventoryPage(1, 0, 0), 1)
+  assert.equal(client.resolveCoreInventoryPage(2, 20, 4), 2)
+})
+
+test('generation rows require explicit routing when several coremaking nodes exist', () => {
+  const { client } = compileCoremakingClient()
+  const preview = {
+    rows: [{ coreBoxCode: 'CB-1', coreBoxName: '一号', quantityPerProduct: 1, cavityCount: 2, shelfLifeHours: 24, expectedScrapRate: 0, plannedQuantity: 10, plannedPressCount: 5 }],
+    routingNodes: [{ id: 'N-1' }, { id: 'N-2' }],
+  }
+  const [row] = client.buildCoreTaskGenerationRows(preview)
+  assert.equal(row.routingNodeId, undefined)
+  assert.match(client.validateCoreTaskGenerationRows([row])['CB-1'], /工序/)
+  const assigned = { ...row, routingNodeId: 'N-1', equipmentCode: 'EQ-1', teamCode: 'T-1', plannedStartAt: '2026-08-14T08:00:00.000Z' }
+  assert.deepEqual(client.changeCoreTaskRoutingNode(assigned, 'N-2'), { ...assigned, routingNodeId: 'N-2', equipmentCode: undefined, teamCode: undefined, plannedStartAt: undefined })
+  assert.equal(client.buildCoreTaskGenerationRows({ ...preview, routingNodes: [{ id: 'ONLY' }] })[0].routingNodeId, 'ONLY')
 })
 
 test('coremaking pages use the shared industrial table and operation patterns', () => {
@@ -88,6 +163,9 @@ test('coremaking pages use the shared industrial table and operation patterns', 
   assert.match(inventory, /production\.core_inventory\.dry/)
   assert.match(inventory, /production\.core_inventory\.lock/)
   assert.match(inventory, /production\.core_inventory\.scrap/)
+  assert.match(inventory, /createLatestRequestGate/)
+  assert.match(inventory, /resolveCoreInventoryPage/)
+  assert.match(inventory, /status === 409[\s\S]*?await refreshAfterAction\(\)/)
   for (const label of ['全部', '待烘干', '可用', '临期', '过期', '冻结', '报废', '耗尽']) assert.match(inventory, new RegExp(label))
 })
 
@@ -98,6 +176,9 @@ test('generation workbench and work-order detail expose the complete coremaking 
   assert.match(modal, /createCoreTasks/)
   assert.match(modal, /calculateCorePlan/)
   assert.match(modal, /preview\?\.teams/)
+  assert.match(modal, /validateCoreTaskGenerationRows/)
+  assert.match(modal, /validationErrors/)
+  assert.match(modal, /createLatestRequestGate/)
 
   const workOrder = read('apps/admin/src/pages/production/WorkOrderWorkbenchPage.tsx')
   assert.match(workOrder, /resolveCoreTaskEntry/)
@@ -120,6 +201,12 @@ test('task detail includes dispatch, reporting and batch actions guarded by capa
   assert.match(detail, /派工记录/)
   assert.match(detail, /报工记录/)
   assert.match(detail, /fetchCoreTaskOptions/)
+  assert.match(detail, /production\.core_task\.dry/)
+  assert.doesNotMatch(detail, /fetchCoreInventoryBatch\(batch\.id\)/)
+  assert.match(detail, /<Form/)
+  assert.match(detail, /rules=/)
+  assert.match(detail, /createLatestRequestGate/)
+  assert.match(detail, /status === 409[\s\S]*?await refresh\(\)/)
 })
 
 test('batch label renders a real QR code and print-only label styles', () => {
@@ -131,6 +218,24 @@ test('batch label renders a real QR code and print-only label styles', () => {
   assert.match(css, /@media print/)
   assert.match(css, /core-batch-label/)
   assert.match(css, /body \*/)
+  assert.match(css, /box-sizing:\s*border-box/)
+  assert.match(css, /break-inside:\s*avoid/)
+})
+
+test('batch label component renders production time and drying state', () => {
+  const React = nodeRequire('react')
+  const { renderToStaticMarkup } = nodeRequire('react-dom/server')
+  const { CoreBatchLabelContent } = compileBatchLabel()
+  assert.equal(typeof CoreBatchLabelContent, 'function')
+  const html = renderToStaticMarkup(React.createElement(CoreBatchLabelContent, { batch: {
+    id: 'B-1', code: 'CORE-CB-20260814-DAY-001', qrContent: 'qr-content', coreBoxName: '一号芯盒', coreBoxCode: 'CB-1',
+    productName: '泵体', productCode: 'P-1', workOrderCode: 'WO-1', initialQuantity: 10, reportedAt: '2026-08-14T08:30:00.000Z',
+    dryingRequired: true, driedAt: '2026-08-14T09:00:00.000Z', expiresAt: '2026-08-15T09:00:00.000Z',
+  } }))
+  assert.match(html, /生产时间/)
+  assert.match(html, /2026/)
+  assert.match(html, /烘干状态/)
+  assert.match(html, /已烘干/)
 })
 
 test('coremaking operational option and detail APIs are backed by production endpoints', () => {
@@ -150,6 +255,7 @@ test('coremaking operational option and detail APIs are backed by production end
   assert.match(controller, /@Get\('core-inventory\/options'\)/)
   assert.match(service, /reports:/)
   assert.match(service, /dryingEquipment/)
+  assert.match(service, /reportedAt/)
 })
 
 test('app routes use concrete coremaking pages and the placeholder is removed', () => {

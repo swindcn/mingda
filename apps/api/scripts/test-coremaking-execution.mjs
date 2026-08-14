@@ -194,6 +194,7 @@ try {
     data: { username: 'admin', phone: '13665068911', name: '系统管理员', passwordHash: hashPassword('13665068911'), userType: 'SUPER_ADMIN' },
   })
   const restrictedUsername = `${prefix}-RESTRICTED`
+  const taskDryUsername = `${prefix}-TASK-DRY`
   const restrictedRole = await prisma.role.create({
     data: {
       name: `${prefix}-INVENTORY-VIEWER`,
@@ -210,6 +211,24 @@ try {
       name: '受限库存查看员',
       passwordHash: hashPassword('123456'),
       roles: { create: { roleId: restrictedRole.id } },
+    },
+  })
+  const taskDryRole = await prisma.role.create({
+    data: {
+      name: `${prefix}-TASK-DRY`,
+      app: 'admin',
+      dataScope: 'ALL',
+      dataScopes: ['ALL'],
+      permissions: ['production.core_task.view', 'production.core_task.dry'],
+    },
+  })
+  await prisma.user.create({
+    data: {
+      username: taskDryUsername,
+      phone: `TASK-DRY-${stamp}`,
+      name: '制芯烘干员',
+      passwordHash: hashPassword('123456'),
+      roles: { create: { roleId: taskDryRole.id } },
     },
   })
   const grade = await prisma.materialGrade.create({ data: { code: `${prefix}-GRADE`, name: '测试灰铁', status: '启用' } })
@@ -292,6 +311,8 @@ try {
   const headers = { authorization: `Bearer ${login.token}` }
   const restrictedLogin = await request(baseUrl, '/auth/login', { method: 'POST', body: JSON.stringify({ username: restrictedUsername, password: '123456' }) })
   const restrictedHeaders = { authorization: `Bearer ${restrictedLogin.token}` }
+  const taskDryLogin = await request(baseUrl, '/auth/login', { method: 'POST', body: JSON.stringify({ username: taskDryUsername, password: '123456' }) })
+  const taskDryHeaders = { authorization: `Bearer ${taskDryLogin.token}` }
 
   const { task: resourceTask } = await createTask()
   await prisma.furnace.update({ where: { code: equipment.code }, data: { status: '停用' } })
@@ -310,6 +331,9 @@ try {
   if (resourceStarted.status !== 'IN_PROGRESS') throw new Error('资源恢复后制芯任务仍无法开始')
 
   const { task: mainTask } = await createTask()
+  const taskOptions = await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/options`, { headers: taskDryHeaders })
+  if (!taskOptions.dryingEquipment.some((item) => item.code === dryer.code)) throw new Error('任务选项未返回真实烘干设备')
+  await request(baseUrl, '/admin/production/core-inventory?page=1&pageSize=20', { headers: taskDryHeaders }, 403)
   const started = await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: mainTask.versionNo }) })
   if (started.status !== 'IN_PROGRESS' || started.versionNo !== 2 || !started.startedAt) throw new Error('开始任务未正确更新状态、版本和时间')
   await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: mainTask.versionNo }) }, 409)
@@ -320,6 +344,7 @@ try {
   })
   if (firstReport.task.qualifiedQuantity !== 6 || firstReport.task.scrapQuantity !== 1 || firstReport.task.status !== 'IN_PROGRESS') throw new Error('首次报工累计错误')
   if (firstReport.batch.status !== 'UNDRIED' || firstReport.batch.currentQuantity !== 6) throw new Error('需烘干批次初始状态或数量错误')
+  if (firstReport.batch.reportedAt !== firstReport.report.reportedAt) throw new Error('批次生产时间未使用报工时间')
   if (!new RegExp(`^CORE-${dryCoreBox.code}-\\d{8}-${shift.code}-\\d{3}$`).test(firstReport.batch.code)) throw new Error(`批次编码格式错误: ${firstReport.batch.code}`)
   const batchSequence = await prisma.documentSequence.findFirst({ where: { documentType: `CORE_BATCH:${dryCoreBox.code}:${shift.code}` } })
   if (!batchSequence) throw new Error('砂芯批次流水未创建')
@@ -353,6 +378,10 @@ try {
   await request(baseUrl, `/admin/production/core-batches/${secondReport.batch.id}/dry`, {
     method: 'POST', headers, body: JSON.stringify({ versionNo: secondReport.batch.versionNo, equipmentCode: unrelatedEquipment.code }),
   }, 400)
+  const taskDried = await request(baseUrl, `/admin/production/core-batches/${secondReport.batch.id}/dry`, {
+    method: 'POST', headers: taskDryHeaders, body: JSON.stringify({ versionNo: secondReport.batch.versionNo, equipmentCode: dryer.code }),
+  })
+  if (!taskDried.driedAt || taskDried.dryingEquipmentCode !== dryer.code) throw new Error('仅任务烘干权限的用户无法从任务入口完成烘干')
 
   const { task: directTask } = await createTask({ coreBox: directCoreBox, shelfLifeHours: 8.5, plannedQuantity: 3 })
   const directStarted = await request(baseUrl, `/admin/production/core-tasks/${directTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: directTask.versionNo }) })
@@ -525,7 +554,7 @@ try {
   await request(baseUrl, `/admin/production/core-batches/${secondReport.batch.id}/dry`, { method: 'POST', headers, body: JSON.stringify([]) }, 400)
   await request(baseUrl, `/admin/production/core-batches/${secondReport.batch.id}/scrap`, { method: 'POST', headers, body: JSON.stringify({ versionNo: 'bad', reason: 'x' }) }, 400)
 
-  console.log(JSON.stringify({ ok: true, assertions: 46, batches: mainCounts[1] + 3 }))
+  console.log(JSON.stringify({ ok: true, assertions: 50, batches: mainCounts[1] + 3 }))
 } catch (error) {
   testError = error
 } finally {

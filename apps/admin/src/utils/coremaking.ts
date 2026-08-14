@@ -64,6 +64,7 @@ export interface CoreTaskOptions {
   equipment: CoreOption[]
   teams: CoreOption[]
   shifts: CoreOption[]
+  dryingEquipment: CoreOption[]
 }
 
 export interface CoreInventoryOptions {
@@ -202,6 +203,7 @@ export interface CoreBatchRecord {
   productCode: string
   productName: string
   workOrderCode: string
+  reportedAt: string
   initialQuantity: number
   currentQuantity: number
   dryingRequired: boolean
@@ -281,6 +283,8 @@ export interface CoreBatchScrapPayload {
   reason: string
 }
 
+export type CoreTaskGenerationRow = CoreTaskPreviewRow & CoreTaskInput
+
 function encodeId(id: string) {
   return encodeURIComponent(id)
 }
@@ -308,6 +312,45 @@ export function calculateCorePlan(workOrderQuantity: number, quantityPerProduct:
   const numerator = BigInt(workOrderQuantity) * ratio * (scale + scrapRate)
   const plannedQuantity = Number((numerator + scale * scale - 1n) / (scale * scale))
   return { plannedQuantity, plannedPressCount: Math.ceil(plannedQuantity / cavityCount) }
+}
+
+export function buildCoreTaskGenerationRows(preview: Pick<CoreTaskPreview, 'rows' | 'routingNodes'>): CoreTaskGenerationRow[] {
+  const routingNodeId = preview.routingNodes.length === 1 ? preview.routingNodes[0].id : undefined
+  return preview.rows.map((row) => ({
+    ...row,
+    routingNodeId,
+    equipmentCode: undefined,
+    teamCode: undefined,
+    plannedStartAt: undefined,
+    remark: '',
+  }))
+}
+
+export function changeCoreTaskRoutingNode(row: CoreTaskGenerationRow, routingNodeId: string): CoreTaskGenerationRow {
+  return {
+    ...row,
+    routingNodeId,
+    equipmentCode: undefined,
+    teamCode: undefined,
+    plannedStartAt: undefined,
+  }
+}
+
+export function validateCoreTaskGenerationRows(rows: CoreTaskGenerationRow[]) {
+  return rows.reduce<Record<string, string>>((errors, row) => {
+    if (!row.routingNodeId) errors[row.coreBoxCode] = '请选择制芯工序'
+    else if ((row.equipmentCode || row.teamCode || row.plannedStartAt) && !(row.equipmentCode && row.teamCode && row.plannedStartAt)) {
+      errors[row.coreBoxCode] = '设备、班组和计划时间需要完整填写'
+    }
+    return errors
+  }, {})
+}
+
+export function resolveCoreInventoryPage(requestedPage: number, itemCount: number, totalPages: number) {
+  const lastPage = Math.max(1, totalPages)
+  if (requestedPage > lastPage) return lastPage
+  if (itemCount === 0 && requestedPage > 1) return lastPage
+  return requestedPage
 }
 
 export function resolveCoreTaskEntry(

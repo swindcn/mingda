@@ -94,8 +94,10 @@ a {
 }
 
 .core-batch-label {
-  width: 500px;
+  width: min(100%, 500px);
+  max-width: 100%;
   padding: 20px;
+  box-sizing: border-box;
   color: #111827;
   background: #fff;
   border: 1px solid #111827;
@@ -151,9 +153,38 @@ a {
     position: fixed;
     top: 0;
     left: 0;
-    width: 92mm;
+    width: 100%;
+    max-width: 92mm;
     padding: 4mm;
+    box-sizing: border-box;
     border: 1px solid #000;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .core-batch-label-title {
+    padding-bottom: 2mm;
+    margin-bottom: 2mm;
+    font-size: 14px;
+    line-height: 1.2;
+  }
+
+  .core-batch-label-body {
+    grid-template-columns: 30mm minmax(0, 1fr) !important;
+    gap: 3mm;
+  }
+
+  .core-batch-label-body .ant-qrcode,
+  .core-batch-label-body .ant-qrcode canvas {
+    width: 30mm !important;
+    height: 30mm !important;
+  }
+
+  .core-batch-label-fields {
+    grid-template-columns: 18mm minmax(0, 1fr);
+    gap: 1mm 2mm;
+    font-size: 9px;
+    line-height: 1.2;
   }
 }
 

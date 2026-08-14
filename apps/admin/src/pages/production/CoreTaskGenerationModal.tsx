@@ -1,31 +1,21 @@
-import { Alert, DatePicker, Empty, Input, InputNumber, Modal, Select, Table, Typography, message } from 'antd'
+import { Alert, DatePicker, Empty, Form, Input, InputNumber, Modal, Select, Table, Typography, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
 import { ApiRequestError } from '../../services/api'
 import {
+  buildCoreTaskGenerationRows,
   calculateCorePlan,
+  changeCoreTaskRoutingNode,
   createCoreTasks,
   previewCoreTasks,
+  validateCoreTaskGenerationRows,
   type CoreTaskInput,
   type CoreTaskPreview,
-  type CoreTaskPreviewRow,
+  type CoreTaskGenerationRow,
 } from '../../utils/coremaking'
+import { createLatestRequestGate } from '../../utils/latestRequest'
 import { hasPermission } from '../../utils/roles'
-
-type GenerationRow = CoreTaskPreviewRow & CoreTaskInput
-
-function assignmentRows(preview: CoreTaskPreview): GenerationRow[] {
-  const defaultNode = preview.routingNodes[0]
-  return preview.rows.map((row) => ({
-    ...row,
-    routingNodeId: defaultNode?.id,
-    equipmentCode: undefined,
-    teamCode: undefined,
-    plannedStartAt: undefined,
-    remark: '',
-  }))
-}
 
 export function CoreTaskGenerationModal({
   open,
@@ -41,32 +31,49 @@ export function CoreTaskGenerationModal({
   onSuccess: () => Promise<void> | void
 }) {
   const [preview, setPreview] = useState<CoreTaskPreview | null>(null)
-  const [rows, setRows] = useState<GenerationRow[]>([])
+  const [rows, setRows] = useState<CoreTaskGenerationRow[]>([])
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [requestGate] = useState(() => createLatestRequestGate())
   const canCreate = hasPermission('production.core_task.create')
 
   const load = async () => {
     setLoading(true)
     setError('')
-    try {
-      const result = await previewCoreTasks(workOrderId, { rows: [] })
-      setPreview(result)
-      setRows(assignmentRows(result))
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '制芯任务预览加载失败')
-    } finally {
-      setLoading(false)
-    }
+    setValidationErrors({})
+    await requestGate.run(
+      () => previewCoreTasks(workOrderId, { rows: [] }),
+      {
+        success: (result) => {
+          setPreview(result)
+          setRows(buildCoreTaskGenerationRows(result))
+        },
+        error: (reason) => setError(reason instanceof Error ? reason.message : '制芯任务预览加载失败'),
+        settled: () => setLoading(false),
+      },
+    )
   }
 
-  // Opening the modal starts a fresh server preview.
-  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { if (open) void load() }, [open, workOrderId])
+  useEffect(() => {
+    // Opening the modal starts a fresh server preview.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (open) void load()
+    else requestGate.invalidate()
+    return () => requestGate.invalidate()
+    // Each opening deliberately snapshots its work-order identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, workOrderId])
 
-  const patchRow = (coreBoxCode: string, value: Partial<GenerationRow>) => {
+  const patchRow = (coreBoxCode: string, value: Partial<CoreTaskGenerationRow>) => {
     setRows((current) => current.map((row) => row.coreBoxCode === coreBoxCode ? { ...row, ...value } : row))
+    setValidationErrors((current) => {
+      if (!current[coreBoxCode]) return current
+      const next = { ...current }
+      delete next[coreBoxCode]
+      return next
+    })
   }
 
   const payloadRows = useMemo<CoreTaskInput[]>(() => rows.map((row) => ({
@@ -81,12 +88,15 @@ export function CoreTaskGenerationModal({
 
   const submit = async () => {
     if (!canCreate) return
-    if (!rows.length) throw new Error('没有可生成的芯盒任务')
-    for (const row of rows) {
-      if (!row.routingNodeId) throw new Error(`请选择芯盒 ${row.coreBoxCode} 的制芯工序`)
-      if ((row.equipmentCode || row.teamCode || row.plannedStartAt) && !(row.equipmentCode && row.teamCode && row.plannedStartAt)) {
-        throw new Error(`芯盒 ${row.coreBoxCode} 的设备、班组和计划时间需要完整填写`)
-      }
+    if (!rows.length) {
+      message.error('没有可生成的芯盒任务')
+      return
+    }
+    const errors = validateCoreTaskGenerationRows(rows)
+    setValidationErrors(errors)
+    if (Object.keys(errors).length) {
+      message.error('请完善表格中的任务配置')
+      return
     }
     setSubmitting(true)
     try {
@@ -109,12 +119,12 @@ export function CoreTaskGenerationModal({
     }
   }
 
-  const columns: TableColumnsType<GenerationRow> = [
+  const columns: TableColumnsType<CoreTaskGenerationRow> = [
     { title: '芯盒', dataIndex: 'coreBoxName', key: 'coreBoxName', width: 170, render: (value, row) => <div><Typography.Text strong>{value}</Typography.Text><br /><Typography.Text type="secondary">{row.coreBoxCode}</Typography.Text></div> },
     { title: '预计废品率', dataIndex: 'expectedScrapRate', key: 'expectedScrapRate', width: 130, render: (value: number, row) => <InputNumber min={0} max={9999} precision={2} value={Number((value * 100).toFixed(2))} addonAfter="%" onChange={(percent) => { const expectedScrapRate = Number(percent || 0) / 100; patchRow(row.coreBoxCode, { expectedScrapRate, ...calculateCorePlan(workOrderQuantity, row.quantityPerProduct, expectedScrapRate, row.cavityCount) }) }} /> },
     { title: '需求量', dataIndex: 'plannedQuantity', key: 'plannedQuantity', width: 90 },
     { title: '压盒次数', dataIndex: 'plannedPressCount', key: 'plannedPressCount', width: 100 },
-    { title: '工序', dataIndex: 'routingNodeId', key: 'routingNodeId', width: 180, render: (value: string, row) => <Select value={value} style={{ width: '100%' }} options={(preview?.routingNodes || []).map((item) => ({ value: item.id, label: `${item.seqNo}. ${item.operationName}` }))} onChange={(routingNodeId) => patchRow(row.coreBoxCode, { routingNodeId, equipmentCode: undefined, teamCode: undefined })} /> },
+    { title: '工序', dataIndex: 'routingNodeId', key: 'routingNodeId', width: 210, render: (value: string, row) => <Form.Item validateStatus={validationErrors[row.coreBoxCode] ? 'error' : undefined} help={validationErrors[row.coreBoxCode]} style={{ marginBottom: 0 }}><Select value={value} placeholder="请选择工序" style={{ width: '100%' }} options={(preview?.routingNodes || []).map((item) => ({ value: item.id, label: `${item.seqNo}. ${item.operationName}` }))} onChange={(routingNodeId) => { const changed = changeCoreTaskRoutingNode(row, routingNodeId); patchRow(row.coreBoxCode, changed) }} /></Form.Item> },
     { title: '设备', dataIndex: 'equipmentCode', key: 'equipmentCode', width: 180, render: (value: string, row) => { const node = preview?.routingNodes.find((item) => item.id === row.routingNodeId); return <Select allowClear showSearch optionFilterProp="label" value={value || undefined} style={{ width: '100%' }} placeholder="可后续派工" options={(node?.equipment || []).filter((item) => item.status === '启用').map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} onChange={(equipmentCode) => patchRow(row.coreBoxCode, { equipmentCode, teamCode: undefined })} /> } },
     { title: '班组', dataIndex: 'teamCode', key: 'teamCode', width: 170, render: (value: string, row) => { const node = preview?.routingNodes.find((item) => item.id === row.routingNodeId); const equipment = node?.equipment.find((item) => item.code === row.equipmentCode); return <Select allowClear showSearch optionFilterProp="label" disabled={!equipment} value={value || undefined} style={{ width: '100%' }} placeholder="可后续派工" options={(preview?.teams || []).filter((item) => item.workshopCode === equipment?.workshopCode).map((item) => ({ value: item.code, label: `${item.name}（${item.code}）` }))} onChange={(teamCode) => patchRow(row.coreBoxCode, { teamCode })} /> } },
     { title: '计划时间', dataIndex: 'plannedStartAt', key: 'plannedStartAt', width: 190, render: (value: string, row) => <DatePicker showTime value={value ? dayjs(value) : null} style={{ width: '100%' }} onChange={(date) => patchRow(row.coreBoxCode, { plannedStartAt: date?.toISOString() })} /> },

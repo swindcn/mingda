@@ -1,7 +1,7 @@
 import { EyeOutlined, LockOutlined, PrinterOutlined, SearchOutlined, StopOutlined, UnlockOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Descriptions, Input, Modal, Segmented, Select, Table, Tag, message } from 'antd'
-import type { TableColumnsType } from 'antd'
-import { useEffect, useState } from 'react'
+import { Alert, Button, Card, Descriptions, Form, Input, Modal, Segmented, Select, Table, Tag, message } from 'antd'
+import type { FormInstance, TableColumnsType } from 'antd'
+import { createRef, useEffect, useState } from 'react'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
 import { ApiRequestError } from '../../services/api'
@@ -12,11 +12,13 @@ import {
   fetchCoreInventoryOptions,
   lockCoreBatch,
   remainingCoreHours,
+  resolveCoreInventoryPage,
   scrapCoreBatch,
   unlockCoreBatch,
   type CoreBatchRecord,
   type CoreBatchStatus,
 } from '../../utils/coremaking'
+import { createLatestRequestGate } from '../../utils/latestRequest'
 import { hasPermission } from '../../utils/roles'
 import { CoreBatchLabel } from './CoreBatchLabel'
 
@@ -38,27 +40,49 @@ export function CoreInventoryPage() {
   const [error, setError] = useState('')
   const [detail, setDetail] = useState<CoreBatchRecord | null>(null)
   const [labelBatch, setLabelBatch] = useState<CoreBatchRecord | null>(null)
+  const [listRequestGate] = useState(() => createLatestRequestGate())
+  const [detailRequestGate] = useState(() => createLatestRequestGate())
   const canView = hasPermission('production.core_inventory.view')
   const canDry = hasPermission('production.core_inventory.dry')
   const canLock = hasPermission('production.core_inventory.lock')
   const canScrap = hasPermission('production.core_inventory.scrap')
 
-  const refresh = async (nextPage = page, nextPageSize = pageSize, nextStatus = status) => {
+  const refresh = async (nextPage = page, nextPageSize = pageSize, nextStatus = status, nextKeyword = keyword.trim()) => {
     setLoading(true); setError('')
-    try {
-      const result = await fetchCoreInventory({ page: nextPage, pageSize: nextPageSize, status: nextStatus, keyword: keyword.trim() })
-      setRecords(result.items); setPage(result.page); setPageSize(result.pageSize); setTotal(result.total)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '砂芯库存加载失败')
-    } finally {
-      setLoading(false)
-    }
+    await listRequestGate.run(async () => {
+      let result = await fetchCoreInventory({ page: nextPage, pageSize: nextPageSize, status: nextStatus, keyword: nextKeyword })
+      const resolvedPage = resolveCoreInventoryPage(nextPage, result.items.length, result.totalPages)
+      if (resolvedPage !== result.page) {
+        result = await fetchCoreInventory({ page: resolvedPage, pageSize: nextPageSize, status: nextStatus, keyword: nextKeyword })
+      }
+      return result
+    }, {
+      success: (result) => {
+        setRecords(result.items); setPage(result.page); setPageSize(result.pageSize); setTotal(result.total)
+      },
+      error: (reason) => setError(reason instanceof Error ? reason.message : '砂芯库存加载失败'),
+      settled: () => setLoading(false),
+    })
   }
-  // Initial query intentionally synchronizes remote inventory into local page state.
-  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { void refresh(1) }, [])
+  useEffect(() => {
+    // Initial query synchronizes the remote inventory into local page state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh(1)
+    return () => { listRequestGate.invalidate(); detailRequestGate.invalidate() }
+    // The initial query deliberately snapshots the default filter state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const refreshAfterAction = async () => { await refresh(); if (detail) setDetail(await fetchCoreInventoryBatch(detail.id)) }
+  const loadDetail = async (id: string) => {
+    await detailRequestGate.run(
+      () => fetchCoreInventoryBatch(id),
+      {
+        success: setDetail,
+        error: (reason) => message.error(reason instanceof Error ? reason.message : '批次详情加载失败'),
+      },
+    )
+  }
+  const refreshAfterAction = async () => { await refresh(); if (detail) await loadDetail(detail.id) }
   const submit = async (action: () => Promise<unknown>) => {
     try { await action(); await refreshAfterAction(); return true } catch (reason) {
       if (reason instanceof ApiRequestError && reason.status === 409) { message.warning('数据已被其他用户更新，请刷新后重试；页面已刷新'); await refreshAfterAction(); return false }
@@ -66,7 +90,7 @@ export function CoreInventoryPage() {
     }
   }
   const openDetail = async (record: CoreBatchRecord) => {
-    try { setDetail(await fetchCoreInventoryBatch(record.id)) } catch (reason) { message.error(reason instanceof Error ? reason.message : '批次详情加载失败') }
+    await loadDetail(record.id)
   }
   const openLabel = async (record: CoreBatchRecord) => {
     try { setLabelBatch(await fetchCoreInventoryBatch(record.id)) } catch (reason) { message.error(reason instanceof Error ? reason.message : '批次标签加载失败') }
@@ -74,14 +98,33 @@ export function CoreInventoryPage() {
   const runDry = async (record: CoreBatchRecord) => {
     const latest = await fetchCoreInventoryBatch(record.id)
     const options = await fetchCoreInventoryOptions()
-    let equipmentCode = ''
-    Modal.confirm({ title: '确认烘干', content: <Select showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="请选择真实烘干设备" options={options.dryingEquipment.map((item) => ({ value: item.code, label: `${item.name}（${item.code}） · ${item.equipmentType}` }))} onChange={(value) => { equipmentCode = value }} />, okText: '确认烘干', cancelText: '取消', onOk: async () => { if (!equipmentCode) throw new Error('请选择烘干设备'); if (await submit(() => dryCoreBatch(latest.id, { versionNo: latest.versionNo, equipmentCode }))) message.success('批次已确认烘干') } })
+    const formRef = createRef<FormInstance<{ equipmentCode: string }>>()
+    Modal.confirm({
+      title: '确认烘干',
+      content: <Form ref={formRef} layout="vertical"><Form.Item name="equipmentCode" label="烘干设备" rules={[{ required: true, message: '请选择烘干设备' }]}><Select showSearch optionFilterProp="label" placeholder="请选择真实烘干设备" options={options.dryingEquipment.map((item) => ({ value: item.code, label: `${item.name}（${item.code}） · ${item.equipmentType}` }))} /></Form.Item></Form>,
+      okText: '确认烘干', cancelText: '取消',
+      onOk: async () => {
+        const { equipmentCode } = await formRef.current!.validateFields()
+        if (await submit(() => dryCoreBatch(latest.id, { versionNo: latest.versionNo, equipmentCode }))) message.success('批次已确认烘干')
+      },
+    })
   }
   const runReasonAction = async (record: CoreBatchRecord, action: 'lock' | 'scrap') => {
     const latest = await fetchCoreInventoryBatch(record.id)
-    let reason = ''
     const label = action === 'lock' ? '冻结' : '报废'
-    Modal.confirm({ title: `${label}砂芯批次`, content: <Input.TextArea rows={3} placeholder={`请输入${label}理由`} onChange={(event) => { reason = event.target.value }} />, okText: `确认${label}`, cancelText: '取消', okButtonProps: action === 'scrap' ? { danger: true } : undefined, onOk: async () => { if (!reason.trim()) throw new Error(`请输入${label}理由`); const request = action === 'lock' ? lockCoreBatch(latest.id, { versionNo: latest.versionNo, reason }) : scrapCoreBatch(latest.id, { versionNo: latest.versionNo, reason }); if (await submit(() => request)) message.success(`批次已${label}`) } })
+    const formRef = createRef<FormInstance<{ reason: string }>>()
+    Modal.confirm({
+      title: `${label}砂芯批次`,
+      content: <Form ref={formRef} layout="vertical"><Form.Item name="reason" label={`${label}理由`} rules={[{ required: true, whitespace: true, message: `请输入${label}理由` }]}><Input.TextArea rows={3} maxLength={200} placeholder={`请输入${label}理由`} /></Form.Item></Form>,
+      okText: `确认${label}`, cancelText: '取消', okButtonProps: action === 'scrap' ? { danger: true } : undefined,
+      onOk: async () => {
+        const { reason } = await formRef.current!.validateFields()
+        const request = () => action === 'lock'
+          ? lockCoreBatch(latest.id, { versionNo: latest.versionNo, reason })
+          : scrapCoreBatch(latest.id, { versionNo: latest.versionNo, reason })
+        if (await submit(request)) message.success(`批次已${label}`)
+      },
+    })
   }
   const runUnlock = async (record: CoreBatchRecord) => {
     const latest = await fetchCoreInventoryBatch(record.id)
@@ -110,9 +153,9 @@ export function CoreInventoryPage() {
   ]
 
   return <>
-    <div className="page-header"><div><h1 className="page-title">砂芯库存</h1><p className="page-description">按批次管理烘干、保质期、冻结与报废状态。</p></div>{canView && <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={() => void refresh(1)}>查询</Button>}</div>
+    <div className="page-header"><div><h1 className="page-title">砂芯库存</h1><p className="page-description">按批次管理烘干、保质期、冻结与报废状态。</p></div>{canView && <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={() => { setPage(1); void refresh(1) }}>查询</Button>}</div>
     <Card>
-      <div className="production-query-row core-inventory-query"><Input allowClear prefix={<SearchOutlined />} placeholder="批次/芯盒/产品/工单" value={keyword} onChange={(event) => setKeyword(event.target.value)} onPressEnter={() => void refresh(1)} /><Segmented value={status} options={batchFilters} onChange={(value) => { const next = value as CoreBatchStatus | 'ALL'; setStatus(next); void refresh(1, pageSize, next) }} /></div>
+      <div className="production-query-row core-inventory-query"><Input allowClear prefix={<SearchOutlined />} placeholder="批次/芯盒/产品/工单" value={keyword} onChange={(event) => { setKeyword(event.target.value); setPage(1) }} onPressEnter={() => void refresh(1)} /><Segmented value={status} options={batchFilters} onChange={(value) => { const next = value as CoreBatchStatus | 'ALL'; setStatus(next); setPage(1); void refresh(1, pageSize, next) }} /></div>
       {error && <Alert className="coremaking-load-error" type="error" showIcon message={error} action={<Button size="small" onClick={() => void refresh()}>重试</Button>} />}
       <ResizableTable storageKey="production-core-inventory-widths" rowKey="id" columns={columns} dataSource={records} loading={loading} locale={{ emptyText: '暂无砂芯库存' }} pagination={{ current: page, pageSize, total, onChange: (nextPage, nextPageSize) => void refresh(nextPage, nextPageSize) }} />
     </Card>
