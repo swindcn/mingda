@@ -10,8 +10,12 @@ function permissionFor(request: Request) {
     if (/\/work-orders\/[^/]+\/core-tasks$/.test(path) && request.method === 'POST') return 'production.core_task.create'
     if (/\/core-tasks\/[^/]+\/dispatch$/.test(path)) return 'production.core_task.dispatch'
     if (/\/core-tasks\/[^/]+\/cancel$/.test(path)) return 'production.core_task.cancel'
+    if (/\/core-tasks\/[^/]+\/start$/.test(path)) return 'production.core_task.start'
+    if (/\/core-tasks\/[^/]+\/report$/.test(path)) return 'production.core_task.report'
     return 'production.core_task.view'
   }
+  if (path.includes('/core-batches')) return 'production.core_inventory.manage'
+  if (path.includes('/core-inventory')) return 'production.core_inventory.view'
   if (path.includes('/work-orders')) {
     if (/\/work-orders\/[^/]+\/close$/.test(path)) return 'production.work_order.close'
     if (request.method === 'POST') return 'production.work_order.create'

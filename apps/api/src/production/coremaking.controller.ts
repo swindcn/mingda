@@ -2,7 +2,18 @@ import { Body, Controller, Get, Param, Post, Put, Query, Req, UseGuards } from '
 import { AdminAuthGuard } from '../shared/admin-auth.guard'
 import type { RequestWithAdmin } from '../shared/admin-context'
 import { CoremakingService } from './coremaking.service'
-import type { CancelCoreTaskBody, CreateCoreTasksBody, DispatchCoreTaskBody, CoreTaskPreviewBody } from './coremaking.types'
+import type {
+  CancelCoreTaskBody,
+  CreateCoreTasksBody,
+  DispatchCoreTaskBody,
+  DryCoreBatchBody,
+  LockCoreBatchBody,
+  ReportCoreTaskBody,
+  ScrapCoreBatchBody,
+  StartCoreTaskBody,
+  CoreTaskPreviewBody,
+  UnlockCoreBatchBody,
+} from './coremaking.types'
 import { ProductionPermissionGuard } from './production-permission.guard'
 
 @Controller('admin/production')
@@ -43,5 +54,40 @@ export class CoremakingController {
   @Post('core-tasks/:id/cancel')
   cancel(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: CancelCoreTaskBody) {
     return this.coremaking.cancelTask(request, id, body)
+  }
+
+  @Post('core-tasks/:id/start')
+  start(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: StartCoreTaskBody) {
+    return this.coremaking.startTask(request, id, body)
+  }
+
+  @Post('core-tasks/:id/report')
+  report(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: ReportCoreTaskBody) {
+    return this.coremaking.reportTask(request, id, body)
+  }
+
+  @Get('core-inventory')
+  inventory(@Req() request: RequestWithAdmin) {
+    return this.coremaking.listInventory(request)
+  }
+
+  @Post('core-batches/:id/dry')
+  dry(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: DryCoreBatchBody) {
+    return this.coremaking.dryBatch(request, id, body)
+  }
+
+  @Post('core-batches/:id/lock')
+  lock(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: LockCoreBatchBody) {
+    return this.coremaking.lockBatch(request, id, body)
+  }
+
+  @Post('core-batches/:id/unlock')
+  unlock(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: UnlockCoreBatchBody) {
+    return this.coremaking.unlockBatch(request, id, body)
+  }
+
+  @Post('core-batches/:id/scrap')
+  scrap(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: ScrapCoreBatchBody) {
+    return this.coremaking.scrapBatch(request, id, body)
   }
 }

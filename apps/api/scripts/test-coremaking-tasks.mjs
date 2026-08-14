@@ -318,7 +318,9 @@ try {
   const waitingTask = created.find((task) => task.coreBoxCode === coreBoxes[0].code)
   const pendingTask = created.find((task) => task.coreBoxCode === coreBoxes[1].code)
   if (waitingTask.status !== 'WAITING' || pendingTask.status !== 'PENDING_DISPATCH') throw new Error('任务初始状态不正确')
-  if (!waitingTask.canCancel || !waitingTask.canDispatch || waitingTask.canStart || waitingTask.canReport) throw new Error('Task 2 能力字段不正确')
+  if (!waitingTask.canCancel || !waitingTask.canDispatch || !waitingTask.canStart || waitingTask.canReport || pendingTask.canStart) {
+    throw new Error('制芯任务能力字段不正确')
+  }
   if (waitingTask.quantityPerProduct !== 2 || waitingTask.cavityCount !== 4 || waitingTask.shelfLifeHours !== 8.5) throw new Error('任务快照保存不完整')
 
   const invalidDispatchBody = await request(baseUrl, `/admin/production/core-tasks/${pendingTask.id}/dispatch`, {

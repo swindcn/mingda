@@ -15,6 +15,7 @@
     "test:production-calculations": "npm run build && node scripts/test-production-calculations.mjs",
     "test:coremaking-calculations": "npm run build && node scripts/test-coremaking-calculations.mjs",
     "test:coremaking-tasks": "node scripts/test-coremaking-tasks.mjs",
+    "test:coremaking-execution": "node scripts/test-coremaking-execution.mjs",
     "test:production-execution": "node scripts/test-production-execution.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

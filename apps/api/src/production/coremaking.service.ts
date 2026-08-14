@@ -1,9 +1,21 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
-import { CoreTaskStatus, Prisma } from '@prisma/client'
+import { CoreBatchStatus, CoreTaskStatus, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { getAdminContext, hasAdminPermission, visibleOwnershipEntityIds, type AdminContext, type RequestWithAdmin } from '../shared/admin-context'
-import { calculateCoreDemand, calculatePressCount } from './coremaking.calculations'
-import type { CancelCoreTaskBody, CoreTaskInput, CoreTaskPreviewBody, CreateCoreTasksBody, DispatchCoreTaskBody } from './coremaking.types'
+import { calculateCoreBatchExpiresAt, calculateCoreDemand, calculatePressCount, coreBatchStatus } from './coremaking.calculations'
+import type {
+  CancelCoreTaskBody,
+  CoreTaskInput,
+  CoreTaskPreviewBody,
+  CreateCoreTasksBody,
+  DispatchCoreTaskBody,
+  DryCoreBatchBody,
+  LockCoreBatchBody,
+  ReportCoreTaskBody,
+  ScrapCoreBatchBody,
+  StartCoreTaskBody,
+  UnlockCoreBatchBody,
+} from './coremaking.types'
 
 type DatabaseClient = PrismaService | Prisma.TransactionClient
 
@@ -12,9 +24,33 @@ function decimal(value: Prisma.Decimal | number | null | undefined) {
 }
 
 function requiredVersion(value: unknown) {
-  const versionNo = Number(value)
-  if (!Number.isInteger(versionNo) || versionNo <= 0) throw new BadRequestException('缺少有效的数据版本，请刷新后重试')
-  return versionNo
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new BadRequestException('缺少有效的数据版本，请刷新后重试')
+  }
+  return value
+}
+
+function requiredInteger(value: unknown, label: string, minimum: number) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum || value > 2_147_483_647) {
+    throw new BadRequestException(`${label}必须为${minimum > 0 ? '正' : '非负'}整数`)
+  }
+  return value
+}
+
+function requiredBoolean(value: unknown, label: string) {
+  if (typeof value !== 'boolean') throw new BadRequestException(`${label}必须为布尔值`)
+  return value
+}
+
+function textValue(value: unknown, label: string, required = false) {
+  if (value === undefined || value === null) {
+    if (required) throw new BadRequestException(`请填写${label}`)
+    return ''
+  }
+  if (typeof value !== 'string') throw new BadRequestException(`${label}格式不正确`)
+  const result = value.trim()
+  if (required && !result) throw new BadRequestException(`请填写${label}`)
+  return result
 }
 
 function optionalDateTime(value: unknown) {
@@ -25,10 +61,10 @@ function optionalDateTime(value: unknown) {
   return result
 }
 
-function businessDate() {
+function businessDate(at = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(new Date())
+  }).formatToParts(at)
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
   return {
     key: `${values.year}${values.month}${values.day}`,
@@ -75,6 +111,17 @@ export class CoremakingService {
     }
   }
 
+  private batchInclude() {
+    return {
+      report: { include: { task: { select: { id: true, code: true, workOrderId: true, status: true } } } },
+      driedBy: { select: { id: true, name: true } },
+      dryingEquipment: { select: { code: true, name: true, equipmentType: true } },
+      lockedBy: { select: { id: true, name: true } },
+      scrappedBy: { select: { id: true, name: true } },
+      ledgers: { orderBy: { createdAt: 'asc' as const } },
+    }
+  }
+
   private workOrderInclude() {
     return {
       bomVersion: { include: { bom: true, coreBoxes: { include: { coreBox: { include: { mold: true } } } } } },
@@ -112,6 +159,20 @@ export class CoremakingService {
       SELECT "id" FROM "WorkOrder" WHERE "id" = ${id} FOR UPDATE
     `)
     if (!rows.length) throw new NotFoundException('生产工单不存在')
+  }
+
+  private async lockTask(tx: Prisma.TransactionClient, id: string) {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "CoreProductionTask" WHERE "id" = ${id} FOR UPDATE
+    `)
+    if (!rows.length) throw new NotFoundException('制芯任务不存在')
+  }
+
+  private async lockBatchRecord(tx: Prisma.TransactionClient, id: string) {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "CoreInventoryBatch" WHERE "id" = ${id} FOR UPDATE
+    `)
+    if (!rows.length) throw new NotFoundException('砂芯批次不存在')
   }
 
   private coreNodes(workOrder: Awaited<ReturnType<CoremakingService['loadWorkOrder']>>) {
@@ -240,6 +301,25 @@ export class CoremakingService {
       RETURNING "currentValue"
     `)
     return `CORE-${current.key}-${String(sequence.currentValue).padStart(3, '0')}`
+  }
+
+  private async nextBatchCode(tx: Prisma.TransactionClient, coreBoxCode: string, shiftCode: string, reportedAt: Date) {
+    const current = businessDate(reportedAt)
+    const documentType = `CORE_BATCH:${coreBoxCode}:${shiftCode}`
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const [sequence] = await tx.$queryRaw<Array<{ currentValue: number }>>(Prisma.sql`
+        INSERT INTO "DocumentSequence" ("documentType", "businessDate", "currentValue", "updatedAt")
+        VALUES (${documentType}, ${current.date}, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT ("documentType", "businessDate") DO UPDATE
+        SET "currentValue" = "DocumentSequence"."currentValue" + 1,
+            "updatedAt" = CURRENT_TIMESTAMP
+        RETURNING "currentValue"
+      `)
+      if (sequence.currentValue > 999) throw new ConflictException('当日砂芯批次三位流水已用尽')
+      const code = `CORE-${coreBoxCode}-${current.key}-${shiftCode}-${String(sequence.currentValue).padStart(3, '0')}`
+      if (!(await tx.coreInventoryBatch.count({ where: { code } }))) return code
+    }
+    throw new ConflictException('砂芯批次编码生成冲突，请重试')
   }
 
   private async serializable<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {
@@ -378,14 +458,20 @@ export class CoremakingService {
       reportCount: Number(record._count?.reports || 0),
       remark: record.remark || '',
       cancelReason: record.cancelReason || '',
+      startedAt: record.startedAt?.toISOString() || '',
+      completedAt: record.completedAt?.toISOString() || '',
       canceledByName: record.canceledBy?.name || '',
       canceledAt: record.canceledAt?.toISOString() || '',
       createdByName: record.createdBy?.name || '',
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
       canDispatch: adjustable && hasAdminPermission(user, 'production.core_task.dispatch'),
-      canStart: false,
-      canReport: false,
+      canStart: record.status === 'WAITING'
+        && !['COMPLETED', 'CLOSED'].includes(record.workOrder.productionStatus)
+        && hasAdminPermission(user, 'production.core_task.start'),
+      canReport: record.status === 'IN_PROGRESS'
+        && !['COMPLETED', 'CLOSED'].includes(record.workOrder.productionStatus)
+        && hasAdminPermission(user, 'production.core_task.report'),
       canCancel: cancelable && hasAdminPermission(user, 'production.core_task.cancel'),
     }
   }
@@ -478,5 +564,385 @@ export class CoremakingService {
     })
     if (!result.count) throw new ConflictException('仅未报工且未完成、未取消的制芯任务可以取消，或数据已被更新')
     return this.taskDto(await this.findTask(id), user)
+  }
+
+  private reportDto(record: any) {
+    return {
+      id: record.id,
+      taskId: record.taskId,
+      equipmentCode: record.equipmentCode,
+      equipmentName: record.equipmentNameSnapshot,
+      teamCode: record.teamCode,
+      teamName: record.teamNameSnapshot,
+      shiftCode: record.shiftCode || '',
+      operatorName: record.operatorNameSnapshot,
+      sandBatchCode: record.sandBatchCode || '',
+      qualifiedQuantity: record.qualifiedQuantity,
+      scrapQuantity: record.scrapQuantity,
+      defectReason: record.defectReason || '',
+      dryingRequired: record.dryingRequired,
+      remark: record.remark || '',
+      reportedAt: record.reportedAt.toISOString(),
+      createdAt: record.createdAt.toISOString(),
+    }
+  }
+
+  private batchDto(record: any) {
+    return {
+      id: record.id,
+      code: record.code,
+      qrContent: record.qrContent,
+      reportId: record.reportId,
+      taskId: record.report?.taskId || '',
+      taskCode: record.report?.task?.code || '',
+      workOrderId: record.report?.task?.workOrderId || '',
+      coreBoxCode: record.coreBoxCodeSnapshot,
+      coreBoxName: record.coreBoxNameSnapshot,
+      productCode: record.productCodeSnapshot,
+      productName: record.productNameSnapshot,
+      workOrderCode: record.workOrderCodeSnapshot,
+      initialQuantity: record.initialQuantity,
+      currentQuantity: record.currentQuantity,
+      dryingRequired: record.dryingRequired,
+      driedAt: record.driedAt?.toISOString() || '',
+      driedByName: record.driedBy?.name || '',
+      dryingEquipmentCode: record.dryingEquipmentCode || '',
+      dryingEquipmentName: record.dryingEquipmentNameSnapshot || '',
+      shelfLifeHours: decimal(record.shelfLifeHoursSnapshot),
+      shelfLifeStartedAt: record.shelfLifeStartedAt?.toISOString() || '',
+      expiresAt: record.expiresAt?.toISOString() || '',
+      status: record.status,
+      versionNo: record.versionNo,
+      lockedByName: record.lockedBy?.name || '',
+      lockedAt: record.lockedAt?.toISOString() || '',
+      lockReason: record.lockReason || '',
+      scrappedByName: record.scrappedBy?.name || '',
+      scrappedAt: record.scrappedAt?.toISOString() || '',
+      scrapReason: record.scrapReason || '',
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+      ledgers: (record.ledgers || []).map((item: any) => ({
+        id: item.id,
+        action: item.action,
+        quantityChange: item.quantityChange,
+        quantityAfter: item.quantityAfter,
+        operatorName: item.operatorNameSnapshot,
+        reason: item.reason || '',
+        createdAt: item.createdAt.toISOString(),
+      })),
+    }
+  }
+
+  private async findBatch(id: string) {
+    const record = await this.prisma.coreInventoryBatch.findUnique({ where: { id }, include: this.batchInclude() })
+    if (!record) throw new NotFoundException('砂芯批次不存在')
+    return record
+  }
+
+  private async assertBatchVisible(request: RequestWithAdmin, id: string) {
+    const batch = await this.prisma.coreInventoryBatch.findUnique({
+      where: { id },
+      select: { report: { select: { taskId: true } } },
+    })
+    if (!batch) throw new NotFoundException('砂芯批次不存在')
+    await this.assertTaskVisible(request, batch.report.taskId)
+  }
+
+  private liveBatchStatus(record: { status: CoreBatchStatus; expiresAt: Date | null }, now: Date) {
+    if (!['AVAILABLE', 'WARNING', 'EXPIRED'].includes(record.status)) return record.status
+    return coreBatchStatus(now, record.expiresAt) as CoreBatchStatus
+  }
+
+  async startTask(request: RequestWithAdmin, id: string, value: StartCoreTaskBody | unknown) {
+    await this.assertTaskVisible(request, id)
+    const body = requestBody(value) as StartCoreTaskBody
+    const versionNo = requiredVersion(body.versionNo)
+    const user = getAdminContext(request)
+    await this.serializable(async (tx) => {
+      await this.lockTask(tx, id)
+      const current = await tx.coreProductionTask.findUnique({
+        where: { id },
+        include: { workOrder: { select: { productionStatus: true } } },
+      })
+      if (!current) throw new NotFoundException('制芯任务不存在')
+      if (current.versionNo !== versionNo) throw new ConflictException('制芯任务已被其他用户更新，请刷新后重试')
+      if (['COMPLETED', 'CLOSED'].includes(current.workOrder.productionStatus)) {
+        throw new BadRequestException('父生产工单已完成或关闭，不能开始制芯任务')
+      }
+      if (current.status !== 'WAITING' || !current.equipmentCode || !current.teamCode || !current.plannedStartAt) {
+        throw new ConflictException('仅已完成派工的待生产任务可以开始')
+      }
+      const result = await tx.coreProductionTask.updateMany({
+        where: { id, versionNo, status: 'WAITING' },
+        data: { status: 'IN_PROGRESS', startedByUserId: user.id, startedAt: new Date(), versionNo: { increment: 1 } },
+      })
+      if (!result.count) throw new ConflictException('制芯任务已被其他用户更新，请刷新后重试')
+    })
+    return this.taskDto(await this.findTask(id), user)
+  }
+
+  async reportTask(request: RequestWithAdmin, id: string, value: ReportCoreTaskBody | unknown) {
+    await this.assertTaskVisible(request, id)
+    const body = requestBody(value) as ReportCoreTaskBody
+    const versionNo = requiredVersion(body.versionNo)
+    const qualifiedQuantity = requiredInteger(body.qualifiedQuantity, '合格数量', 1)
+    const scrapQuantity = requiredInteger(body.scrapQuantity, '废品数量', 0)
+    const shiftCode = textValue(body.shiftCode, '班次', true)
+    const dryingRequired = requiredBoolean(body.dryingRequired, '是否需要烘干')
+    const sandBatchCode = textValue(body.sandBatchCode, '砂批次') || null
+    const defectReason = textValue(body.defectReason, '缺陷原因') || null
+    const remark = textValue(body.remark, '备注') || null
+    const user = getAdminContext(request)
+
+    const reportId = await this.serializable(async (tx) => {
+      await this.lockTask(tx, id)
+      const current = await tx.coreProductionTask.findUnique({
+        where: { id },
+        include: { workOrder: { select: { productionStatus: true } } },
+      })
+      if (!current) throw new NotFoundException('制芯任务不存在')
+      if (current.versionNo !== versionNo) throw new ConflictException('制芯任务已被其他用户更新，请刷新后重试')
+      if (['COMPLETED', 'CLOSED'].includes(current.workOrder.productionStatus)) {
+        throw new BadRequestException('父生产工单已完成或关闭，不能继续报工')
+      }
+      if (current.status !== 'IN_PROGRESS') throw new ConflictException('仅生产中的制芯任务可以报工')
+      if (!current.equipmentCode || !current.equipmentNameSnapshot || !current.teamCode || !current.teamNameSnapshot) {
+        throw new BadRequestException('制芯任务缺少完整派工信息')
+      }
+      if (!(await tx.shiftMaster.count({ where: { code: shiftCode, status: '启用' } }))) {
+        throw new BadRequestException('班次不存在或已停用')
+      }
+
+      const qualifiedTotal = BigInt(current.qualifiedQuantity) + BigInt(qualifiedQuantity)
+      const scrapTotal = BigInt(current.scrapQuantity) + BigInt(scrapQuantity)
+      if (qualifiedTotal > 2_147_483_647n || scrapTotal > 2_147_483_647n) throw new BadRequestException('累计报工数量超出可存储范围')
+      const reportedAt = new Date()
+      const completed = qualifiedTotal >= BigInt(current.plannedQuantity)
+      const updated = await tx.coreProductionTask.updateMany({
+        where: { id, versionNo, status: 'IN_PROGRESS' },
+        data: {
+          qualifiedQuantity: Number(qualifiedTotal),
+          scrapQuantity: Number(scrapTotal),
+          status: completed ? 'COMPLETED' : 'IN_PROGRESS',
+          completedByUserId: completed ? user.id : null,
+          completedAt: completed ? reportedAt : null,
+          versionNo: { increment: 1 },
+        },
+      })
+      if (!updated.count) throw new ConflictException('制芯任务已被其他用户更新，请刷新后重试')
+
+      const report = await tx.coreProductionReport.create({
+        data: {
+          taskId: id,
+          equipmentCode: current.equipmentCode,
+          equipmentNameSnapshot: current.equipmentNameSnapshot,
+          teamCode: current.teamCode,
+          teamNameSnapshot: current.teamNameSnapshot,
+          shiftCode,
+          operatorUserId: user.id,
+          operatorNameSnapshot: user.name,
+          sandBatchCode,
+          qualifiedQuantity,
+          scrapQuantity,
+          defectReason,
+          dryingRequired,
+          remark,
+          reportedAt,
+        },
+      })
+      const expiresAt = calculateCoreBatchExpiresAt(dryingRequired, reportedAt, null, decimal(current.shelfLifeHoursSnapshot))
+      const batchCode = await this.nextBatchCode(tx, current.coreBoxCode, shiftCode, reportedAt)
+      const batch = await tx.coreInventoryBatch.create({
+        data: {
+          code: batchCode,
+          qrContent: batchCode,
+          reportId: report.id,
+          coreBoxCodeSnapshot: current.coreBoxCode,
+          productCodeSnapshot: current.productCodeSnapshot,
+          productNameSnapshot: current.productNameSnapshot,
+          coreBoxNameSnapshot: current.coreBoxNameSnapshot,
+          workOrderCodeSnapshot: current.workOrderCodeSnapshot,
+          initialQuantity: qualifiedQuantity,
+          currentQuantity: qualifiedQuantity,
+          dryingRequired,
+          shelfLifeHoursSnapshot: current.shelfLifeHoursSnapshot,
+          shelfLifeStartedAt: dryingRequired ? null : reportedAt,
+          expiresAt,
+          status: dryingRequired ? 'UNDRIED' : 'AVAILABLE',
+        },
+      })
+      await tx.coreInventoryLedger.create({
+        data: {
+          batchId: batch.id,
+          action: 'PRODUCED',
+          quantityChange: qualifiedQuantity,
+          quantityAfter: qualifiedQuantity,
+          sourceType: 'CORE_PRODUCTION_REPORT',
+          sourceId: report.id,
+          operatorUserId: user.id,
+          operatorNameSnapshot: user.name,
+        },
+      })
+      return report.id
+    })
+
+    const report = await this.prisma.coreProductionReport.findUnique({ where: { id: reportId }, include: { batch: { include: this.batchInclude() } } })
+    if (!report?.batch) throw new NotFoundException('报工库存批次不存在')
+    return {
+      task: this.taskDto(await this.findTask(id), user),
+      report: this.reportDto(report),
+      batch: this.batchDto(report.batch),
+    }
+  }
+
+  async listInventory(request: RequestWithAdmin) {
+    const taskIds = await visibleOwnershipEntityIds(this.prisma, getAdminContext(request), 'production:core_tasks')
+    if (taskIds?.length === 0) return []
+    const where = taskIds ? { report: { taskId: { in: taskIds } } } : {}
+    const now = new Date()
+    const candidates = await this.prisma.coreInventoryBatch.findMany({
+      where: { ...where, status: { in: ['AVAILABLE', 'WARNING', 'EXPIRED'] } },
+      select: { id: true, status: true, expiresAt: true },
+    })
+    await this.prisma.$transaction(candidates.map((batch) => {
+      const status = this.liveBatchStatus(batch, now)
+      return this.prisma.coreInventoryBatch.updateMany({
+        where: { id: batch.id, status: batch.status },
+        data: { status },
+      })
+    }))
+    const records = await this.prisma.coreInventoryBatch.findMany({
+      where,
+      include: this.batchInclude(),
+      orderBy: [{ createdAt: 'desc' }, { code: 'desc' }],
+    })
+    return records.map((record) => this.batchDto(record))
+  }
+
+  async dryBatch(request: RequestWithAdmin, id: string, value: DryCoreBatchBody | unknown) {
+    await this.assertBatchVisible(request, id)
+    const body = requestBody(value) as DryCoreBatchBody
+    const versionNo = requiredVersion(body.versionNo)
+    const equipmentCode = textValue(body.equipmentCode, '烘干设备', true)
+    const user = getAdminContext(request)
+    await this.serializable(async (tx) => {
+      await this.lockBatchRecord(tx, id)
+      const batch = await tx.coreInventoryBatch.findUnique({ where: { id } })
+      if (!batch) throw new NotFoundException('砂芯批次不存在')
+      if (batch.versionNo !== versionNo) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
+      if (!batch.dryingRequired || batch.status !== 'UNDRIED') throw new ConflictException('仅待烘干批次可以确认烘干')
+      const equipment = await tx.furnace.findUnique({ where: { code: equipmentCode } })
+      if (!equipment || equipment.status !== '启用' || !/(芯|烘干)/.test(equipment.equipmentType)) {
+        throw new BadRequestException('请选择启用且与制芯或烘干相关的设备')
+      }
+      const driedAt = new Date()
+      const expiresAt = calculateCoreBatchExpiresAt(true, batch.createdAt, driedAt, decimal(batch.shelfLifeHoursSnapshot))
+      const updated = await tx.coreInventoryBatch.updateMany({
+        where: { id, versionNo, status: 'UNDRIED', dryingRequired: true },
+        data: {
+          driedAt,
+          driedByUserId: user.id,
+          dryingEquipmentCode: equipment.code,
+          dryingEquipmentNameSnapshot: equipment.name,
+          shelfLifeStartedAt: driedAt,
+          expiresAt,
+          status: 'AVAILABLE',
+          versionNo: { increment: 1 },
+        },
+      })
+      if (!updated.count) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
+    })
+    return this.batchDto(await this.findBatch(id))
+  }
+
+  async lockBatch(request: RequestWithAdmin, id: string, value: LockCoreBatchBody | unknown) {
+    await this.assertBatchVisible(request, id)
+    const body = requestBody(value) as LockCoreBatchBody
+    const versionNo = requiredVersion(body.versionNo)
+    const reason = textValue(body.reason, '锁定原因', true)
+    const user = getAdminContext(request)
+    await this.serializable(async (tx) => {
+      await this.lockBatchRecord(tx, id)
+      const batch = await tx.coreInventoryBatch.findUnique({ where: { id } })
+      if (!batch) throw new NotFoundException('砂芯批次不存在')
+      if (batch.versionNo !== versionNo) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
+      const currentStatus = this.liveBatchStatus(batch, new Date())
+      if (!['AVAILABLE', 'WARNING', 'EXPIRED'].includes(currentStatus)) throw new ConflictException('当前砂芯批次不可锁定')
+      if (batch.currentQuantity <= 0) throw new ConflictException('无可锁定库存数量')
+      const lockedAt = new Date()
+      const updated = await tx.coreInventoryBatch.updateMany({
+        where: { id, versionNo, status: { in: ['AVAILABLE', 'WARNING', 'EXPIRED'] } },
+        data: { status: 'LOCKED', lockedByUserId: user.id, lockedAt, lockReason: reason, versionNo: { increment: 1 } },
+      })
+      if (!updated.count) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
+      await tx.coreInventoryLedger.create({
+        data: { batchId: id, action: 'LOCKED', quantityChange: 0, quantityAfter: batch.currentQuantity, operatorUserId: user.id, operatorNameSnapshot: user.name, reason },
+      })
+    })
+    return this.batchDto(await this.findBatch(id))
+  }
+
+  async unlockBatch(request: RequestWithAdmin, id: string, value: UnlockCoreBatchBody | unknown) {
+    await this.assertBatchVisible(request, id)
+    const body = requestBody(value) as UnlockCoreBatchBody
+    const versionNo = requiredVersion(body.versionNo)
+    const user = getAdminContext(request)
+    await this.serializable(async (tx) => {
+      await this.lockBatchRecord(tx, id)
+      const batch = await tx.coreInventoryBatch.findUnique({ where: { id } })
+      if (!batch) throw new NotFoundException('砂芯批次不存在')
+      if (batch.versionNo !== versionNo) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
+      if (batch.status !== 'LOCKED') throw new ConflictException('仅锁定中的砂芯批次可以解锁')
+      const status = coreBatchStatus(new Date(), batch.expiresAt)
+      const updated = await tx.coreInventoryBatch.updateMany({
+        where: { id, versionNo, status: 'LOCKED' },
+        data: { status, lockedByUserId: null, lockedAt: null, lockReason: null, versionNo: { increment: 1 } },
+      })
+      if (!updated.count) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
+      await tx.coreInventoryLedger.create({
+        data: { batchId: id, action: 'UNLOCKED', quantityChange: 0, quantityAfter: batch.currentQuantity, operatorUserId: user.id, operatorNameSnapshot: user.name },
+      })
+    })
+    return this.batchDto(await this.findBatch(id))
+  }
+
+  async scrapBatch(request: RequestWithAdmin, id: string, value: ScrapCoreBatchBody | unknown) {
+    await this.assertBatchVisible(request, id)
+    const body = requestBody(value) as ScrapCoreBatchBody
+    const versionNo = requiredVersion(body.versionNo)
+    const reason = textValue(body.reason, '报废原因', true)
+    const user = getAdminContext(request)
+    await this.serializable(async (tx) => {
+      await this.lockBatchRecord(tx, id)
+      const batch = await tx.coreInventoryBatch.findUnique({ where: { id } })
+      if (!batch) throw new NotFoundException('砂芯批次不存在')
+      if (batch.versionNo !== versionNo) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
+      if (['SCRAPPED', 'CONSUMED'].includes(batch.status) || batch.currentQuantity <= 0) throw new ConflictException('当前砂芯批次无可报废库存')
+      const scrappedAt = new Date()
+      const updated = await tx.coreInventoryBatch.updateMany({
+        where: { id, versionNo, currentQuantity: { gt: 0 }, status: { notIn: ['SCRAPPED', 'CONSUMED'] } },
+        data: {
+          currentQuantity: 0,
+          status: 'SCRAPPED',
+          scrappedByUserId: user.id,
+          scrappedAt,
+          scrapReason: reason,
+          versionNo: { increment: 1 },
+        },
+      })
+      if (!updated.count) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
+      await tx.coreInventoryLedger.create({
+        data: {
+          batchId: id,
+          action: 'SCRAPPED',
+          quantityChange: -batch.currentQuantity,
+          quantityAfter: 0,
+          operatorUserId: user.id,
+          operatorNameSnapshot: user.name,
+          reason,
+        },
+      })
+    })
+    return this.batchDto(await this.findBatch(id))
   }
 }
