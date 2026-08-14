@@ -34,6 +34,80 @@ let apiOutput = ''
 let apiSpawnError
 let schemaCreated = false
 
+async function assertSetBasedInventoryRefresh() {
+  const coremakingModule = await import('../dist/production/coremaking.service.js')
+  const CoremakingService = coremakingModule.CoremakingService || coremakingModule.default?.CoremakingService
+  const findManyCalls = []
+  const updateManyCalls = []
+  const fakePrisma = {
+    businessDataOwnership: {
+      findMany: async () => [{ entityId: 'visible-task' }],
+    },
+    coreInventoryBatch: {
+      count: async () => 0,
+      findMany: async (args) => {
+        findManyCalls.push(args)
+        return []
+      },
+      updateMany: (args) => {
+        updateManyCalls.push(args)
+        return Promise.resolve({ count: 0 })
+      },
+    },
+    $transaction: async (operations) => Promise.all(operations),
+  }
+  const service = new CoremakingService(fakePrisma)
+  const requestWithOwnScope = {
+    adminUser: {
+      id: 'inventory-viewer', name: '库存查看员', username: 'inventory-viewer', userType: 'EMPLOYEE', departmentId: null,
+      permissions: ['production.core_inventory.view'], dataScope: 'OWN', dataScopes: ['OWN'], customDepartments: [],
+    },
+  }
+  await service.listInventory(requestWithOwnScope, { page: '1', pageSize: '20' })
+  if (findManyCalls.length !== 1) throw new Error(`库存状态刷新不应全量读取候选批次: findMany=${findManyCalls.length}`)
+  if (updateManyCalls.length !== 3) throw new Error(`库存状态刷新应固定执行三次集合更新: updateMany=${updateManyCalls.length}`)
+  const targetStatuses = new Set(updateManyCalls.map((call) => call.data.status))
+  if (!['EXPIRED', 'WARNING', 'AVAILABLE'].every((status) => targetStatuses.has(status))) throw new Error('库存状态集合更新目标不完整')
+  if (updateManyCalls.some((call) => !JSON.stringify(call.where).includes('visible-task'))) throw new Error('库存状态集合更新缺少数据可见范围')
+}
+
+async function assertBatchCodeSequenceLock() {
+  const coremakingModule = await import('../dist/production/coremaking.service.js')
+  const CoremakingService = coremakingModule.CoremakingService || coremakingModule.default?.CoremakingService
+  const sqlCalls = []
+  let sequenceUpdate
+  let occupiedCodeReads = 0
+  const allocationTx = {
+    $executeRaw: async (query) => {
+      sqlCalls.push(Array.isArray(query?.strings) ? query.strings.join(' ') : String(query))
+      return 1
+    },
+    $queryRaw: async (query) => {
+      sqlCalls.push(Array.isArray(query?.strings) ? query.strings.join(' ') : String(query))
+      return [{ currentValue: 0 }]
+    },
+    coreInventoryBatch: {
+      count: async () => { throw new Error('批次编码分配不应逐个探测历史编码') },
+      findMany: async () => {
+        occupiedCodeReads += 1
+        return Array.from({ length: 6 }, (_, index) => ({ code: `CORE-BOX-20260814-DAY-00${index + 1}` }))
+      },
+    },
+    documentSequence: {
+      update: async (args) => {
+        sequenceUpdate = args
+        return args.data
+      },
+    },
+  }
+  const service = new CoremakingService({})
+  const allocatedCode = await service.nextBatchCode(allocationTx, 'BOX', 'DAY', new Date('2026-08-14T08:00:00.000Z'))
+  if (allocatedCode !== 'CORE-BOX-20260814-DAY-007') throw new Error(`批次序列行锁分配未跳过历史编码: ${allocatedCode}`)
+  if (!sqlCalls.some((sql) => sql.includes('FOR UPDATE'))) throw new Error('批次编码分配未显式锁定 DocumentSequence 行')
+  if (occupiedCodeReads !== 1) throw new Error(`批次编码分配应一次读取历史编码: findMany=${occupiedCodeReads}`)
+  if (sequenceUpdate?.data?.currentValue !== 7) throw new Error('批次编码分配未持久化最终流水号')
+}
+
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex')
   return `scrypt:${salt}:${scryptSync(password, salt, 64).toString('hex')}`
@@ -106,6 +180,8 @@ function hoursBetween(later, earlier) {
 let testError
 try {
   runCommand('构建当前 API', 'npm', ['run', 'build'])
+  await assertSetBasedInventoryRefresh()
+  await assertBatchCodeSequenceLock()
   managementPrisma = new PrismaClient({ datasources: { db: { url: managementDatabaseUrl } } })
   await managementPrisma.$connect()
   await managementPrisma.$executeRawUnsafe(`CREATE SCHEMA "${schemaName}"`)
@@ -410,12 +486,28 @@ try {
   const scrapLedger = inventoryLedgers.find((item) => item.action === 'SCRAPPED')
   if (!scrapLedger || scrapLedger.quantityChange !== -3 || scrapLedger.quantityAfter !== 0) throw new Error('报废流水数量语义错误')
 
+  await prisma.coreInventoryBatch.update({ where: { id: secondReport.batch.id }, data: { status: 'LOCKED' } })
+  const protectedBefore = await prisma.coreInventoryBatch.findMany({
+    where: { id: { in: [secondReport.batch.id, directReport.batch.id] } },
+    select: { id: true, status: true, currentQuantity: true, updatedAt: true },
+  })
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
   await prisma.coreInventoryBatch.update({ where: { id: dried.id }, data: { status: 'AVAILABLE', expiresAt: new Date(Date.now() - 60_000) } })
   const inventory = await request(baseUrl, '/admin/production/core-inventory?page=1&pageSize=100&status=EXPIRED', { headers })
   const expired = inventory.items.find((item) => item.id === dried.id)
   if (!expired || expired.status !== 'EXPIRED' || expired.currentQuantity !== dried.currentQuantity) throw new Error('库存查询未实时刷新失效状态或错误清空数量')
   const persistedExpired = await prisma.coreInventoryBatch.findUnique({ where: { id: dried.id } })
   if (persistedExpired?.status !== 'EXPIRED') throw new Error('实时库存状态未持久化')
+  const protectedAfter = await prisma.coreInventoryBatch.findMany({
+    where: { id: { in: [secondReport.batch.id, directReport.batch.id] } },
+    select: { id: true, status: true, currentQuantity: true, updatedAt: true },
+  })
+  for (const before of protectedBefore) {
+    const after = protectedAfter.find((item) => item.id === before.id)
+    if (!after || after.status !== before.status || after.currentQuantity !== before.currentQuantity || after.updatedAt.getTime() !== before.updatedAt.getTime()) {
+      throw new Error('库存状态刷新修改了锁定、报废批次或其库存数量')
+    }
+  }
 
   const { task: closedTask } = await createTask({ productionStatus: 'CLOSED' })
   await request(baseUrl, `/admin/production/core-tasks/${closedTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: closedTask.versionNo }) }, 400)

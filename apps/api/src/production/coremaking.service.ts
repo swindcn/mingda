@@ -85,12 +85,6 @@ function isSerializableConflict(error: unknown) {
   return error.code === 'P2010' && String(error.meta?.code || '') === '40001'
 }
 
-function isBatchCodeConflict(error: unknown) {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return false
-  const target = error.meta?.target
-  return Array.isArray(target) && target.length === 1 && target[0] === 'code'
-}
-
 function requestBody(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('请求体格式不正确')
   return value as Record<string, unknown>
@@ -319,33 +313,39 @@ export class CoremakingService {
   private async nextBatchCode(tx: Prisma.TransactionClient, coreBoxCode: string, shiftCode: string, reportedAt: Date) {
     const current = businessDate(reportedAt)
     const documentType = `CORE_BATCH:${coreBoxCode}:${shiftCode}`
-    for (let attempt = 0; attempt < 999; attempt += 1) {
-      const [sequence] = await tx.$queryRaw<Array<{ currentValue: number }>>(Prisma.sql`
-        INSERT INTO "DocumentSequence" ("documentType", "businessDate", "currentValue", "updatedAt")
-        VALUES (${documentType}, ${current.date}, 1, CURRENT_TIMESTAMP)
-        ON CONFLICT ("documentType", "businessDate") DO UPDATE
-        SET "currentValue" = "DocumentSequence"."currentValue" + 1,
-            "updatedAt" = CURRENT_TIMESTAMP
-        RETURNING "currentValue"
-      `)
-      if (sequence.currentValue > 999) throw new ConflictException('当日砂芯批次三位流水已用尽')
-      const code = `CORE-${coreBoxCode}-${current.key}-${shiftCode}-${String(sequence.currentValue).padStart(3, '0')}`
-      if (!(await tx.coreInventoryBatch.count({ where: { code } }))) return code
-    }
-    throw new ConflictException('砂芯批次编码生成冲突，请重试')
+    await tx.$executeRaw(Prisma.sql`
+      INSERT INTO "DocumentSequence" ("documentType", "businessDate", "currentValue", "updatedAt")
+      VALUES (${documentType}, ${current.date}, 0, CURRENT_TIMESTAMP)
+      ON CONFLICT ("documentType", "businessDate") DO NOTHING
+    `)
+    const [sequence] = await tx.$queryRaw<Array<{ currentValue: number }>>(Prisma.sql`
+      SELECT "currentValue" FROM "DocumentSequence"
+      WHERE "documentType" = ${documentType} AND "businessDate" = CAST(${current.date} AS date)
+      FOR UPDATE
+    `)
+    if (!sequence) throw new ConflictException('砂芯批次流水不存在，请重试')
+    const codePrefix = `CORE-${coreBoxCode}-${current.key}-${shiftCode}-`
+    const occupied = await tx.coreInventoryBatch.findMany({
+      where: { code: { startsWith: codePrefix } },
+      select: { code: true },
+    })
+    const occupiedCodes = new Set(occupied.map((batch) => batch.code))
+    let nextValue = sequence.currentValue + 1
+    while (nextValue <= 999 && occupiedCodes.has(`${codePrefix}${String(nextValue).padStart(3, '0')}`)) nextValue += 1
+    if (nextValue > 999) throw new ConflictException('当日砂芯批次三位流水已用尽')
+    await tx.documentSequence.update({
+      where: { documentType_businessDate: { documentType, businessDate: current.date } },
+      data: { currentValue: nextValue },
+    })
+    return `${codePrefix}${String(nextValue).padStart(3, '0')}`
   }
 
-  private async serializable<T>(
-    operation: (tx: Prisma.TransactionClient) => Promise<T>,
-    options: { maxAttempts?: number; retryBatchCodeConflict?: boolean } = {},
-  ) {
-    const maxAttempts = options.maxAttempts || 3
+  private async serializable<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>, maxAttempts = 3) {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
         return await this.prisma.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
       } catch (error) {
-        const retryable = isSerializableConflict(error) || (options.retryBatchCodeConflict && isBatchCodeConflict(error))
-        if (retryable) {
+        if (isSerializableConflict(error)) {
           if (attempt < maxAttempts - 1) continue
           throw new ConflictException('数据并发冲突，请重试')
         }
@@ -693,24 +693,26 @@ export class CoremakingService {
 
   private async refreshInventoryStatuses(where: Prisma.CoreInventoryBatchWhereInput) {
     const now = new Date()
-    const candidates = await this.prisma.coreInventoryBatch.findMany({
-      where: { AND: [where, { status: { in: ['AVAILABLE', 'WARNING', 'EXPIRED'] } }] },
-      select: { id: true, status: true, expiresAt: true },
-    })
-    const groups = new Map<string, { from: CoreBatchStatus; to: CoreBatchStatus; ids: string[] }>()
-    for (const batch of candidates) {
-      const status = this.liveBatchStatus(batch, now)
-      if (status === batch.status) continue
-      const key = `${batch.status}:${status}`
-      const group = groups.get(key) || { from: batch.status, to: status, ids: [] }
-      group.ids.push(batch.id)
-      groups.set(key, group)
-    }
-    const updates = Array.from(groups.values()).map((group) => this.prisma.coreInventoryBatch.updateMany({
-      where: { id: { in: group.ids }, status: group.from },
-      data: { status: group.to },
-    }))
-    if (updates.length) await this.prisma.$transaction(updates)
+    const warningAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    await this.prisma.$transaction([
+      this.prisma.coreInventoryBatch.updateMany({
+        where: { AND: [where, { status: { in: ['AVAILABLE', 'WARNING'] }, expiresAt: { lte: now } }] },
+        data: { status: 'EXPIRED' },
+      }),
+      this.prisma.coreInventoryBatch.updateMany({
+        where: { AND: [where, { status: { in: ['AVAILABLE', 'EXPIRED'] }, expiresAt: { gt: now, lte: warningAt } }] },
+        data: { status: 'WARNING' },
+      }),
+      this.prisma.coreInventoryBatch.updateMany({
+        where: {
+          AND: [
+            where,
+            { status: { in: ['WARNING', 'EXPIRED'] }, OR: [{ expiresAt: null }, { expiresAt: { gt: warningAt } }] },
+          ],
+        },
+        data: { status: 'AVAILABLE' },
+      }),
+    ])
   }
 
   private async validateStartResources(
@@ -866,7 +868,7 @@ export class CoremakingService {
         },
       })
       return report.id
-    }, { maxAttempts: 5, retryBatchCodeConflict: true })
+    }, 5)
 
     const created = await this.prisma.coreProductionReport.findUnique({ where: { id: reportId }, select: { batch: { select: { id: true } } } })
     if (!created?.batch) throw new NotFoundException('报工库存批次不存在')
