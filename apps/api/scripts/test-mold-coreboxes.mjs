@@ -41,6 +41,7 @@ function coreBox(code, name, overrides = {}) {
     code,
     name,
     images: [`/uploads/${code}.jpg`],
+    cavityCount: 1,
     maxLife: 10000,
     usedLife: 0,
     status: '启用',
@@ -83,13 +84,15 @@ try {
       itemCode: productCode,
       status: '启用',
       coreBoxes: [
-        coreBox(coreA, '水道芯盒'),
-        coreBox(coreB, '曲轴箱芯盒'),
+        coreBox(coreA, '水道芯盒', { cavityCount: 2 }),
+        coreBox(coreB, '曲轴箱芯盒', { cavityCount: 4 }),
         coreBox(coreC, '油道芯盒'),
       ],
     }),
   })
   if (!created.hasCoreBox || created.coreBoxes?.length !== 3) throw new Error('一次创建三套芯盒失败')
+  if (created.coreBoxes.find((item) => item.code === coreA)?.cavityCount !== 2) throw new Error('水道芯盒穴数未保存')
+  if (created.coreBoxes.find((item) => item.code === coreB)?.cavityCount !== 4) throw new Error('曲轴箱芯盒穴数未保存')
   const ownerships = await prisma.businessDataOwnership.findMany({
     where: { entityType: { in: ['modeling:molds', 'modeling:coreboxes'] }, entityId: { in: [moldA, coreA, coreB, coreC] } },
   })
@@ -156,7 +159,7 @@ try {
       itemCode: productCode,
       status: '启用',
       coreBoxes: [
-        coreBox(coreA, '水道芯盒（修订）', { usedLife: 125 }),
+        coreBox(coreA, '水道芯盒（修订）', { usedLife: 125, cavityCount: 3 }),
         coreBox(coreC, '油道芯盒'),
         coreBox(coreD, '进气道芯盒'),
       ],
@@ -164,11 +167,26 @@ try {
   })
   const updatedMap = new Map(updated.coreBoxes.map((item) => [item.code, item]))
   if (updated.coreBoxes.length !== 4) throw new Error('编辑后未返回全部芯盒')
-  if (updatedMap.get(coreA)?.name !== '水道芯盒（修订）' || updatedMap.get(coreA)?.usedLife !== 125) {
+  if (updatedMap.get(coreA)?.name !== '水道芯盒（修订）' || updatedMap.get(coreA)?.usedLife !== 125 || updatedMap.get(coreA)?.cavityCount !== 3) {
     throw new Error('已有芯盒修改失败')
   }
   if (!updatedMap.has(coreD)) throw new Error('编辑时新增芯盒失败')
   if (updatedMap.get(coreB)?.status !== '停用') throw new Error('请求遗漏的已有芯盒未停用')
+
+  for (const invalidCavityCount of [0, -1, 1.5, 'abc']) {
+    const invalidCavity = await request(`/admin/modeling/molds/${moldB}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        code: moldB,
+        name: '冲突回滚测试模具',
+        itemCode: productCode,
+        status: '启用',
+        coreBoxes: [coreBox(`${moldB}-INVALID`, '非法穴数芯盒', { cavityCount: invalidCavityCount })],
+      }),
+    }, true)
+    if (!String(invalidCavity.message || '').includes('穴数')) throw new Error('非法芯盒穴数提示不明确')
+  }
 
   const conflict = await request(`/admin/modeling/molds/${moldB}`, {
     method: 'PUT',
@@ -229,6 +247,7 @@ try {
   })
   const legacyDetail = await request(`/admin/modeling/molds/${moldLegacy}`, { headers })
   if (!legacyDetail.hasCoreBox || legacyDetail.coreBoxes?.[0]?.code !== legacyCore) throw new Error('旧单芯盒请求不兼容')
+  if (legacyDetail.coreBoxes[0].cavityCount !== 1) throw new Error('旧单芯盒请求未默认穴数为 1')
 
   console.log(JSON.stringify({ ok: true, moldCode: moldA, coreBoxes: updated.coreBoxes.length, omittedDisabled: coreB }))
 } finally {

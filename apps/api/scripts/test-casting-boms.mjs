@@ -75,8 +75,8 @@ try {
     materialGradeCode: grade.code,
     moldCodes: [moldA],
     coreBoxes: [
-      { coreBoxCode: coreBoxA, quantityPerProduct: 2 },
-      { coreBoxCode: coreBoxB, quantityPerProduct: 4 },
+      { coreBoxCode: coreBoxA, quantityPerProduct: 2, shelfLifeHours: 8.5 },
+      { coreBoxCode: coreBoxB, quantityPerProduct: 4, shelfLifeHours: 24 },
     ],
     netWeightKg: 45,
     grossWeightKg: 65,
@@ -95,6 +95,8 @@ try {
   }
   if (v1.coreBoxes.find((item) => item.code === coreBoxA)?.quantityPerProduct !== 2) throw new Error('水道芯盒芯件比保存失败')
   if (v1.coreBoxes.find((item) => item.code === coreBoxB)?.quantityPerProduct !== 4) throw new Error('油道芯盒芯件比保存失败')
+  if (v1.coreBoxes.find((item) => item.code === coreBoxA)?.shelfLifeHours !== 8.5) throw new Error('水道芯盒保质期保存失败')
+  if (v1.coreBoxes.find((item) => item.code === coreBoxB)?.shelfLifeHours !== 24) throw new Error('油道芯盒保质期保存失败')
   const v1Ownership = await prisma.businessDataOwnership.findUnique({
     where: { entityType_entityId: { entityType: 'modeling:boms', entityId: v1.id } },
   })
@@ -124,6 +126,7 @@ try {
     body: JSON.stringify({ ...legacyPayload, coreBoxCodes: [coreBoxA] }),
   })
   if (v1Legacy.coreBoxes.length !== 1 || v1Legacy.coreBoxes[0].quantityPerProduct !== 1) throw new Error('旧 coreBoxCodes 请求未按芯件比 1 兼容')
+  if (v1Legacy.coreBoxes[0].shelfLifeHours != null) throw new Error('旧 coreBoxCodes 请求不应生成保质期')
   await request(`/admin/modeling/boms/${v1.id}`, { method: 'PUT', headers, body: JSON.stringify(payload) })
   const moldDeleteFailure = await request(`/admin/modeling/molds/${moldA}`, { method: 'DELETE', headers }, true)
   if (!String(moldDeleteFailure.message || '').includes('已被其他资料引用')) throw new Error('被 BOM 引用的模具删除提示不正确')
@@ -144,6 +147,17 @@ try {
     method: 'POST', headers,
     body: JSON.stringify({ ...payload, productCode: productB, coreBoxes: [{ coreBoxCode: coreBoxA, quantityPerProduct: 0 }] }),
   }, true)
+  for (const invalidShelfLife of [0, -1]) {
+    const invalidShelfLifeResult = await request('/admin/modeling/boms', {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        ...payload,
+        productCode: productB,
+        coreBoxes: [{ coreBoxCode: coreBoxA, quantityPerProduct: 1, shelfLifeHours: invalidShelfLife }],
+      }),
+    }, true)
+    if (!String(invalidShelfLifeResult.message || '').includes('保质期')) throw new Error('非法保质期提示不明确')
+  }
   await request('/admin/modeling/boms', {
     method: 'POST',
     headers,
@@ -157,6 +171,7 @@ try {
   if (v2.version !== 'V2.0' || v2.status !== 'DRAFT' || v2.items.length !== 2) throw new Error('新版本复制失败')
   if (v2.moldCodes?.[0] !== moldA || v2.coreBoxes?.length !== 2) throw new Error('新版本未复制工装关系')
   if (v2.coreBoxes.find((item) => item.code === coreBoxB)?.quantityPerProduct !== 4) throw new Error('新版本未复制芯件比')
+  if (v2.coreBoxes.find((item) => item.code === coreBoxB)?.shelfLifeHours !== 24) throw new Error('新版本未复制保质期')
   await request(`/admin/modeling/boms/${v2.id}/new-version`, { method: 'POST', headers }, true)
   const cloned = await request(`/admin/modeling/boms/${v2.id}/clone`, {
     method: 'POST',
@@ -195,6 +210,7 @@ try {
   if (calculation.molds?.[0]?.code !== moldA || calculation.coreBoxes?.length !== 2) throw new Error('计算接口缺少生产工装摘要')
   if (calculation.coreBoxes.find((item) => item.code === coreBoxB)?.quantityPerProduct !== 4) throw new Error('计算接口缺少芯件比')
   if (calculation.coreBoxes.find((item) => item.code === coreBoxB)?.requiredQuantity !== 400) throw new Error('计算接口芯件需求量不正确')
+  if (calculation.coreBoxes.find((item) => item.code === coreBoxB)?.shelfLifeHours !== 24) throw new Error('计算接口缺少芯盒保质期')
 
   console.log(JSON.stringify({ ok: true, productCode: productA, versions: ['V1.0', 'V2.0', 'V3.0', 'V4.0'], clonedProduct: productB }))
 } finally {

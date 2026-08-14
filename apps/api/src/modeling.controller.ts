@@ -196,6 +196,15 @@ function toInt(value: unknown) {
   return Number.isFinite(numberValue) ? Math.trunc(numberValue) : undefined
 }
 
+function positiveInteger(value: unknown, label: string) {
+  if (value === null || value === undefined || value === '') return 1
+  const numberValue = Number(value)
+  if (!Number.isInteger(numberValue) || numberValue <= 0) {
+    throw new BadRequestException(`${label}必须为大于 0 的整数`)
+  }
+  return numberValue
+}
+
 function getDelegate(prisma: PrismaService, resource: ResourceName) {
   return prisma[resourceMap[resource].delegate as keyof PrismaService] as {
     findMany: (args?: unknown) => Promise<unknown[]>
@@ -779,6 +788,7 @@ export class ModelingController {
         ...common,
         moldCode: stringValue(body.moldCode),
         images: toJsonArray(body.images),
+        cavityCount: positiveInteger(body.cavityCount, '芯盒穴数'),
         maxLife: toInt(body.maxLife),
         usedLife: toInt(body.usedLife) ?? 0,
       }
@@ -1414,6 +1424,7 @@ export class ModelingController {
         code,
         name: stringValue(item.name) || code,
         images: toJsonArray(item.images),
+        cavityCount: positiveInteger(item.cavityCount, '芯盒穴数'),
         maxLife: toInt(item.maxLife),
         usedLife: toInt(item.usedLife) ?? 0,
         status: stringValue(item.status) || '启用',

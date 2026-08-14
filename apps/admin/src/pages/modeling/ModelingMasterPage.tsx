@@ -60,6 +60,9 @@ export interface ModelingField {
   computed?: boolean
   formSpan?: number
   code?: boolean
+  defaultValue?: unknown
+  min?: number
+  precision?: number
   detailNameKey?: 'elementName' | 'propertyName' | 'parameterName'
 }
 
@@ -431,7 +434,10 @@ export function ModelingMasterPage({
     setEditing(null)
     setViewing(false)
     form.resetFields()
-    form.setFieldsValue({ status: '启用' })
+    form.setFieldsValue({
+      status: '启用',
+      ...Object.fromEntries(fields.filter((field) => field.defaultValue !== undefined).map((field) => [field.name, field.defaultValue])),
+    })
     setModalOpen(true)
   }
 
@@ -605,7 +611,7 @@ export function ModelingMasterPage({
                     rules={rules}
                     style={{ gridColumn: `span ${field.formSpan || 3}` }}
                   >
-                    <InputNumber disabled={viewing} min={0} style={{ width: '100%' }} />
+                    <InputNumber disabled={viewing} min={field.min ?? 0} precision={field.precision} style={{ width: '100%' }} />
                   </Form.Item>
                 )
               }

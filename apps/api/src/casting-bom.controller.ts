@@ -34,6 +34,7 @@ interface BomItemBody {
 interface BomCoreBoxBody {
   coreBoxCode?: string
   quantityPerProduct?: number
+  shelfLifeHours?: unknown
 }
 
 interface BomBody {
@@ -70,6 +71,10 @@ export class CastingBomController {
     return Number(value || 0)
   }
 
+  private optionalDecimal(value: unknown) {
+    return value === null || value === undefined ? null : Number(value)
+  }
+
   private dto(record: Prisma.CastingBomVersionGetPayload<{ include: ReturnType<CastingBomController['include']> }>) {
     return {
       id: record.id,
@@ -104,6 +109,7 @@ export class CastingBomController {
         name: item.coreBoxNameSnapshot || item.coreBox.name,
         moldCode: item.moldCodeSnapshot || item.coreBox.moldCode,
         quantityPerProduct: this.decimal(item.quantityPerProduct),
+        shelfLifeHours: this.optionalDecimal(item.shelfLifeHours),
       })),
       items: record.items.map((item) => ({
         id: item.id,
@@ -142,10 +148,14 @@ export class CastingBomController {
       ? body.coreBoxes.map((item) => ({
         coreBoxCode: String(item.coreBoxCode || '').trim(),
         quantityPerProduct: item.quantityPerProduct === undefined ? 1 : Number(item.quantityPerProduct),
+        shelfLifeHours: item.shelfLifeHours === null || item.shelfLifeHours === undefined || item.shelfLifeHours === ''
+          ? null
+          : Number(item.shelfLifeHours),
       }))
       : (Array.isArray(body.coreBoxCodes) ? body.coreBoxCodes : []).map((code) => ({
         coreBoxCode: String(code).trim(),
         quantityPerProduct: 1,
+        shelfLifeHours: null,
       }))
     const coreBoxCodes = requestedCoreBoxes.map((item) => item.coreBoxCode).filter(Boolean)
     if (!productCode || !materialGradeCode) throw new BadRequestException('请选择产品和材质牌号')
@@ -159,6 +169,9 @@ export class CastingBomController {
     if (coreBoxCodes.length !== requestedCoreBoxes.length) throw new BadRequestException('请选择芯盒工装')
     if (requestedCoreBoxes.some((item) => !Number.isFinite(item.quantityPerProduct) || item.quantityPerProduct <= 0)) {
       throw new BadRequestException('芯件比必须大于 0')
+    }
+    if (requestedCoreBoxes.some((item) => item.shelfLifeHours !== null && (!Number.isFinite(item.shelfLifeHours) || item.shelfLifeHours <= 0))) {
+      throw new BadRequestException('保质期必须大于 0 小时')
     }
     items.forEach((item) => {
       const quantity = Number(item.standardQuantity)
@@ -207,6 +220,7 @@ export class CastingBomController {
         coreBoxNameSnapshot: coreBoxByCode.get(item.coreBoxCode)!.name,
         moldCodeSnapshot: coreBoxByCode.get(item.coreBoxCode)!.moldCode,
         quantityPerProduct: item.quantityPerProduct,
+        shelfLifeHours: item.shelfLifeHours,
       })),
       items: items.map((item) => {
         const record = byCode.get(String(item.itemCode))!
@@ -472,6 +486,7 @@ export class CastingBomController {
             coreBoxNameSnapshot: item.coreBoxNameSnapshot,
             moldCodeSnapshot: item.moldCodeSnapshot,
             quantityPerProduct: item.quantityPerProduct,
+            shelfLifeHours: item.shelfLifeHours,
           })) },
         },
         include: this.include(),
@@ -535,6 +550,7 @@ export class CastingBomController {
         moldCode: item.moldCodeSnapshot,
         quantityPerProduct: this.decimal(item.quantityPerProduct),
         requiredQuantity: Number((quantity * this.decimal(item.quantityPerProduct)).toFixed(4)),
+        shelfLifeHours: this.optionalDecimal(item.shelfLifeHours),
       })),
       activeRecipes: recipes.map((recipe) => ({
         code: recipe.code,

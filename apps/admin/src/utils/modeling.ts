@@ -33,6 +33,7 @@ export interface MoldCoreBoxRecord {
   code: string
   name: string
   images: string[]
+  cavityCount: number
   maxLife?: number
   usedLife?: number
   status: string

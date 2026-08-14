@@ -620,7 +620,7 @@ model CoreBoxMaster {
   name        String
   moldCode    String
   images      Json                       @default("[]")
-  cavityCount Int?
+  cavityCount Int                        @default(1)
   maxLife     Int?
   usedLife    Int                        @default(0)
   status      String                     @default("启用")
@@ -948,6 +948,7 @@ model CastingBomVersionCoreBox {
   coreBoxNameSnapshot String
   moldCodeSnapshot    String
   quantityPerProduct  Decimal           @default(1) @db.Decimal(12, 4)
+  shelfLifeHours      Decimal?          @db.Decimal(12, 4)
   createdAt           DateTime          @default(now())
   bomVersion          CastingBomVersion @relation(fields: [bomVersionId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   coreBox             CoreBoxMaster     @relation(fields: [coreBoxCode], references: [code], onUpdate: Cascade, onDelete: Restrict)

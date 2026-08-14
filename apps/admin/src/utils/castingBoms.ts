@@ -18,6 +18,7 @@ export interface BomCoreBox {
   name: string
   moldCode: string
   quantityPerProduct: number
+  shelfLifeHours?: number | null
 }
 
 export interface BomRecord {
@@ -68,7 +69,7 @@ export interface BomPayload {
   productCode: string
   materialGradeCode: string
   moldCodes: string[]
-  coreBoxes: Array<{ coreBoxCode: string; quantityPerProduct: number }>
+  coreBoxes: Array<{ coreBoxCode: string; quantityPerProduct: number; shelfLifeHours?: number | null }>
   netWeightKg: number
   grossWeightKg: number
   items: BomItem[]

@@ -135,6 +135,7 @@ CastingBomVersion -> CastingBomVersionCoreBox -> CoreBoxMaster（芯盒工装）
 - BOM 主物料只能选择一级类型为“成品”或“半成品”的物料。物理用料只允许一级类型为“半成品”“铸造辅材”“工装耗材”的物料；砂芯统一归档为 `半成品/砂芯`。
 - 模具、芯盒属于可重复使用的生产工装，不计入物理领料单耗。一个模具可绑定多套芯盒；BOM 版本可从全部启用的模具档案中多选生产模具，选择后自动带入其全部启用芯盒，芯盒仍允许手动增删调整。
 - 芯件比属于 BOM 版本与芯盒的关系属性，保存在 `CastingBomVersionCoreBox.quantityPerProduct`，不进入芯盒主档。默认值为 `1`，必须大于 `0`；后续制芯任务需求量按 `生产数量 × 芯件比` 计算。砂芯物料的领料单耗仍在物理用料明细中单独维护，两者不能混用。
+- 芯盒保质期属于产品 BOM 工艺约束，保存在 `CastingBomVersionCoreBox.shelfLifeHours`，单位小时，允许为空；填写时必须大于 `0`。新版本、同产品复制和计算接口必须原样保留，用于后续制芯完成后的失效时间计算。
 - 同一产品同一时间只能有一个 `ACTIVE` 版本。新版本以现有版本为模板复制为下一主版本草稿；新版本生效时，事务内将同产品旧生效版本改为已停用。
 - 首版创建、版本号分配和生效切换使用 PostgreSQL 产品维度事务锁，避免并发请求生成重复版本或出现多个已生效版本。
 - 草稿可编辑、删除、提交生效；已生效可查看、停用、创建新版本和跨产品克隆；已停用可查看、创建新版本和跨产品克隆。
@@ -171,7 +172,8 @@ CastingBomVersion -> CastingBomVersionCoreBox -> CoreBoxMaster（芯盒工装）
 - 模具档案引用物料；工艺路线版本通过 `RoutingApplicableProduct` 多选成品/半成品。
 - 路线节点引用工序主档，通过 `RoutingNodeEquipment` 多选设备。
 - 芯盒档案引用模具编码，关系为模具 `1:N` 芯盒；移除历史芯盒使用停用，不做物理删除。
-- BOM 版本通过 `CastingBomVersionMold` 关联模具，通过 `CastingBomVersionCoreBox` 关联多套芯盒并保存芯件比。
+- 芯盒档案的 `cavityCount` 表示芯盒穴数，新增默认 `1`，必须为正整数；与模具型腔数和 BOM 芯件比分开维护。
+- BOM 版本通过 `CastingBomVersionMold` 关联模具，通过 `CastingBomVersionCoreBox` 关联多套芯盒并保存芯件比和可选的保质期小时数。
 - 动态排班引用车间编码、班次编码、班组编码。
 - 删除被引用的车间、产线、班组、物料、材质、模具、班次时，后端阻止删除。
 - 模具或芯盒被任一 BOM 历史版本引用时禁止删除；停用不影响历史 BOM 查看。

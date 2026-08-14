@@ -174,6 +174,7 @@ export const modelingPages: ModelingMasterPageProps[] = [
       ...codeNameFields,
       { name: 'moldCode', label: '关联模具', type: 'select', required: true, optionSource: 'molds', width: 160 },
       { name: 'images', label: '芯盒图片', type: 'json', hiddenInTable: true },
+      { name: 'cavityCount', label: '穴数', type: 'number', required: true, width: 90, defaultValue: 1, min: 1, precision: 0 },
       { name: 'maxLife', label: '使用寿命', type: 'number', width: 110 },
       { name: 'usedLife', label: '已用次数', type: 'number', width: 110 },
       statusField,

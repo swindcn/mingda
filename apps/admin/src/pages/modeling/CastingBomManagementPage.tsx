@@ -112,7 +112,11 @@ export function CastingBomManagementPage() {
         productCode: detail.productCode,
         materialGradeCode: detail.materialGradeCode,
         moldCodes: detail.moldCodes,
-        coreBoxes: detail.coreBoxes.map((item) => ({ coreBoxCode: item.code, quantityPerProduct: item.quantityPerProduct || 1 })),
+        coreBoxes: detail.coreBoxes.map((item) => ({
+          coreBoxCode: item.code,
+          quantityPerProduct: item.quantityPerProduct || 1,
+          shelfLifeHours: item.shelfLifeHours ?? null,
+        })),
         netWeightKg: detail.netWeightKg,
         grossWeightKg: detail.grossWeightKg,
         version: detail.version,
@@ -311,12 +315,12 @@ export function CastingBomManagementPage() {
               />
             </Form.Item>
           </div>
-          <div className="bom-tooling-hint">自动带入已选模具的全部启用芯盒，可调整芯件比或移除不适用芯盒。</div>
-          <div className="bom-detail-header bom-corebox-grid"><span>所属模具</span><span>芯盒编码</span><span>芯盒名称</span><span>芯件比</span><span /></div>
+          <div className="bom-tooling-hint">自动带入已选模具的全部启用芯盒，可调整芯件比、保质期或移除不适用芯盒。</div>
+          <div className="bom-detail-header bom-corebox-grid"><span>所属模具</span><span>芯盒编码</span><span>芯盒名称</span><span>芯件比</span><span>保质期（小时）</span><span /></div>
           <Form.List name="coreBoxes">
             {(fields, { add, remove }) => <>
               {fields.map((field) => <Form.Item key={field.key} noStyle shouldUpdate>{() => {
-                const row = (form.getFieldValue('coreBoxes') || [])[field.name] as { coreBoxCode?: string; quantityPerProduct?: number } | undefined
+                const row = (form.getFieldValue('coreBoxes') || [])[field.name] as { coreBoxCode?: string; quantityPerProduct?: number; shelfLifeHours?: number | null } | undefined
                 const coreBox = coreBoxRecords.find((item) => item.code === row?.coreBoxCode)
                 const mold = moldRecords.find((item) => item.code === coreBox?.moldCode)
                 return <div className="bom-detail-row bom-corebox-grid">
@@ -325,6 +329,7 @@ export function CastingBomManagementPage() {
                   <span className="bom-readonly-cell">{coreBox?.code || row?.coreBoxCode || '-'}</span>
                   <span className="bom-readonly-cell">{coreBox?.name || '-'}</span>
                   <Form.Item name={[field.name, 'quantityPerProduct']} rules={[{ required: true, message: '请输入芯件比' }]}><InputNumber min={0.0001} precision={4} style={{ width: '100%' }} /></Form.Item>
+                  <Form.Item name={[field.name, 'shelfLifeHours']}><InputNumber min={0.0001} precision={4} placeholder="选填" style={{ width: '100%' }} /></Form.Item>
                   {!viewing && <Button type="text" danger title="移除芯盒" icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />}
                 </div>
               }}</Form.Item>)}
