@@ -29,7 +29,7 @@ import { ROLE_STORAGE_EVENT, getCurrentAdminUser, hasPermission } from '../utils
 
 const { Header, Content, Sider } = Layout
 
-interface AppMenuItem {
+export interface AppMenuItem {
   key: string
   icon?: ReactNode
   label: ReactNode
@@ -37,7 +37,7 @@ interface AppMenuItem {
   children?: AppMenuItem[]
 }
 
-const allMenuItems: AppMenuItem[] = [
+export const allMenuItems: AppMenuItem[] = [
   {
     key: '/dashboard/mold',
     icon: <Factory size={18} />,
@@ -249,6 +249,21 @@ const allMenuItems: AppMenuItem[] = [
   },
 ]
 
+export function firstAccessibleRoute(
+  items: AppMenuItem[],
+  canAccess: (permission: string) => boolean,
+): string | null {
+  for (const item of items) {
+    if (item.children?.length) {
+      const childRoute = firstAccessibleRoute(item.children, canAccess)
+      if (childRoute) return childRoute
+    } else if (item.permission && canAccess(item.permission)) {
+      return item.key
+    }
+  }
+  return null
+}
+
 function filterMenuItems(items: AppMenuItem[]): MenuProps['items'] {
   return items
     .map((item) => {
@@ -303,7 +318,7 @@ export function AppLayout() {
   const handleLogout = () => {
     window.localStorage.removeItem('mingda-admin-token')
     window.localStorage.removeItem('mingda-admin-user')
-    navigate('/')
+    navigate('/login')
   }
 
   const userMenuItems: MenuProps['items'] = [

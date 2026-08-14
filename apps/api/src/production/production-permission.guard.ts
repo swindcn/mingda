@@ -3,28 +3,58 @@ import type { Request } from 'express'
 import { getAdminContext, hasAdminPermission, type RequestWithAdmin } from '../shared/admin-context'
 
 function permissionFor(request: Request) {
-  const path = request.path
+  const path = request.path.split(/[?#]/, 1)[0].replace(/\/+$/, '') || '/'
+  const method = request.method.toUpperCase()
   const isMiniProgram = path.includes('/mini/production/')
   if (/\/work-orders\/[^/]+\/core-readiness$/.test(path)) return 'production.work_order.view'
   if (path.includes('/core-tasks')) {
-    if (/\/work-orders\/[^/]+\/core-tasks\/preview$/.test(path)) return 'production.core_task.create'
-    if (/\/work-orders\/[^/]+\/core-tasks$/.test(path) && request.method === 'POST') return 'production.core_task.create'
-    if (/\/core-tasks\/[^/]+\/dispatch$/.test(path)) return 'production.core_task.dispatch'
-    if (/\/core-tasks\/[^/]+\/cancel$/.test(path)) return 'production.core_task.cancel'
+    if (/\/work-orders\/[^/]+\/core-tasks\/preview$/.test(path)) {
+      if (method === 'POST') return 'production.core_task.create'
+      throw new NotFoundException('生产管理资源不存在')
+    }
+    if (/\/work-orders\/[^/]+\/core-tasks$/.test(path)) {
+      if (method === 'POST') return 'production.core_task.create'
+      throw new NotFoundException('生产管理资源不存在')
+    }
+    if (/\/core-tasks\/[^/]+\/dispatch$/.test(path)) {
+      if (method === 'PUT') return 'production.core_task.dispatch'
+      throw new NotFoundException('生产管理资源不存在')
+    }
+    if (/\/core-tasks\/[^/]+\/cancel$/.test(path)) {
+      if (method === 'POST') return 'production.core_task.cancel'
+      throw new NotFoundException('生产管理资源不存在')
+    }
     const corePermissionPrefix = isMiniProgram ? 'mini.production.core' : 'production.core_task'
-    if (/\/core-tasks\/[^/]+\/start$/.test(path)) return `${corePermissionPrefix}.start`
-    if (/\/core-tasks\/[^/]+\/report$/.test(path)) return `${corePermissionPrefix}.report`
-    return `${corePermissionPrefix}.view`
+    if (/\/core-tasks\/[^/]+\/start$/.test(path)) {
+      if (method === 'POST') return `${corePermissionPrefix}.start`
+      throw new NotFoundException('生产管理资源不存在')
+    }
+    if (/\/core-tasks\/[^/]+\/report$/.test(path)) {
+      if (method === 'POST') return `${corePermissionPrefix}.report`
+      throw new NotFoundException('生产管理资源不存在')
+    }
+    if (method === 'GET' && /\/core-tasks(?:\/[^/]+)?$/.test(path)) return `${corePermissionPrefix}.view`
+    throw new NotFoundException('生产管理资源不存在')
   }
   if (path.includes('/core-batches')) {
     if (/\/core-batches\/[^/]+\/dry$/.test(path)) {
-      return isMiniProgram ? 'mini.production.core.dry' : 'production.core_inventory.dry'
+      if (method === 'POST') return isMiniProgram ? 'mini.production.core.dry' : 'production.core_inventory.dry'
+      throw new NotFoundException('生产管理资源不存在')
     }
-    if (/\/core-batches\/[^/]+\/(?:lock|unlock)$/.test(path)) return 'production.core_inventory.lock'
-    if (/\/core-batches\/[^/]+\/scrap$/.test(path)) return 'production.core_inventory.scrap'
-    return 'production.core_inventory.view'
+    if (/\/core-batches\/[^/]+\/(?:lock|unlock)$/.test(path)) {
+      if (method === 'POST') return 'production.core_inventory.lock'
+      throw new NotFoundException('生产管理资源不存在')
+    }
+    if (/\/core-batches\/[^/]+\/scrap$/.test(path)) {
+      if (method === 'POST') return 'production.core_inventory.scrap'
+      throw new NotFoundException('生产管理资源不存在')
+    }
+    throw new NotFoundException('生产管理资源不存在')
   }
-  if (path.includes('/core-inventory')) return 'production.core_inventory.view'
+  if (path.includes('/core-inventory')) {
+    if (method === 'GET' && /\/core-inventory(?:\/[^/]+)?$/.test(path)) return 'production.core_inventory.view'
+    throw new NotFoundException('生产管理资源不存在')
+  }
   if (path.includes('/work-orders')) {
     if (/\/work-orders\/[^/]+\/close$/.test(path)) return 'production.work_order.close'
     if (request.method === 'POST') return 'production.work_order.create'

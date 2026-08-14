@@ -1,7 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router'
+import { Result } from 'antd'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { AppLayout } from './layouts/AppLayout'
+import { AppLayout, allMenuItems, firstAccessibleRoute } from './layouts/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { CustomerManagementPage } from './pages/basic/CustomerManagementPage'
 import { DepartmentConfigHelpPage } from './pages/basic/DepartmentConfigHelpPage'
@@ -89,7 +90,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (checking) return null
 
   if (!authenticated) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/login" replace />
   }
 
   return children
@@ -97,10 +98,16 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 function RequirePermission({ permission, children }: { permission: string; children: ReactNode }) {
   if (!hasPermission(permission)) {
-    return <Navigate to="/dashboard/mold/development" replace />
+    return <PermissionLanding />
   }
 
   return children
+}
+
+function PermissionLanding() {
+  const route = firstAccessibleRoute(allMenuItems, hasPermission)
+  if (route) return <Navigate to={route} replace />
+  return <Result status="403" title="403" subTitle="暂无可用功能，请联系管理员配置权限。" />
 }
 
 function protectedPage(permission: string, children: ReactNode) {
@@ -110,7 +117,8 @@ function protectedPage(permission: string, children: ReactNode) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LoginPage />} />
+      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="/login" element={<LoginPage />} />
       <Route
         path="/dashboard"
         element={
@@ -119,7 +127,7 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<Navigate to="/dashboard/mold/development" replace />} />
+        <Route index element={<PermissionLanding />} />
         <Route path="departments" element={protectedPage('basic.department', <DepartmentManagementPage />)} />
         <Route path="departments/help" element={<DepartmentConfigHelpPage />} />
         <Route path="roles" element={protectedPage('basic.role', <RolePermissionPage />)} />
@@ -159,7 +167,7 @@ export default function App() {
         <Route path="production/heat-orders/:id" element={protectedPage('production.heat.view', <HeatOrderDetailPage />)} />
         <Route path="resources/parser" element={<ResourceParserPage />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )
 }

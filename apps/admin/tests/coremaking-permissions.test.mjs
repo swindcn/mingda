@@ -111,6 +111,20 @@ function compilePermissionResolver() {
   return exports.permissionFor
 }
 
+function compileFirstAccessibleRoute() {
+  const source = sourceFile('apps/admin/src/layouts/AppLayout.tsx', ts.ScriptKind.TSX)
+  const declaration = source.statements.find(
+    (statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === 'firstAccessibleRoute',
+  )
+  assert.ok(declaration, 'firstAccessibleRoute should remain a standalone pure resolver')
+  const output = ts.transpileModule(`${declaration.getText(source)}\nexports.firstAccessibleRoute = firstAccessibleRoute`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const exports = {}
+  Function('exports', output)(exports)
+  return exports.firstAccessibleRoute
+}
+
 const adminPermissionKeys = [
   'production.core_task.view',
   'production.core_task.create',
@@ -133,21 +147,47 @@ const miniPermissionKeys = [
   'mini.production.core.dry',
 ]
 
-test('backend administrator defaults grant every coremaking permission', () => {
-  const expectedPermissions = [...adminPermissionKeys, ...miniPermissionKeys]
-  const defaultSources = [
+test('backend administrator defaults have one duplicate-free source covered by frontend defaults', () => {
+  const defaultsPath = 'apps/api/src/shared/admin-default-permissions.ts'
+  const defaultsFile = path.join(repoRoot, defaultsPath)
+  assert.equal(fs.existsSync(defaultsFile), true, `${defaultsPath} should be the single permission list source`)
+
+  const backendPermissions = literalModuleValues(sourceFile(defaultsPath)).get('ADMIN_DEFAULT_PERMISSIONS')
+  assert.equal(new Set(backendPermissions).size, backendPermissions.length, 'backend administrator defaults should not contain duplicates')
+
+  const apiSourceRoot = path.join(repoRoot, 'apps/api/src')
+  const permissionListDefinitions = fs.readdirSync(apiSourceRoot, { recursive: true })
+    .filter((relativePath) => typeof relativePath === 'string' && relativePath.endsWith('.ts'))
+    .flatMap((relativePath) => {
+      const source = fs.readFileSync(path.join(apiSourceRoot, relativePath), 'utf8')
+      return /(?:const|let|var)\s+(?:adminPermissions|ADMIN_DEFAULT_PERMISSIONS)\s*(?::[^=]+)?=\s*\[/.test(source)
+        ? [path.posix.join('apps/api/src', relativePath)]
+        : []
+    })
+  assert.deepEqual(permissionListDefinitions, [defaultsPath])
+
+  const controllerPaths = [
     'apps/api/src/basic-data.controller.ts',
     'apps/api/src/mold-development.controller.ts',
   ]
-
-  for (const relativePath of defaultSources) {
-    const permissions = literalModuleValues(sourceFile(relativePath)).get('adminPermissions')
-    assert.deepEqual(
-      expectedPermissions.filter((permission) => !permissions.includes(permission)),
-      [],
-      `${relativePath} should grant all coremaking permissions`,
-    )
+  for (const relativePath of controllerPaths) {
+    const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8')
+    assert.match(source, /import \{ ADMIN_DEFAULT_PERMISSIONS \} from '\.\/shared\/admin-default-permissions'/)
+    assert.doesNotMatch(source, /const adminPermissions\s*=\s*\[/)
+    assert.match(source, /permissions: ADMIN_DEFAULT_PERMISSIONS/)
   }
+
+  const frontendDefaults = literalModuleValues(sourceFile('apps/admin/src/utils/roles.ts'))
+    .get('initialRoles')
+    .find((role) => role.name === '系统管理员').permissions
+  const pureGroupKeys = new Set(['admin', 'basic', 'mold', 'model', 'process', 'production', 'mini', 'mini.production'])
+  const backendExecutablePermissions = backendPermissions.filter((permission) => !pureGroupKeys.has(permission))
+  assert.deepEqual(
+    backendExecutablePermissions.filter((permission) => !frontendDefaults.includes(permission)),
+    [],
+    'frontend administrator defaults should include every backend executable permission',
+  )
+  assert.deepEqual([...adminPermissionKeys, ...miniPermissionKeys].filter((permission) => !backendPermissions.includes(permission)), [])
 })
 
 test('coremaking permissions are selectable and granted to the default administrator', () => {
@@ -205,6 +245,37 @@ test('coremaking navigation and routes require their own view permissions', () =
   assert.equal(guardedRoutes.get('production/core-inventory'), 'production.core_inventory.view')
 })
 
+test('dashboard and denied pages resolve the first permitted menu route without redirect loops', () => {
+  const appLayout = sourceFile('apps/admin/src/layouts/AppLayout.tsx', ts.ScriptKind.TSX)
+  const menu = literalModuleValues(appLayout).get('allMenuItems')
+  const firstAccessibleRoute = compileFirstAccessibleRoute()
+
+  assert.equal(
+    firstAccessibleRoute(menu, (permission) => permission === 'production.core_task.view'),
+    '/dashboard/production/core-tasks',
+  )
+  assert.equal(firstAccessibleRoute(menu, () => false), null)
+
+  const firstRouteByPermission = new Map()
+  function collect(items) {
+    for (const item of items) {
+      if (item.children?.length) collect(item.children)
+      else if (item.permission && !firstRouteByPermission.has(item.permission)) firstRouteByPermission.set(item.permission, item.key)
+    }
+  }
+  collect(menu)
+  for (const [permission, route] of firstRouteByPermission) {
+    assert.equal(firstAccessibleRoute(menu, (candidate) => candidate === permission), route, permission)
+  }
+
+  const appSource = fs.readFileSync(path.join(adminRoot, 'src/App.tsx'), 'utf8')
+  assert.equal((appSource.match(/<PermissionLanding/g) || []).length, 2, 'dashboard index and denied pages should share PermissionLanding')
+  assert.doesNotMatch(appSource, /Navigate to="\/dashboard\/mold\/development"/)
+  assert.match(appSource, /status="403"/)
+  assert.match(appSource, /<Route path="\/login" element=\{<LoginPage \/>\} \/>/)
+  assert.match(appSource, /if \(!authenticated\)[\s\S]*?<Navigate to="\/login" replace \/>/)
+})
+
 test('production guard resolves the minimum permission for every coremaking path', () => {
   const permissionFor = compilePermissionResolver()
   const cases = [
@@ -231,6 +302,28 @@ test('production guard resolves the minimum permission for every coremaking path
 
   for (const [method, requestPath, permission] of cases) {
     assert.equal(permissionFor({ method, path: requestPath }), permission, `${method} ${requestPath}`)
+  }
+  for (const [method, requestPath, permission] of cases.filter(([method]) => method !== 'GET')) {
+    assert.equal(permissionFor({ method, path: `${requestPath}/` }), permission, `${method} ${requestPath}/`)
+    assert.equal(permissionFor({ method, path: `${requestPath}///?source=test` }), permission, `${method} ${requestPath} query`)
+  }
+
+  const rejectedCases = [
+    ['GET', '/admin/production/work-orders/wo-1/core-tasks/preview'],
+    ['GET', '/admin/production/work-orders/wo-1/core-tasks'],
+    ['POST', '/admin/production/core-tasks/task-1/dispatch'],
+    ['GET', '/admin/production/core-tasks/task-1/cancel'],
+    ['GET', '/admin/production/core-tasks/task-1/start'],
+    ['GET', '/admin/production/core-tasks/task-1/report'],
+    ['GET', '/admin/production/core-batches/batch-1/dry'],
+    ['GET', '/admin/production/core-batches/batch-1/lock'],
+    ['GET', '/admin/production/core-batches/batch-1/unlock'],
+    ['GET', '/admin/production/core-batches/batch-1/scrap'],
+    ['POST', '/admin/production/core-tasks/task-1/unknown'],
+    ['POST', '/admin/production/core-tasks/task-1'],
+  ]
+  for (const [method, requestPath] of rejectedCases) {
+    assert.throws(() => permissionFor({ method, path: requestPath }), undefined, `${method} ${requestPath}`)
   }
   const operationPermissions = cases.filter(([method]) => method !== 'GET').map(([, , permission]) => permission)
   assert.equal(operationPermissions.includes('production.core_task.view'), false)
