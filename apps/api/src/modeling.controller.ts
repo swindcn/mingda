@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -17,6 +18,7 @@ import { PrismaService } from './prisma/prisma.service'
 import {
   collectDepartmentIds,
   getAdminContext,
+  hasAdminPermission,
   upsertOwnership,
   visibleOwnershipEntityIds,
   type RequestWithAdmin,
@@ -418,8 +420,8 @@ export class ModelingController {
 
     const normalizedBody = await this.withDevelopmentReceiveImages(resource, body)
     if (resource === 'molds') {
-      const record = await this.createMoldWithCoreBoxes(normalizedBody)
-      await upsertOwnership(this.prisma, request.adminUser, this.entityType(resource), record.code)
+      await this.assertNestedCoreBoxPermissions(request, undefined, normalizedBody)
+      const record = await this.createMoldWithCoreBoxes(normalizedBody, getAdminContext(request))
       return this.toDto(resource, record)
     }
 
@@ -457,7 +459,8 @@ export class ModelingController {
     }
 
     if (resource === 'molds') {
-      const record = await this.updateMoldWithCoreBoxes(id, body)
+      await this.assertNestedCoreBoxPermissions(request, id, body)
+      const record = await this.updateMoldWithCoreBoxes(id, body, getAdminContext(request))
       return this.toDto(resource, record)
     }
 
@@ -1423,6 +1426,7 @@ export class ModelingController {
     tx: Prisma.TransactionClient,
     moldCode: string,
     coreBoxes: ReturnType<ModelingController['coreBoxesFromBody']>,
+    user: ReturnType<typeof getAdminContext>,
   ) {
     if (coreBoxes === null) {
       const enabledCount = await tx.coreBoxMaster.count({ where: { moldCode, status: '启用' } })
@@ -1449,6 +1453,7 @@ export class ModelingController {
         create: data,
         update: data,
       })
+      await upsertOwnership(tx, user, this.entityType('coreboxes'), coreBox.code)
     }
     await tx.coreBoxMaster.updateMany({
       where: { moldCode, ...(requestedCodes.length ? { code: { notIn: requestedCodes } } : {}) },
@@ -1458,7 +1463,61 @@ export class ModelingController {
     await tx.moldMaster.update({ where: { code: moldCode }, data: { hasCoreBox: enabledCount > 0 } })
   }
 
-  private async createMoldWithCoreBoxes(body: Record<string, unknown>) {
+  private async assertNestedCoreBoxPermissions(
+    request: RequestWithAdmin,
+    moldCode: string | undefined,
+    body: Record<string, unknown>,
+  ) {
+    const coreBoxes = this.coreBoxesFromBody(body, moldCode || stringValue(body.code) || '', stringValue(body.name) || '')
+    if (coreBoxes === null) return
+
+    const user = getAdminContext(request)
+    const existingCodes = moldCode
+      ? new Set((await this.prisma.coreBoxMaster.findMany({ where: { moldCode }, select: { code: true } })).map((item) => item.code))
+      : new Set<string>()
+    const hasNewCoreBox = coreBoxes.some((item) => !existingCodes.has(item.code))
+    if (hasNewCoreBox && !hasAdminPermission(user, 'mold.corebox.create')) {
+      throw new ForbiddenException('无权新增芯盒档案')
+    }
+    if (existingCodes.size && !hasAdminPermission(user, 'mold.corebox.edit')) {
+      throw new ForbiddenException('无权修改或停用芯盒档案')
+    }
+  }
+
+  private async syncMoldDevelopmentArchive(
+    tx: Prisma.TransactionClient,
+    moldCode: string,
+    previousSourceCode: string | null,
+    nextSourceCode: string | null,
+  ) {
+    if (previousSourceCode && previousSourceCode !== nextSourceCode) {
+      await tx.moldDevelopment.updateMany({
+        where: { code: previousSourceCode, archivedMoldCode: moldCode },
+        data: { archivedMoldCode: null },
+      })
+    }
+    if (!nextSourceCode) return
+
+    const linked = await tx.moldDevelopment.updateMany({
+      where: {
+        code: nextSourceCode,
+        status: 'COMPLETED',
+        OR: [{ archivedMoldCode: null }, { archivedMoldCode: moldCode }],
+      },
+      data: { archivedMoldCode: moldCode },
+    })
+    if (linked.count === 1) return
+
+    const development = await tx.moldDevelopment.findUnique({
+      where: { code: nextSourceCode },
+      select: { status: true, archivedMoldCode: true },
+    })
+    if (!development) throw new BadRequestException('来源开发单不存在')
+    if (development.status !== 'COMPLETED') throw new BadRequestException('仅已完成的模具开发单可以建档')
+    throw new BadRequestException(`开发单 ${nextSourceCode} 已建档`)
+  }
+
+  private async createMoldWithCoreBoxes(body: Record<string, unknown>, user: ReturnType<typeof getAdminContext>) {
     return this.prisma.$transaction(async (tx) => {
       const moldCode = stringValue(body.code) as string
       const moldName = stringValue(body.name) || moldCode
@@ -1466,25 +1525,29 @@ export class ModelingController {
       await tx.moldMaster.create({
         data: { ...(this.normalize('molds', body) as Prisma.MoldMasterUncheckedCreateInput), hasCoreBox: false },
       })
-      await this.syncMoldCoreBoxes(tx, moldCode, coreBoxes)
-      if (body.sourceMoldDevelopmentCode) {
-        await tx.moldDevelopment.updateMany({
-          where: { code: stringValue(body.sourceMoldDevelopmentCode) },
-          data: { archivedMoldCode: moldCode },
-        })
-      }
+      await upsertOwnership(tx, user, this.entityType('molds'), moldCode)
+      await this.syncMoldCoreBoxes(tx, moldCode, coreBoxes, user)
+      await this.syncMoldDevelopmentArchive(tx, moldCode, null, stringValue(body.sourceMoldDevelopmentCode) || null)
       return tx.moldMaster.findUniqueOrThrow({ where: { code: moldCode }, include: { supplier: true, coreBoxes: true } })
     })
   }
 
-  private async updateMoldWithCoreBoxes(id: string, body: Record<string, unknown>) {
+  private async updateMoldWithCoreBoxes(id: string, body: Record<string, unknown>, user: ReturnType<typeof getAdminContext>) {
     return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.moldMaster.findUniqueOrThrow({ where: { code: id }, select: { sourceMoldDevelopmentCode: true } })
+      const sourceWasProvided = Object.prototype.hasOwnProperty.call(body, 'sourceMoldDevelopmentCode')
+      const nextSourceCode = sourceWasProvided
+        ? stringValue(body.sourceMoldDevelopmentCode) || null
+        : existing.sourceMoldDevelopmentCode
+      const data = this.normalize('molds', body) as Prisma.MoldMasterUncheckedUpdateInput
+      if (sourceWasProvided) data.sourceMoldDevelopmentCode = nextSourceCode
       const record = await tx.moldMaster.update({
         where: { code: id },
-        data: this.normalize('molds', body) as Prisma.MoldMasterUncheckedUpdateInput,
+        data,
       })
       const coreBoxes = this.coreBoxesFromBody(body, record.code, record.name)
-      await this.syncMoldCoreBoxes(tx, record.code, coreBoxes)
+      await this.syncMoldCoreBoxes(tx, record.code, coreBoxes, user)
+      await this.syncMoldDevelopmentArchive(tx, record.code, existing.sourceMoldDevelopmentCode, nextSourceCode)
       return tx.moldMaster.findUniqueOrThrow({ where: { code: record.code }, include: { supplier: true, coreBoxes: true } })
     })
   }

@@ -730,9 +730,11 @@ a {
 
 .bom-tooling-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0 16px;
 }
+.bom-tooling-hint { margin-bottom: 10px; color: #6b7280; font-size: 13px; }
+.bom-corebox-grid { grid-template-columns: minmax(180px, 1.2fr) 180px minmax(180px, 1.2fr) 130px 34px; }
 
 .bom-section-title {
   margin-top: 20px !important;

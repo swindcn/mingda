@@ -54,6 +54,8 @@ export function MoldArchivePage() {
   const canCreate = hasPermission('mold.model.create')
   const canEdit = hasPermission('mold.model.edit')
   const canDelete = hasPermission('mold.model.delete')
+  const canCoreBoxCreate = hasPermission('mold.corebox.create')
+  const canCoreBoxEdit = hasPermission('mold.corebox.edit')
 
   const refresh = async (nextKeyword = keyword) => {
     setLoading(true)
@@ -77,6 +79,10 @@ export function MoldArchivePage() {
     const sourceId = new URLSearchParams(location.search).get('fromMoldDevelopment') || ''
     if (!sourceId || sourceId === handledSource.current) return
     handledSource.current = sourceId
+    if (!canCreate) {
+      message.error('无权新建模具档案')
+      return
+    }
     void apiRequest<{
       code: string
       productCode: string
@@ -104,7 +110,7 @@ export function MoldArchivePage() {
       })
       setModalOpen(true)
     }).catch((error) => message.error(error instanceof Error ? error.message : '开发单数据带入失败'))
-  }, [form, location.search])
+  }, [canCreate, form, location.search])
 
   const closeModal = () => {
     setModalOpen(false)
@@ -132,7 +138,14 @@ export function MoldArchivePage() {
   const submit = async (values: MoldArchiveRecord) => {
     setSaving(true)
     try {
-      const payload = { ...values, hasCoreBox: values.coreBoxes.some((item) => item.status !== '停用') }
+      const payload: Record<string, unknown> = {
+        ...values,
+        hasCoreBox: values.coreBoxes.some((item) => item.status !== '停用'),
+      }
+      if (editing && !canCoreBoxEdit) {
+        delete payload.coreBoxes
+        delete payload.hasCoreBox
+      }
       if (editing) await updateModelingRecord('molds', editing.code, payload)
       else await createModelingRecord('molds', payload)
       message.success(editing ? '模具档案已更新' : '模具档案已新增')
@@ -224,7 +237,12 @@ export function MoldArchivePage() {
             <Form.Item name="usedLife" label="已用次数"><InputNumber disabled={viewing} min={0} precision={0} style={{ width: '100%' }} /></Form.Item>
           </div>
           <Form.Item name="images" label="模具图片"><ImageUploadField readOnly={viewing} /></Form.Item>
-          <MoldCoreBoxEditor form={form} readOnly={viewing} />
+          <MoldCoreBoxEditor
+            form={form}
+            readOnly={viewing}
+            canCreate={canCoreBoxCreate && (!editing || canCoreBoxEdit)}
+            canEdit={canCoreBoxEdit}
+          />
         </Form>
       </Modal>
     </>

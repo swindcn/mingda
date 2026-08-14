@@ -401,3 +401,32 @@ npm run build:miniprogram
 - 快递单号 OCR 尚未实现，当前为手填或前端预留入口。
 - 第三方通讯录同步配置已有页面和字段，真实钉钉/企微/飞书同步仍需后续接入。
 - 后续新增功能必须避免本地态和假成功，优先补 API、Prisma relation 和权限校验。
+
+## 模具、芯盒与 BOM 多芯盒改造（2026-08-14）
+
+业务关系：
+
+- 一个 `MoldMaster` 可关联多条 `CoreBoxMaster`；芯盒编码全局唯一，每条芯盒只能归属于一个模具。
+- 芯盒主档只维护工装属性、寿命、使用次数、状态和图片，不保存“芯件比”。
+- “芯件比”是产品 BOM 维度的数据，保存在 `CastingBomVersionCoreBox.quantityPerProduct`，表示生产一个产品所需的该类砂芯数量。
+- BOM 选择生产模具后，管理端自动带入该模具下全部启用芯盒，默认芯件比为 `1`；允许修改比例、移除或重新添加。
+- BOM 新版本和同产品版本复制保留芯件比；生产需求计算返回 `requiredQuantity = 工单数量 × 芯件比`。
+- 模具编辑时，表单中遗漏的已持久化芯盒不会物理删除，而是转为“停用”，历史 BOM 关系仍可追溯。
+- 从模具开发单建档时，来源开发单必须为“已完成”且尚未被其他模具建档；同一开发单最多关联一个模具档案。修改来源时，旧、新两侧关联在同一事务内同步。
+
+权限与数据归属：
+
+- `mold.model.create/edit` 不隐含芯盒维护权限。
+- 嵌套新增芯盒要求 `mold.corebox.create`，修改或停用已有芯盒要求 `mold.corebox.edit`；后端继续作为最终安全边界。
+- 模具、嵌套芯盒及各自 `BusinessDataOwnership` 在同一个 Prisma 事务中写入，保证本人/部门数据范围下可见。
+- 从开发单进入建档页面仍必须具备 `mold.model.create`，无权限时不打开可保存表单。
+
+主要实现位置：
+
+- 模具档案页面：`apps/admin/src/pages/modeling/MoldArchivePage.tsx`
+- 多芯盒编辑器：`apps/admin/src/pages/modeling/MoldCoreBoxEditor.tsx`
+- BOM 页面：`apps/admin/src/pages/modeling/CastingBomManagementPage.tsx`
+- 模具/芯盒 API：`apps/api/src/modeling.controller.ts`
+- BOM API：`apps/api/src/casting-bom.controller.ts`
+- 数据结构：`apps/api/prisma/schema.prisma`
+- 接口回归：`apps/api/scripts/test-mold-coreboxes.mjs`、`apps/api/scripts/test-casting-boms.mjs`

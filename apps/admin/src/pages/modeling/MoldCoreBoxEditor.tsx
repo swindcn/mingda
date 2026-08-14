@@ -8,11 +8,16 @@ import type { MoldArchiveRecord } from '../../utils/modeling'
 interface MoldCoreBoxEditorProps {
   form: FormInstance<MoldArchiveRecord>
   readOnly?: boolean
+  canCreate?: boolean
+  canEdit?: boolean
 }
 
-export function MoldCoreBoxEditor({ form, readOnly = false }: MoldCoreBoxEditorProps) {
+export function MoldCoreBoxEditor({ form, readOnly = false, canCreate = false, canEdit = false }: MoldCoreBoxEditorProps) {
   const [imageRow, setImageRow] = useState<number | null>(null)
-  const imageValues = imageRow === null ? [] : form.getFieldValue(['coreBoxes', imageRow, 'images'])
+  const coreBoxes = Form.useWatch('coreBoxes', form) || []
+  const imageRecord = imageRow === null ? undefined : coreBoxes[imageRow]
+  const imageValues = Array.isArray(imageRecord?.images) ? imageRecord.images : []
+  const imageReadOnly = readOnly || Boolean(imageRecord?.id ? !canEdit : !canCreate)
 
   return (
     <section className="mold-corebox-section">
@@ -34,18 +39,19 @@ export function MoldCoreBoxEditor({ form, readOnly = false }: MoldCoreBoxEditorP
                   {({ getFieldValue }) => {
                     const row = getFieldValue(['coreBoxes', field.name]) || {}
                     const persisted = Boolean(row.id)
+                    const rowReadOnly = readOnly || (persisted ? !canEdit : !canCreate)
                     const images = Array.isArray(row.images) ? row.images : []
                     return (
                       <div className="mold-corebox-row">
                         <Form.Item name={[field.name, 'id']} hidden><Input /></Form.Item>
-                        <Form.Item name={[field.name, 'code']} rules={[{ required: true, message: '请输入编码' }, { pattern: /^[^\s\u4e00-\u9fff]+$/, message: '不能包含中文或空格' }]}><Input disabled={readOnly || persisted} /></Form.Item>
-                        <Form.Item name={[field.name, 'name']} rules={[{ required: true, message: '请输入名称' }]}><Input disabled={readOnly} /></Form.Item>
-                        <Form.Item name={[field.name, 'maxLife']}><InputNumber disabled={readOnly} min={0} precision={0} style={{ width: '100%' }} /></Form.Item>
-                        <Form.Item name={[field.name, 'usedLife']}><InputNumber disabled={readOnly} min={0} precision={0} style={{ width: '100%' }} /></Form.Item>
-                        <Form.Item name={[field.name, 'status']}><Select disabled={readOnly} options={[{ value: '启用' }, { value: '停用' }]} /></Form.Item>
+                        <Form.Item name={[field.name, 'code']} rules={[{ required: true, message: '请输入编码' }, { pattern: /^[^\s\u4e00-\u9fff]+$/, message: '不能包含中文或空格' }]}><Input disabled={rowReadOnly || persisted} /></Form.Item>
+                        <Form.Item name={[field.name, 'name']} rules={[{ required: true, message: '请输入名称' }]}><Input disabled={rowReadOnly} /></Form.Item>
+                        <Form.Item name={[field.name, 'maxLife']}><InputNumber disabled={rowReadOnly} min={0} precision={0} style={{ width: '100%' }} /></Form.Item>
+                        <Form.Item name={[field.name, 'usedLife']}><InputNumber disabled={rowReadOnly} min={0} precision={0} style={{ width: '100%' }} /></Form.Item>
+                        <Form.Item name={[field.name, 'status']}><Select disabled={rowReadOnly} options={[{ value: '启用' }, { value: '停用' }]} /></Form.Item>
                         <Button icon={<PictureOutlined />} onClick={() => setImageRow(field.name)}>{images.length ? `${images.length}张` : '图片'}</Button>
-                        <Form.Item name={[field.name, 'remark']}><Input disabled={readOnly} /></Form.Item>
-                        {!readOnly && (
+                        <Form.Item name={[field.name, 'remark']}><Input disabled={rowReadOnly} /></Form.Item>
+                        {!rowReadOnly && (
                           <Button
                             type="text"
                             danger
@@ -59,7 +65,7 @@ export function MoldCoreBoxEditor({ form, readOnly = false }: MoldCoreBoxEditorP
                   }}
                 </Form.Item>
               ))}
-              {!readOnly && (
+              {!readOnly && canCreate && (
                 <Button className="mold-corebox-add" type="dashed" icon={<PlusOutlined />} onClick={() => add({ images: [], usedLife: 0, status: '启用' })}>
                   新增芯盒
                 </Button>
@@ -76,7 +82,7 @@ export function MoldCoreBoxEditor({ form, readOnly = false }: MoldCoreBoxEditorP
         destroyOnHidden
       >
         <ImageUploadField
-          readOnly={readOnly}
+          readOnly={imageReadOnly}
           value={imageValues}
           onChange={(images) => imageRow !== null && form.setFieldValue(['coreBoxes', imageRow, 'images'], images)}
         />

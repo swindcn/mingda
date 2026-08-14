@@ -8,12 +8,18 @@ const productCode = `TEST-MOLD-P-${stamp}`
 const moldA = `TEST-MOLD-A-${stamp}`
 const moldB = `TEST-MOLD-B-${stamp}`
 const moldLegacy = `TEST-MOLD-L-${stamp}`
+const moldFromDevelopment = `TEST-MOLD-D-${stamp}`
+const moldDuplicateDevelopment = `TEST-MOLD-DD-${stamp}`
 const coreA = `${moldA}-WATER`
 const coreB = `${moldA}-CRANK`
 const coreC = `${moldA}-OIL`
 const coreD = `${moldA}-INTAKE`
 const legacyCore = `${moldLegacy}-CORE`
-const moldCodes = [moldA, moldB, moldLegacy]
+const customerCode = `TEST-MOLD-C-${stamp}`
+const supplierCode = `TEST-MOLD-S-${stamp}`
+const developmentA = `TEST-MOLD-DEV-A-${stamp}`
+const developmentB = `TEST-MOLD-DEV-B-${stamp}`
+const moldCodes = [moldA, moldB, moldLegacy, moldFromDevelopment, moldDuplicateDevelopment]
 
 async function request(path, options = {}, expectedFailure = false) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -44,8 +50,22 @@ function coreBox(code, name, overrides = {}) {
 }
 
 try {
-  await prisma.product.create({
+  const product = await prisma.product.create({
     data: { code: productCode, name: '多芯盒测试发动机缸体', type: '半成品', unit: '件' },
+  })
+  const customer = await prisma.customer.create({ data: { code: customerCode, name: '多芯盒测试客户' } })
+  const supplier = await prisma.supplier.create({ data: { code: supplierCode, name: '多芯盒测试供应商' } })
+  await prisma.moldDevelopment.createMany({
+    data: [developmentA, developmentB].map((code) => ({
+      code,
+      customerId: customer.id,
+      productId: product.id,
+      supplierId: supplier.id,
+      customerNotifyDate: new Date(),
+      moldName: `${code}模具`,
+      moldType: '金属型',
+      status: 'COMPLETED',
+    })),
   })
 
   const login = await request('/auth/login', {
@@ -70,6 +90,56 @@ try {
     }),
   })
   if (!created.hasCoreBox || created.coreBoxes?.length !== 3) throw new Error('一次创建三套芯盒失败')
+  const ownerships = await prisma.businessDataOwnership.findMany({
+    where: { entityType: { in: ['modeling:molds', 'modeling:coreboxes'] }, entityId: { in: [moldA, coreA, coreB, coreC] } },
+  })
+  if (ownerships.length !== 4) throw new Error('模具或嵌套芯盒未在同一请求中生成数据归属')
+
+  await request('/admin/modeling/molds', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      code: moldFromDevelopment,
+      name: '开发单建档测试模具',
+      itemCode: productCode,
+      sourceMoldDevelopmentCode: developmentA,
+      status: '启用',
+    }),
+  })
+  const linkedDevelopment = await prisma.moldDevelopment.findUnique({ where: { code: developmentA } })
+  if (linkedDevelopment?.archivedMoldCode !== moldFromDevelopment) throw new Error('开发单建档关联未同步写入')
+
+  const duplicateArchive = await request('/admin/modeling/molds', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      code: moldDuplicateDevelopment,
+      name: '不应成功的重复建档模具',
+      itemCode: productCode,
+      sourceMoldDevelopmentCode: developmentA,
+      status: '启用',
+    }),
+  }, true)
+  if (!String(duplicateArchive.message || '').includes('已建档')) throw new Error('重复关联已建档开发单时提示不明确')
+
+  await request(`/admin/modeling/molds/${moldFromDevelopment}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({
+      code: moldFromDevelopment,
+      name: '开发单建档测试模具',
+      itemCode: productCode,
+      sourceMoldDevelopmentCode: developmentB,
+      status: '启用',
+    }),
+  })
+  const [oldDevelopment, newDevelopment] = await Promise.all([
+    prisma.moldDevelopment.findUnique({ where: { code: developmentA } }),
+    prisma.moldDevelopment.findUnique({ where: { code: developmentB } }),
+  ])
+  if (oldDevelopment?.archivedMoldCode !== null || newDevelopment?.archivedMoldCode !== moldFromDevelopment) {
+    throw new Error('修改来源开发单后两侧关联未保持一致')
+  }
 
   await request('/admin/modeling/molds', {
     method: 'POST',
@@ -167,6 +237,9 @@ try {
   }).catch(() => null)
   await prisma.coreBoxMaster.deleteMany({ where: { moldCode: { in: moldCodes } } }).catch(() => null)
   await prisma.moldMaster.deleteMany({ where: { code: { in: moldCodes } } }).catch(() => null)
+  await prisma.moldDevelopment.deleteMany({ where: { code: { in: [developmentA, developmentB] } } }).catch(() => null)
+  await prisma.customer.deleteMany({ where: { code: customerCode } }).catch(() => null)
+  await prisma.supplier.deleteMany({ where: { code: supplierCode } }).catch(() => null)
   await prisma.product.deleteMany({ where: { code: productCode } }).catch(() => null)
   await prisma.$disconnect()
 }

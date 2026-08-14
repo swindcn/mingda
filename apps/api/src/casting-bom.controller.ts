@@ -31,11 +31,17 @@ interface BomItemBody {
   remark?: string
 }
 
+interface BomCoreBoxBody {
+  coreBoxCode?: string
+  quantityPerProduct?: number
+}
+
 interface BomBody {
   productCode?: string
   materialGradeCode?: string
   moldCodes?: string[]
   coreBoxCodes?: string[]
+  coreBoxes?: BomCoreBoxBody[]
   netWeightKg?: number
   grossWeightKg?: number
   items?: BomItemBody[]
@@ -97,6 +103,7 @@ export class CastingBomController {
         code: item.coreBoxCode,
         name: item.coreBoxNameSnapshot || item.coreBox.name,
         moldCode: item.moldCodeSnapshot || item.coreBox.moldCode,
+        quantityPerProduct: this.decimal(item.quantityPerProduct),
       })),
       items: record.items.map((item) => ({
         id: item.id,
@@ -131,7 +138,16 @@ export class CastingBomController {
     const grossWeightKg = Number(body.grossWeightKg)
     const items = Array.isArray(body.items) ? body.items : []
     const moldCodes = Array.isArray(body.moldCodes) ? body.moldCodes.map((code) => String(code).trim()).filter(Boolean) : []
-    const coreBoxCodes = Array.isArray(body.coreBoxCodes) ? body.coreBoxCodes.map((code) => String(code).trim()).filter(Boolean) : []
+    const requestedCoreBoxes = Array.isArray(body.coreBoxes)
+      ? body.coreBoxes.map((item) => ({
+        coreBoxCode: String(item.coreBoxCode || '').trim(),
+        quantityPerProduct: item.quantityPerProduct === undefined ? 1 : Number(item.quantityPerProduct),
+      }))
+      : (Array.isArray(body.coreBoxCodes) ? body.coreBoxCodes : []).map((code) => ({
+        coreBoxCode: String(code).trim(),
+        quantityPerProduct: 1,
+      }))
+    const coreBoxCodes = requestedCoreBoxes.map((item) => item.coreBoxCode).filter(Boolean)
     if (!productCode || !materialGradeCode) throw new BadRequestException('请选择产品和材质牌号')
     if (!Number.isFinite(netWeightKg) || netWeightKg <= 0) throw new BadRequestException('毛坯净重必须大于 0')
     if (!Number.isFinite(grossWeightKg) || grossWeightKg < netWeightKg) throw new BadRequestException('浇注毛重必须大于或等于毛坯净重')
@@ -140,6 +156,10 @@ export class CastingBomController {
     if (new Set(itemCodes).size !== itemCodes.length) throw new BadRequestException('同一 BOM 版本不能重复选择物料')
     if (new Set(moldCodes).size !== moldCodes.length) throw new BadRequestException('同一 BOM 版本不能重复选择模具')
     if (new Set(coreBoxCodes).size !== coreBoxCodes.length) throw new BadRequestException('同一 BOM 版本不能重复选择芯盒')
+    if (coreBoxCodes.length !== requestedCoreBoxes.length) throw new BadRequestException('请选择芯盒工装')
+    if (requestedCoreBoxes.some((item) => !Number.isFinite(item.quantityPerProduct) || item.quantityPerProduct <= 0)) {
+      throw new BadRequestException('芯件比必须大于 0')
+    }
     items.forEach((item) => {
       const quantity = Number(item.standardQuantity)
       const lossRate = Number(item.lossRate || 0)
@@ -171,6 +191,7 @@ export class CastingBomController {
       throw new BadRequestException('芯盒工装必须属于已选生产模具')
     }
     const byCode = new Map(itemRecords.map((item) => [item.code, item]))
+    const coreBoxByCode = new Map(coreBoxRecords.map((item) => [item.code, item]))
     return {
       product,
       grade,
@@ -181,10 +202,11 @@ export class CastingBomController {
       returnWeightKg: grossWeightKg - netWeightKg,
       remark: String(body.remark || '').trim() || null,
       molds: moldRecords.map((mold) => ({ moldCode: mold.code, moldNameSnapshot: mold.name })),
-      coreBoxes: coreBoxRecords.map((coreBox) => ({
-        coreBoxCode: coreBox.code,
-        coreBoxNameSnapshot: coreBox.name,
-        moldCodeSnapshot: coreBox.moldCode,
+      coreBoxes: requestedCoreBoxes.map((item) => ({
+        coreBoxCode: item.coreBoxCode,
+        coreBoxNameSnapshot: coreBoxByCode.get(item.coreBoxCode)!.name,
+        moldCodeSnapshot: coreBoxByCode.get(item.coreBoxCode)!.moldCode,
+        quantityPerProduct: item.quantityPerProduct,
       })),
       items: items.map((item) => {
         const record = byCode.get(String(item.itemCode))!
@@ -449,6 +471,7 @@ export class CastingBomController {
             coreBoxCode: item.coreBoxCode,
             coreBoxNameSnapshot: item.coreBoxNameSnapshot,
             moldCodeSnapshot: item.moldCodeSnapshot,
+            quantityPerProduct: item.quantityPerProduct,
           })) },
         },
         include: this.include(),
@@ -510,6 +533,8 @@ export class CastingBomController {
         code: item.coreBoxCode,
         name: item.coreBoxNameSnapshot,
         moldCode: item.moldCodeSnapshot,
+        quantityPerProduct: this.decimal(item.quantityPerProduct),
+        requiredQuantity: Number((quantity * this.decimal(item.quantityPerProduct)).toFixed(4)),
       })),
       activeRecipes: recipes.map((recipe) => ({
         code: recipe.code,

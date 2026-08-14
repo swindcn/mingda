@@ -13,6 +13,13 @@ export interface BomItem {
   remark?: string
 }
 
+export interface BomCoreBox {
+  code: string
+  name: string
+  moldCode: string
+  quantityPerProduct: number
+}
+
 export interface BomRecord {
   id: string
   bomId: string
@@ -36,7 +43,7 @@ export interface BomRecord {
   moldCodes: string[]
   coreBoxCodes: string[]
   molds: Array<{ code: string; name: string; itemCode: string; itemName?: string }>
-  coreBoxes: Array<{ code: string; name: string; moldCode: string }>
+  coreBoxes: BomCoreBox[]
   items: BomItem[]
 }
 
@@ -61,7 +68,7 @@ export interface BomPayload {
   productCode: string
   materialGradeCode: string
   moldCodes: string[]
-  coreBoxCodes: string[]
+  coreBoxes: Array<{ coreBoxCode: string; quantityPerProduct: number }>
   netWeightKg: number
   grossWeightKg: number
   items: BomItem[]

@@ -98,7 +98,7 @@ export function CastingBomManagementPage() {
     setEditing(null)
     setViewing(false)
     form.resetFields()
-    form.setFieldsValue({ version: 'V1.0', status: 'DRAFT', moldCodes: [], coreBoxCodes: [], items: [] })
+    form.setFieldsValue({ version: 'V1.0', status: 'DRAFT', moldCodes: [], coreBoxes: [], items: [] })
     setModalOpen(true)
   }
 
@@ -112,7 +112,7 @@ export function CastingBomManagementPage() {
         productCode: detail.productCode,
         materialGradeCode: detail.materialGradeCode,
         moldCodes: detail.moldCodes,
-        coreBoxCodes: detail.coreBoxCodes,
+        coreBoxes: detail.coreBoxes.map((item) => ({ coreBoxCode: item.code, quantityPerProduct: item.quantityPerProduct || 1 })),
         netWeightKg: detail.netWeightKg,
         grossWeightKg: detail.grossWeightKg,
         version: detail.version,
@@ -130,6 +130,7 @@ export function CastingBomManagementPage() {
 
   const selectedGradeCode = Form.useWatch('materialGradeCode', form)
   const selectedMoldCodes = Form.useWatch('moldCodes', form) || []
+  const selectedCoreBoxes = Form.useWatch('coreBoxes', form) || []
   const netWeight = Number(Form.useWatch('netWeightKg', form) || 0)
   const grossWeight = Number(Form.useWatch('grossWeightKg', form) || 0)
   const yieldRate = grossWeight > 0 ? netWeight / grossWeight * 100 : 0
@@ -145,20 +146,22 @@ export function CastingBomManagementPage() {
     const product = options.products.find((item) => item.code === code)
     if (product?.materialGradeCode) form.setFieldValue('materialGradeCode', product.materialGradeCode)
     form.setFieldValue('moldCodes', [])
-    form.setFieldValue('coreBoxCodes', [])
+    form.setFieldValue('coreBoxes', [])
   }
 
   const handleMoldChange = (codes: string[]) => {
     const selected = new Set(codes)
     const newlySelected = new Set(codes.filter((code) => !selectedMoldCodes.includes(code)))
-    const validCoreBoxCodes = (form.getFieldValue('coreBoxCodes') || []).filter((code: string) => {
-      const coreBox = coreBoxRecords.find((item) => item.code === code)
+    const validCoreBoxes = (form.getFieldValue('coreBoxes') || []).filter((row: { coreBoxCode: string }) => {
+      const coreBox = coreBoxRecords.find((item) => item.code === row.coreBoxCode)
       return Boolean(coreBox && selected.has(coreBox.moldCode))
     })
-    const boundCoreBoxCodes = options.coreBoxes
+    const existingCodes = new Set(validCoreBoxes.map((item: { coreBoxCode: string }) => item.coreBoxCode))
+    const boundCoreBoxes = options.coreBoxes
       .filter((item) => newlySelected.has(item.moldCode))
-      .map((item) => item.code)
-    form.setFieldValue('coreBoxCodes', Array.from(new Set([...validCoreBoxCodes, ...boundCoreBoxCodes])))
+      .filter((item) => !existingCodes.has(item.code))
+      .map((item) => ({ coreBoxCode: item.code, quantityPerProduct: 1 }))
+    form.setFieldValue('coreBoxes', [...validCoreBoxes, ...boundCoreBoxes])
   }
 
   const persist = async (activate: boolean) => {
@@ -294,7 +297,7 @@ export function CastingBomManagementPage() {
 
           <Typography.Title level={5} className="bom-section-title">生产工装</Typography.Title>
           <div className="bom-tooling-grid">
-            <Form.Item name="moldCodes" label="生产模具">
+            <Form.Item name="moldCodes" label="生产模具" style={{ marginBottom: 8 }}>
               <Select
                 mode="multiple"
                 showSearch
@@ -307,16 +310,39 @@ export function CastingBomManagementPage() {
                 onChange={handleMoldChange}
               />
             </Form.Item>
-            <Form.Item name="coreBoxCodes" label="芯盒工装">
-              <Select
-                mode="multiple"
-                showSearch
-                optionFilterProp="label"
-                placeholder="请选择芯盒工装"
-                options={availableCoreBoxes.map((item) => ({ label: `${item.name}（${item.code}）`, value: item.code }))}
-              />
-            </Form.Item>
           </div>
+          <div className="bom-tooling-hint">自动带入已选模具的全部启用芯盒，可调整芯件比或移除不适用芯盒。</div>
+          <div className="bom-detail-header bom-corebox-grid"><span>所属模具</span><span>芯盒编码</span><span>芯盒名称</span><span>芯件比</span><span /></div>
+          <Form.List name="coreBoxes">
+            {(fields, { add, remove }) => <>
+              {fields.map((field) => <Form.Item key={field.key} noStyle shouldUpdate>{() => {
+                const row = (form.getFieldValue('coreBoxes') || [])[field.name] as { coreBoxCode?: string; quantityPerProduct?: number } | undefined
+                const coreBox = coreBoxRecords.find((item) => item.code === row?.coreBoxCode)
+                const mold = moldRecords.find((item) => item.code === coreBox?.moldCode)
+                return <div className="bom-detail-row bom-corebox-grid">
+                  <span className="bom-readonly-cell">{mold?.name || coreBox?.moldCode || '-'}</span>
+                  <Form.Item name={[field.name, 'coreBoxCode']} hidden><Input /></Form.Item>
+                  <span className="bom-readonly-cell">{coreBox?.code || row?.coreBoxCode || '-'}</span>
+                  <span className="bom-readonly-cell">{coreBox?.name || '-'}</span>
+                  <Form.Item name={[field.name, 'quantityPerProduct']} rules={[{ required: true, message: '请输入芯件比' }]}><InputNumber min={0.0001} precision={4} style={{ width: '100%' }} /></Form.Item>
+                  {!viewing && <Button type="text" danger title="移除芯盒" icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />}
+                </div>
+              }}</Form.Item>)}
+              {!viewing && selectedMoldCodes.length > 0 && (
+                <Select
+                  value={undefined}
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="添加已选模具下的芯盒"
+                  style={{ width: 360, marginTop: 8 }}
+                  options={availableCoreBoxes
+                    .filter((item) => !selectedCoreBoxes.some((row) => row.coreBoxCode === item.code))
+                    .map((item) => ({ label: `${item.name}（${item.code}）`, value: item.code }))}
+                  onChange={(code) => add({ coreBoxCode: code, quantityPerProduct: 1 })}
+                />
+              )}
+            </>}
+          </Form.List>
 
           <Typography.Title level={5} className="bom-section-title">零件物理用料明细</Typography.Title>
           <div className="bom-detail-header bom-item-grid"><span>物料</span><span>物料类型</span><span>单件标准用量</span><span>单位</span><span>损耗率（%）</span><span>备注</span><span /></div>
