@@ -1,0 +1,16 @@
+<view class="form-page">
+  <view class="form-card">
+    <view class="task-line" wx:if="{{task}}"><text>{{task.code}}</text><text>{{task.productName}}</text></view>
+    <view class="field"><text class="field-label">报工人</text><view class="readonly-value">{{operatorName}}</view></view>
+    <view class="quantity-grid">
+      <view class="field"><text class="field-label">合格数</text><input class="quantity-input" type="number" value="{{qualifiedQuantity}}" placeholder="请输入" bindinput="inputQualified" /></view>
+      <view class="field"><text class="field-label">报废数</text><input class="quantity-input" type="number" value="{{scrapQuantity}}" placeholder="请输入" bindinput="inputScrap" /></view>
+    </view>
+    <view class="field"><text class="field-label">废品原因</text><input class="standard-input" value="{{defectReason}}" placeholder="有废品时必填" bindinput="inputDefectReason" /></view>
+    <view class="field"><text class="field-label">班次</text><picker range="{{options.shifts}}" range-key="name" value="{{shiftIndex}}" bindchange="selectShift"><view class="picker-value {{shiftCode ? '' : 'placeholder'}}">{{shiftCode ? options.shifts[shiftIndex].name : '请选择班次'}}</view></picker></view>
+    <view class="field"><text class="field-label">混砂批次</text><view class="scan-row"><input class="standard-input scan-input" value="{{sandBatchCode}}" placeholder="手输或扫码" bindinput="inputSandBatch" /><button class="scan-button" bindtap="scanSandBatch">扫码</button></view></view>
+    <view class="switch-row"><text>是否烘干</text><switch color="#1677ff" checked="{{dryingRequired}}" bindchange="toggleDrying" /></view>
+    <view class="field"><text class="field-label">备注</text><textarea class="remark-input" value="{{remark}}" maxlength="200" placeholder="选填" bindinput="inputRemark" /></view>
+    <view class="submit-row"><button class="submit-button" loading="{{submitting}}" bindtap="submit">提交报工</button></view>
+  </view>
+</view>

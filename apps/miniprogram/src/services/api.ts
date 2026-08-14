@@ -1,6 +1,10 @@
 import {
   MoldDevelopmentItem,
   HeatExecutionOptions,
+  CoreExecutionOptions,
+  CoreInventoryBatch,
+  CoreReportResult,
+  MobileCoreTask,
   MobileHeatOrder,
   TodoItem,
 } from '../types/business'
@@ -149,4 +153,41 @@ export function transferHeatProduction(id: string, data: { versionNo: number; tr
 
 export function completeHeatProduction(id: string, data: { versionNo: number; actualOutputWeightKg: number; remark?: string }) {
   return request<MobileHeatOrder>({ url: `/mini/production/heat-orders/${id}/complete`, method: 'POST', data })
+}
+
+export function getCoreTasks(status?: string) {
+  return request<MobileCoreTask[]>({ url: `/mini/production/core-tasks${status ? `?status=${encodeURIComponent(status)}` : ''}` })
+}
+
+export function getCoreTaskDetail(id: string) {
+  return request<MobileCoreTask>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}` })
+}
+
+export function getCoreExecutionOptions(id: string) {
+  return request<CoreExecutionOptions>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}/execution-options` })
+}
+
+export function startCoreTask(id: string, data: { versionNo: number }) {
+  return request<MobileCoreTask>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}/start`, method: 'POST', data })
+}
+
+export function reportCoreTask(id: string, data: {
+  versionNo: number
+  qualifiedQuantity: number
+  scrapQuantity: number
+  shiftCode: string
+  sandBatchCode?: string
+  dryingRequired: boolean
+  defectReason?: string
+  remark?: string
+}) {
+  return request<CoreReportResult>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}/report`, method: 'POST', data })
+}
+
+export function getCoreDryingBatches(id: string) {
+  return request<CoreInventoryBatch[]>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}/drying-batches` })
+}
+
+export function dryCoreBatch(id: string, data: { versionNo: number; equipmentCode: string }) {
+  return request<CoreInventoryBatch>({ url: `/mini/production/core-batches/${encodeURIComponent(id)}/dry`, method: 'POST', data })
 }

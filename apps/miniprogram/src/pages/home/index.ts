@@ -8,6 +8,7 @@ Page({
     todoCount: 0,
     moldCount: 0,
     canViewHeats: false,
+    canViewCoreTasks: false,
     loading: false,
   },
 
@@ -22,6 +23,7 @@ Page({
     this.setData({
       username: wx.getStorageSync('mingda_display_name') || wx.getStorageSync('mingda_login_account') || '1',
       canViewHeats: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.heat.view'),
+      canViewCoreTasks: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.core.view'),
     })
     void this.loadHome()
   },
@@ -42,6 +44,7 @@ Page({
         todoCount: result.todoCount,
         moldCount: result.moldCount,
         canViewHeats: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.production.heat.view'),
+        canViewCoreTasks: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.production.core.view'),
       })
     } catch (error) {
       wx.showToast({
@@ -70,6 +73,10 @@ Page({
 
   goHeats() {
     wx.navigateTo({ url: '/pages/heat/list/index' })
+  },
+
+  goCoreTasks() {
+    wx.navigateTo({ url: '/pages/core/list/index' })
   },
 
   logout() {

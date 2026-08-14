@@ -116,7 +116,7 @@ export class CoremakingService {
       routingNode: { include: { operation: true, equipmentLinks: { include: { equipment: { include: { workshop: true } } } } } },
       coreBox: { include: { mold: true } },
       equipment: { include: { workshop: true } },
-      team: { include: { workshop: true } },
+      team: { include: { workshop: true, members: { select: { userId: true } } } },
       createdBy: { select: { id: true, name: true } },
       canceledBy: { select: { id: true, name: true } },
       _count: { select: { reports: true } },
@@ -125,7 +125,7 @@ export class CoremakingService {
 
   private batchInclude(includeLedgers = true) {
     return {
-      report: { include: { task: { select: { id: true, code: true, workOrderId: true, status: true } } } },
+      report: { include: { task: { select: { id: true, code: true, workOrderId: true, status: true, team: { select: { members: { select: { userId: true } } } } } } } },
       driedBy: { select: { id: true, name: true } },
       dryingEquipment: { select: { code: true, name: true, equipmentType: true } },
       lockedBy: { select: { id: true, name: true } },
@@ -158,6 +158,28 @@ export class CoremakingService {
   private async assertTaskVisible(request: RequestWithAdmin, id: string) {
     const ids = await visibleOwnershipEntityIds(this.prisma, getAdminContext(request), 'production:core_tasks')
     if (ids !== null && !ids.includes(id)) throw new NotFoundException('制芯任务不存在')
+  }
+
+  private isAdministrator(user: AdminContext) {
+    return user.username === 'admin' || user.userType === 'SUPER_ADMIN'
+  }
+
+  private async assertTaskAccess(request: RequestWithAdmin, id: string, mobile: boolean) {
+    if (!mobile) return this.assertTaskVisible(request, id)
+    const user = getAdminContext(request)
+    if (this.isAdministrator(user)) return
+    const membership = await this.prisma.coreProductionTask.count({
+      where: { id, team: { members: { some: { userId: user.id } } } },
+    })
+    if (!membership) throw new NotFoundException('制芯任务不存在')
+  }
+
+  private async assertTaskOperator(client: DatabaseClient, user: AdminContext, id: string) {
+    if (this.isAdministrator(user)) return
+    const membership = await client.coreProductionTask.count({
+      where: { id, team: { members: { some: { userId: user.id } } } },
+    })
+    if (!membership) throw new NotFoundException('制芯任务不存在')
   }
 
   private async loadWorkOrder(client: DatabaseClient, id: string) {
@@ -463,10 +485,12 @@ export class CoremakingService {
     }
   }
 
-  private taskDto(record: any, user: AdminContext) {
+  private taskDto(record: any, user: AdminContext, mobile = false) {
     const hasReports = Number(record._count?.reports || 0) > 0
     const adjustable = ['PENDING_DISPATCH', 'WAITING'].includes(record.status) && !hasReports
     const cancelable = !['COMPLETED', 'CANCELED'].includes(record.status) && !hasReports
+    const isTeamMember = Boolean(record.team?.members?.some((member: { userId: string }) => member.userId === user.id))
+    const canOperate = !mobile || this.isAdministrator(user) || isTeamMember
     return {
       id: record.id,
       code: record.code,
@@ -514,24 +538,28 @@ export class CoremakingService {
       canDispatch: adjustable && hasAdminPermission(user, 'production.core_task.dispatch'),
       canStart: record.status === 'WAITING'
         && !['COMPLETED', 'CLOSED'].includes(record.workOrder.productionStatus)
-        && hasAdminPermission(user, 'production.core_task.start'),
+        && canOperate
+        && hasAdminPermission(user, mobile ? 'mini.production.core.start' : 'production.core_task.start'),
       canReport: record.status === 'IN_PROGRESS'
         && !['COMPLETED', 'CLOSED'].includes(record.workOrder.productionStatus)
-        && hasAdminPermission(user, 'production.core_task.report'),
+        && canOperate
+        && hasAdminPermission(user, mobile ? 'mini.production.core.report' : 'production.core_task.report'),
       canCancel: cancelable && hasAdminPermission(user, 'production.core_task.cancel'),
+      canDry: false,
     }
   }
 
-  async listTasks(request: RequestWithAdmin, filters: { keyword?: string; status?: string; workOrderId?: string }) {
+  async listTasks(request: RequestWithAdmin, filters: { keyword?: string; status?: string; workOrderId?: string }, mobile = false) {
     const user = getAdminContext(request)
-    const ids = await visibleOwnershipEntityIds(this.prisma, user, 'production:core_tasks')
-    if (ids?.length === 0) return []
+    const ids = mobile ? null : await visibleOwnershipEntityIds(this.prisma, user, 'production:core_tasks')
+    if (!mobile && ids?.length === 0) return []
     const status = filters.status && filters.status !== 'ALL' && Object.values(CoreTaskStatus).includes(filters.status as CoreTaskStatus)
       ? filters.status as CoreTaskStatus
       : undefined
     const records = await this.prisma.coreProductionTask.findMany({
       where: {
         ...(ids ? { id: { in: ids } } : {}),
+        ...(mobile && !this.isAdministrator(user) ? { team: { members: { some: { userId: user.id } } } } : {}),
         ...(filters.workOrderId ? { workOrderId: filters.workOrderId } : {}),
         ...(status ? { status } : {}),
         ...(filters.keyword ? { OR: [
@@ -542,9 +570,9 @@ export class CoremakingService {
         ] } : {}),
       },
       include: this.taskInclude(),
-      orderBy: [{ plannedStartAt: 'asc' }, { createdAt: 'desc' }],
+      orderBy: mobile ? [{ plannedStartAt: 'desc' }, { createdAt: 'desc' }] : [{ plannedStartAt: 'asc' }, { createdAt: 'desc' }],
     })
-    return records.map((record) => this.taskDto(record, user))
+    return records.map((record) => this.taskDto(record, user, mobile))
   }
 
   private async findTask(id: string, includeReports = false) {
@@ -559,17 +587,28 @@ export class CoremakingService {
     return record
   }
 
-  async getTask(request: RequestWithAdmin, id: string) {
-    await this.assertTaskVisible(request, id)
+  async getTask(request: RequestWithAdmin, id: string, mobile = false) {
+    await this.assertTaskAccess(request, id, mobile)
     const record = await this.findTask(id, true)
+    const user = getAdminContext(request)
+    const batches = mobile ? await this.prisma.coreInventoryBatch.findMany({
+      where: { report: { taskId: id } },
+      include: this.batchInclude(false),
+      orderBy: { createdAt: 'desc' },
+    }) : []
+    const batchDtos = batches.map((batch) => this.batchDto(batch, user, true))
     return {
-      ...this.taskDto(record, getAdminContext(request)),
+      ...this.taskDto(record, user, mobile),
       reports: Array.isArray((record as any).reports) ? (record as any).reports.map((item: any) => this.reportDto(item)) : [],
+      ...(mobile ? {
+        batches: batchDtos,
+        canDry: batchDtos.some((batch) => batch.canDry),
+      } : {}),
     }
   }
 
-  async getCoreTaskOptions(request: RequestWithAdmin, id: string) {
-    await this.assertTaskVisible(request, id)
+  async getCoreTaskOptions(request: RequestWithAdmin, id: string, mobile = false) {
+    await this.assertTaskAccess(request, id, mobile)
     const task = await this.findTask(id)
     const equipment = task.routingNode.equipmentLinks
       .map((link) => link.equipment)
@@ -700,7 +739,9 @@ export class CoremakingService {
     }
   }
 
-  private batchDto(record: any) {
+  private batchDto(record: any, user?: AdminContext, mobile = false) {
+    const isTeamMember = Boolean(user && record.report?.task?.team?.members?.some((member: { userId: string }) => member.userId === user.id))
+    const canOperate = Boolean(user && (this.isAdministrator(user) || isTeamMember))
     const result = {
       id: record.id,
       code: record.code,
@@ -735,6 +776,10 @@ export class CoremakingService {
       scrapReason: record.scrapReason || '',
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
+      canDry: record.dryingRequired
+        && record.status === 'UNDRIED'
+        && canOperate
+        && Boolean(user && hasAdminPermission(user, mobile ? 'mini.production.core.dry' : 'production.core_task.dry')),
     }
     if (!Array.isArray(record.ledgers)) return result
     return {
@@ -1030,13 +1075,14 @@ export class CoremakingService {
     if (team.workshopCode !== equipment.workshopCode) throw new BadRequestException('派工设备与班组不属于同一车间')
   }
 
-  async startTask(request: RequestWithAdmin, id: string, value: StartCoreTaskBody | unknown) {
-    await this.assertTaskVisible(request, id)
+  async startTask(request: RequestWithAdmin, id: string, value: StartCoreTaskBody | unknown, mobile = false) {
+    await this.assertTaskAccess(request, id, mobile)
     const body = requestBody(value) as StartCoreTaskBody
     const versionNo = requiredVersion(body.versionNo)
     const user = getAdminContext(request)
     await this.serializable(async (tx) => {
       await this.lockTask(tx, id)
+      if (mobile) await this.assertTaskOperator(tx, user, id)
       const current = await tx.coreProductionTask.findUnique({
         where: { id },
         include: { workOrder: { select: { productionStatus: true } } },
@@ -1056,11 +1102,12 @@ export class CoremakingService {
       })
       if (!result.count) throw new ConflictException('制芯任务已被其他用户更新，请刷新后重试')
     })
-    return this.taskDto(await this.findTask(id), user)
+    await this.assertTaskAccess(request, id, mobile)
+    return this.taskDto(await this.findTask(id), user, mobile)
   }
 
-  async reportTask(request: RequestWithAdmin, id: string, value: ReportCoreTaskBody | unknown) {
-    await this.assertTaskVisible(request, id)
+  async reportTask(request: RequestWithAdmin, id: string, value: ReportCoreTaskBody | unknown, mobile = false) {
+    await this.assertTaskAccess(request, id, mobile)
     const body = requestBody(value) as ReportCoreTaskBody
     const versionNo = requiredVersion(body.versionNo)
     const qualifiedQuantity = requiredInteger(body.qualifiedQuantity, '合格数量', 1)
@@ -1074,6 +1121,7 @@ export class CoremakingService {
 
     const reportId = await this.serializable(async (tx) => {
       await this.lockTask(tx, id)
+      if (mobile) await this.assertTaskOperator(tx, user, id)
       const current = await tx.coreProductionTask.findUnique({
         where: { id },
         include: { workOrder: { select: { productionStatus: true } } },
@@ -1164,16 +1212,28 @@ export class CoremakingService {
       return report.id
     }, 5)
 
+    await this.assertTaskAccess(request, id, mobile)
     const created = await this.prisma.coreProductionReport.findUnique({ where: { id: reportId }, select: { batch: { select: { id: true } } } })
     if (!created?.batch) throw new NotFoundException('报工库存批次不存在')
     await this.refreshBatchStatus(created.batch.id)
     const report = await this.prisma.coreProductionReport.findUnique({ where: { id: reportId }, include: { batch: { include: this.batchInclude() } } })
     if (!report?.batch) throw new NotFoundException('报工库存批次不存在')
     return {
-      task: this.taskDto(await this.findTask(id), user),
+      task: this.taskDto(await this.findTask(id), user, mobile),
       report: this.reportDto(report),
-      batch: this.batchDto(report.batch),
+      batch: this.batchDto(report.batch, user, mobile),
     }
+  }
+
+  async listDryingBatches(request: RequestWithAdmin, taskId: string) {
+    await this.assertTaskAccess(request, taskId, true)
+    const user = getAdminContext(request)
+    const records = await this.prisma.coreInventoryBatch.findMany({
+      where: { report: { taskId }, dryingRequired: true, status: 'UNDRIED' },
+      include: this.batchInclude(false),
+      orderBy: { createdAt: 'desc' },
+    })
+    return records.map((record) => this.batchDto(record, user, true))
   }
 
   async listInventory(request: RequestWithAdmin, query: CoreInventoryQuery) {
@@ -1240,16 +1300,23 @@ export class CoremakingService {
     }
   }
 
-  async dryBatch(request: RequestWithAdmin, id: string, value: DryCoreBatchBody | unknown) {
-    await this.assertBatchVisible(request, id)
+  async dryBatch(request: RequestWithAdmin, id: string, value: DryCoreBatchBody | unknown, mobile = false) {
+    if (mobile) {
+      const batch = await this.prisma.coreInventoryBatch.findUnique({ where: { id }, select: { report: { select: { taskId: true } } } })
+      if (!batch) throw new NotFoundException('砂芯批次不存在')
+      await this.assertTaskAccess(request, batch.report.taskId, true)
+    } else {
+      await this.assertBatchVisible(request, id)
+    }
     const body = requestBody(value) as DryCoreBatchBody
     const versionNo = requiredVersion(body.versionNo)
     const equipmentCode = textValue(body.equipmentCode, '烘干设备', true)
     const user = getAdminContext(request)
     await this.serializable(async (tx) => {
       await this.lockBatchRecord(tx, id)
-      const batch = await tx.coreInventoryBatch.findUnique({ where: { id } })
+      const batch = await tx.coreInventoryBatch.findUnique({ where: { id }, include: { report: { select: { taskId: true } } } })
       if (!batch) throw new NotFoundException('砂芯批次不存在')
+      if (mobile) await this.assertTaskOperator(tx, user, batch.report.taskId)
       if (batch.versionNo !== versionNo) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
       if (!batch.dryingRequired || batch.status !== 'UNDRIED') throw new ConflictException('仅待烘干批次可以确认烘干')
       const equipment = await tx.furnace.findUnique({ where: { code: equipmentCode } })
@@ -1273,7 +1340,12 @@ export class CoremakingService {
       })
       if (!updated.count) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
     })
-    return this.batchDto(await this.refreshBatchStatus(id))
+    if (mobile) {
+      const batch = await this.prisma.coreInventoryBatch.findUnique({ where: { id }, select: { report: { select: { taskId: true } } } })
+      if (!batch) throw new NotFoundException('砂芯批次不存在')
+      await this.assertTaskAccess(request, batch.report.taskId, true)
+    }
+    return this.batchDto(await this.refreshBatchStatus(id), user, mobile)
   }
 
   async lockBatch(request: RequestWithAdmin, id: string, value: LockCoreBatchBody | unknown) {

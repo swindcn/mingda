@@ -17,7 +17,7 @@ import { HeatExecutionController, MobileHeatExecutionController } from './produc
 import { ProductionPermissionGuard } from './production/production-permission.guard'
 import { ProductionService } from './production/production.service'
 import { WorkOrderController } from './production/work-order.controller'
-import { CoremakingController } from './production/coremaking.controller'
+import { CoremakingController, MobileCoremakingController } from './production/coremaking.controller'
 import { CoremakingService } from './production/coremaking.service'
 import { CoreInventoryScheduler } from './production/core-inventory.scheduler'
 
@@ -47,6 +47,7 @@ import { CoreInventoryScheduler } from './production/core-inventory.scheduler'
     HeatExecutionController,
     MobileHeatExecutionController,
     CoremakingController,
+    MobileCoremakingController,
   ],
   providers: [ResourceParserService, ProductionService, CoremakingService, CoreInventoryScheduler, ProductionPermissionGuard],
 })

@@ -1,0 +1,19 @@
+.dry-page { min-height: 100vh; padding: 28rpx 30rpx 56rpx; background: #f5f6f8; box-sizing: border-box; }
+.section-card { padding: 26rpx; margin-bottom: 20rpx; background: #fff; border: 1rpx solid #e5e7eb; border-radius: 16rpx; }
+.section-title { margin-bottom: 18rpx; color: #111827; font-size: 30rpx; font-weight: 700; }
+.batch-option { padding: 20rpx; margin-top: 14rpx; border: 1rpx solid #d0d5dd; border-radius: 10rpx; }
+.batch-option-active { border-color: #1677ff; background: #f0f7ff; }
+.batch-head { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; }
+.batch-code { min-width: 0; overflow: hidden; color: #111827; font-size: 27rpx; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.check-mark { flex: 0 0 auto; color: #1677ff; font-size: 25rpx; }
+.batch-meta { margin-top: 10rpx; color: #667085; font-size: 25rpx; }
+.field-label { margin-bottom: 10rpx; color: #475467; font-size: 26rpx; }
+.picker-value { height: 88rpx; padding: 0 20rpx; color: #111827; font-size: 28rpx; line-height: 88rpx; border: 1rpx solid #d0d5dd; border-radius: 10rpx; box-sizing: border-box; }
+.placeholder { color: #98a2b3; }
+.expiry-box { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; padding-top: 22rpx; margin-top: 24rpx; color: #667085; font-size: 26rpx; border-top: 1rpx solid #eef0f4; }
+.expiry-value { color: #111827; font-weight: 600; text-align: right; }
+.server-note { margin-top: 10rpx; color: #98a2b3; font-size: 23rpx; text-align: right; }
+.submit-row { display: flex; justify-content: flex-end; margin-top: 28rpx; margin-left: auto; }
+.submit-button { flex: 0 0 auto; min-width: 168rpx; height: 76rpx; padding: 0 26rpx; margin: 0; color: #fff; font-size: 28rpx; line-height: 76rpx; background: #1677ff; border-radius: 10rpx; }
+.submit-button::after { border: 0; }
+.empty-inline { padding: 48rpx 0; color: #98a2b3; font-size: 27rpx; text-align: center; }

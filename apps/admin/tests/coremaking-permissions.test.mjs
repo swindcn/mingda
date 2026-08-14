@@ -310,6 +310,9 @@ test('production guard resolves the minimum permission for every coremaking path
     ['POST', '/admin/production/core-batches/batch-1/scrap', 'production.core_inventory.scrap'],
     ['GET', '/admin/production/work-orders/wo-1/core-readiness', 'production.work_order.view'],
     ['GET', '/mini/production/core-tasks', 'mini.production.core.view'],
+    ['GET', '/mini/production/core-tasks/task-1', 'mini.production.core.view'],
+    ['GET', '/mini/production/core-tasks/task-1/execution-options', 'mini.production.core.view'],
+    ['GET', '/mini/production/core-tasks/task-1/drying-batches', 'mini.production.core.view'],
     ['POST', '/mini/production/core-tasks/task-1/start', 'mini.production.core.start'],
     ['POST', '/mini/production/core-tasks/task-1/report', 'mini.production.core.report'],
     ['POST', '/mini/production/core-batches/batch-1/dry', 'mini.production.core.dry'],
@@ -318,7 +321,7 @@ test('production guard resolves the minimum permission for every coremaking path
   for (const [method, requestPath, permission] of cases) {
     assert.deepEqual(permissionFor({ method, path: requestPath }), permission, `${method} ${requestPath}`)
   }
-  for (const [method, requestPath, permission] of cases.filter(([method]) => method !== 'GET')) {
+  for (const [method, requestPath, permission] of cases) {
     assert.deepEqual(permissionFor({ method, path: `${requestPath}/` }), permission, `${method} ${requestPath}/`)
     assert.deepEqual(permissionFor({ method, path: `${requestPath}///?source=test` }), permission, `${method} ${requestPath} query`)
   }

@@ -1,0 +1,17 @@
+<view class="dry-page">
+  <view class="section-card">
+    <view class="section-title">待烘干批次</view>
+    <view wx:for="{{batches}}" wx:key="id" class="batch-option {{batchIndex === index ? 'batch-option-active' : ''}}" data-index="{{index}}" bindtap="selectBatch">
+      <view class="batch-head"><text class="batch-code">{{item.code}}</text><text class="check-mark">{{batchIndex === index ? '已选' : '选择'}}</text></view>
+      <view class="batch-meta">数量 {{item.currentQuantity}}　保质期 {{item.shelfLifeHours || '-'}} 小时</view>
+    </view>
+    <view wx:if="{{!loading && !batches.length}}" class="empty-inline">暂无待烘干批次</view>
+  </view>
+  <view class="section-card" wx:if="{{batches.length}}">
+    <view class="field-label">烘干设备</view>
+    <picker range="{{options.dryingEquipment}}" range-key="name" value="{{equipmentIndex}}" bindchange="selectEquipment"><view class="picker-value {{equipmentCode ? '' : 'placeholder'}}">{{equipmentCode ? options.dryingEquipment[equipmentIndex].name : '请选择烘干设备'}}</view></picker>
+    <view class="expiry-box"><text>预计失效时间</text><text class="expiry-value">{{estimatedExpiresAt}}</text></view>
+    <view class="server-note">实际失效时间以提交后服务端计算结果为准</view>
+    <view class="submit-row"><button class="submit-button" loading="{{submitting}}" bindtap="submit">确认烘干</button></view>
+  </view>
+</view>

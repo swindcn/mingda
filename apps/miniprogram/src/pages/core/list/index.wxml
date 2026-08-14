@@ -1,0 +1,15 @@
+<view class="core-list-page">
+  <view class="core-tabs">
+    <view wx:for="{{tabs}}" wx:key="key" class="core-tab {{activeTab === item.key ? 'core-tab-active' : ''}}" data-key="{{item.key}}" bindtap="changeTab">{{item.label}}</view>
+  </view>
+  <view class="core-card" wx:for="{{records}}" wx:key="id" data-id="{{item.id}}" bindtap="openDetail">
+    <view class="card-head"><text class="task-code">{{item.code}}</text><text class="task-status task-status-{{item.statusTone}}">{{item.statusText}}</text></view>
+    <view class="product-line">{{item.productName}} · {{item.coreBoxName}}</view>
+    <view class="data-grid">
+      <view><text class="field-label">计划 / 合格</text><text class="field-value">{{item.plannedQuantity}} / {{item.qualifiedQuantity}}</text></view>
+      <view><text class="field-label">设备 / 班组</text><text class="field-value">{{item.equipmentName}} / {{item.teamName}}</text></view>
+    </view>
+    <view class="task-time"><text>计划时间</text><text>{{item.plannedStartText}}</text></view>
+  </view>
+  <view wx:if="{{!loading && !records.length}}" class="empty-state">当前暂无制芯任务</view>
+</view>

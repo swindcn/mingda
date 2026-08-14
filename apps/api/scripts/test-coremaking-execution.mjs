@@ -195,6 +195,9 @@ try {
   })
   const restrictedUsername = `${prefix}-RESTRICTED`
   const taskDryUsername = `${prefix}-TASK-DRY`
+  const miniMemberUsername = `${prefix}-MINI-MEMBER`
+  const miniOutsiderUsername = `${prefix}-MINI-OUTSIDER`
+  const miniViewerUsername = `${prefix}-MINI-VIEWER`
   const restrictedRole = await prisma.role.create({
     data: {
       name: `${prefix}-INVENTORY-VIEWER`,
@@ -231,14 +234,51 @@ try {
       roles: { create: { roleId: taskDryRole.id } },
     },
   })
+  const miniRole = await prisma.role.create({
+    data: {
+      name: `${prefix}-MINI-CORE`,
+      app: '小程序端',
+      dataScope: 'ALL',
+      dataScopes: ['ALL'],
+      permissions: ['mini.production.core.view', 'mini.production.core.start', 'mini.production.core.report', 'mini.production.core.dry'],
+    },
+  })
+  const miniViewRole = await prisma.role.create({
+    data: {
+      name: `${prefix}-MINI-CORE-VIEW`,
+      app: '小程序端',
+      dataScope: 'ALL',
+      dataScopes: ['ALL'],
+      permissions: ['mini.production.core.view'],
+    },
+  })
+  const [miniMember, miniOutsider, miniViewer] = await Promise.all([
+    prisma.user.create({
+      data: { username: miniMemberUsername, phone: `MINI-M-${stamp}`, name: '制芯班组员工', passwordHash: hashPassword('123456'), roles: { create: { roleId: miniRole.id } } },
+    }),
+    prisma.user.create({
+      data: { username: miniOutsiderUsername, phone: `MINI-O-${stamp}`, name: '其他班组员工', passwordHash: hashPassword('123456'), roles: { create: { roleId: miniRole.id } } },
+    }),
+    prisma.user.create({
+      data: { username: miniViewerUsername, phone: `MINI-V-${stamp}`, name: '制芯任务查看员', passwordHash: hashPassword('123456'), roles: { create: { roleId: miniViewRole.id } } },
+    }),
+  ])
   const grade = await prisma.materialGrade.create({ data: { code: `${prefix}-GRADE`, name: '测试灰铁', status: '启用' } })
   const workshop = await prisma.workshop.create({ data: { code: `${prefix}-WS`, name: '测试制芯车间', type: '制芯', status: '启用' } })
   const team = await prisma.team.create({ data: { code: `${prefix}-TEAM`, name: '制芯一班', workshopCode: workshop.code, leaderUserId: admin.id, status: '启用' } })
+  const foreignTeam = await prisma.team.create({ data: { code: `${prefix}-TEAM-X`, name: '制芯二班', workshopCode: workshop.code, leaderUserId: admin.id, status: '启用' } })
+  await prisma.teamMember.createMany({
+    data: [
+      { teamCode: team.code, userId: miniMember.id },
+      { teamCode: team.code, userId: miniViewer.id },
+    ],
+  })
   const equipment = await prisma.furnace.create({ data: { code: `${prefix}-SHOOT`, name: '一号射芯机', equipmentType: '射芯机', workshopCode: workshop.code, status: '启用' } })
   const dryer = await prisma.furnace.create({ data: { code: `${prefix}-DRY`, name: '一号烘干炉', equipmentType: '烘干设备', workshopCode: workshop.code, status: '启用' } })
   const disabledDryer = await prisma.furnace.create({ data: { code: `${prefix}-DRY-OFF`, name: '停用烘干炉', equipmentType: '烘干设备', workshopCode: workshop.code, status: '停用' } })
   const unrelatedEquipment = await prisma.furnace.create({ data: { code: `${prefix}-MELT`, name: '熔炼炉', equipmentType: '熔炼炉', workshopCode: workshop.code, status: '启用' } })
   const shift = await prisma.shiftMaster.create({ data: { code: `${prefix}-DAY`, name: '白班', startTime: '08:00', endTime: '20:00', status: '启用' } })
+  const miniShift = await prisma.shiftMaster.create({ data: { code: `${prefix}-MINI`, name: '小程序班次', startTime: '20:00', endTime: '08:00', status: '启用' } })
   const operation = await prisma.operationMaster.create({ data: { code: `${prefix}-OP`, name: '射芯制芯', section: '制芯', status: 'ENABLED' } })
   const product = await prisma.product.create({ data: { code: `${prefix}-ITEM`, name: '测试泵体', type: '半成品', unit: '件', materialGradeCode: grade.code } })
   const mold = await prisma.moldMaster.create({ data: { code: `${prefix}-MOLD`, name: '测试泵体模具', itemCode: product.code, hasCoreBox: true } })
@@ -313,6 +353,75 @@ try {
   const restrictedHeaders = { authorization: `Bearer ${restrictedLogin.token}` }
   const taskDryLogin = await request(baseUrl, '/auth/login', { method: 'POST', body: JSON.stringify({ username: taskDryUsername, password: '123456' }) })
   const taskDryHeaders = { authorization: `Bearer ${taskDryLogin.token}` }
+  const miniMemberLogin = await request(baseUrl, '/auth/login', { method: 'POST', body: JSON.stringify({ username: miniMemberUsername, password: '123456' }) })
+  const miniMemberHeaders = { authorization: `Bearer ${miniMemberLogin.token}` }
+  const miniOutsiderLogin = await request(baseUrl, '/auth/login', { method: 'POST', body: JSON.stringify({ username: miniOutsiderUsername, password: '123456' }) })
+  const miniOutsiderHeaders = { authorization: `Bearer ${miniOutsiderLogin.token}` }
+  const miniViewerLogin = await request(baseUrl, '/auth/login', { method: 'POST', body: JSON.stringify({ username: miniViewerUsername, password: '123456' }) })
+  const miniViewerHeaders = { authorization: `Bearer ${miniViewerLogin.token}` }
+
+  const { task: miniTask } = await createTask({ plannedQuantity: 5 })
+  const { task: foreignMiniTask } = await createTask({ plannedQuantity: 2 })
+  await prisma.coreProductionTask.update({
+    where: { id: foreignMiniTask.id },
+    data: { teamCode: foreignTeam.code, teamNameSnapshot: foreignTeam.name },
+  })
+  await request(baseUrl, '/mini/production/core-tasks?status=WAITING', { headers: restrictedHeaders }, 403)
+  const adminMiniList = await request(baseUrl, '/mini/production/core-tasks/?status=WAITING', { headers })
+  if (!adminMiniList.some((item) => item.id === miniTask.id) || !adminMiniList.some((item) => item.id === foreignMiniTask.id)) {
+    throw new Error('超管 mini 制芯列表未返回全部任务或尾斜杠路由不安全')
+  }
+  const memberMiniList = await request(baseUrl, '/mini/production/core-tasks?status=WAITING', { headers: miniMemberHeaders })
+  if (!memberMiniList.some((item) => item.id === miniTask.id)) throw new Error('班组成员未看到派工给本班组的制芯任务')
+  if (memberMiniList.some((item) => item.id === foreignMiniTask.id)) throw new Error('班组成员看到了派工给其他班组的制芯任务')
+  const outsiderMiniList = await request(baseUrl, '/mini/production/core-tasks?status=WAITING', { headers: miniOutsiderHeaders })
+  if (outsiderMiniList.some((item) => item.id === miniTask.id)) throw new Error('非班组成员看到了制芯任务')
+  await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}`, { headers: miniOutsiderHeaders }, 404)
+  await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/start`, {
+    method: 'POST', headers: miniOutsiderHeaders, body: JSON.stringify({ versionNo: miniTask.versionNo }),
+  }, 404)
+  await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/start`, {
+    method: 'POST', headers: miniViewerHeaders, body: JSON.stringify({ versionNo: miniTask.versionNo }),
+  }, 403)
+
+  const miniDetail = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}`, { headers: miniMemberHeaders })
+  if (!miniDetail.canStart || miniDetail.canReport || miniDetail.canDry || !Array.isArray(miniDetail.reports) || !Array.isArray(miniDetail.batches)) {
+    throw new Error('mini 制芯详情动作标识或执行明细结构错误')
+  }
+  const miniOptions = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/execution-options`, { headers: miniMemberHeaders })
+  if (!miniOptions.shifts.some((item) => item.code === miniShift.code) || !miniOptions.dryingEquipment.some((item) => item.code === dryer.code)) {
+    throw new Error('mini 制芯执行选项未返回真实班次或烘干设备')
+  }
+  const miniStarted = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/start`, {
+    method: 'POST', headers: miniMemberHeaders, body: JSON.stringify({ versionNo: miniTask.versionNo }),
+  })
+  if (miniStarted.status !== 'IN_PROGRESS' || miniStarted.canStart || !miniStarted.canReport) throw new Error('mini 开始制芯状态或动作标识错误')
+  await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/start`, {
+    method: 'POST', headers: miniMemberHeaders, body: JSON.stringify({ versionNo: miniTask.versionNo }),
+  }, 409)
+  const miniReported = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/report`, {
+    method: 'POST', headers: miniMemberHeaders,
+    body: JSON.stringify({ versionNo: miniStarted.versionNo, qualifiedQuantity: 3, scrapQuantity: 1, defectReason: '缺角', shiftCode: miniShift.code, sandBatchCode: 'SAND-MINI-001', dryingRequired: true, remark: '小程序报工' }),
+  })
+  if (miniReported.report.operatorName !== miniMember.name || miniReported.batch.status !== 'UNDRIED') throw new Error('mini 报工操作人或待烘干批次错误')
+  const dryingBatches = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/drying-batches`, { headers: miniMemberHeaders })
+  if (dryingBatches.length !== 1 || dryingBatches[0].id !== miniReported.batch.id || !dryingBatches[0].canDry) throw new Error('mini 待烘干批次列表错误')
+  const detailAfterReport = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}`, { headers: miniMemberHeaders })
+  if (!detailAfterReport.canDry || detailAfterReport.batches.length !== 1) throw new Error('mini 制芯详情未开放可用的烘干动作')
+  await request(baseUrl, `/mini/production/core-batches/${miniReported.batch.id}/dry`, {
+    method: 'POST', headers: miniOutsiderHeaders, body: JSON.stringify({ versionNo: miniReported.batch.versionNo, equipmentCode: dryer.code }),
+  }, 404)
+  const miniDried = await request(baseUrl, `/mini/production/core-batches/${miniReported.batch.id}/dry`, {
+    method: 'POST', headers: miniMemberHeaders, body: JSON.stringify({ versionNo: miniReported.batch.versionNo, equipmentCode: dryer.code }),
+  })
+  if (miniDried.status !== 'WARNING' || miniDried.dryingEquipmentCode !== dryer.code || !miniDried.expiresAt || Math.abs(hoursBetween(miniDried.expiresAt, miniDried.driedAt) - 2) > 0.0001) {
+    throw new Error('mini 烘干未使用真实设备或未由后端计算失效时间')
+  }
+  await request(baseUrl, `/mini/production/core-batches/${miniReported.batch.id}/dry`, {
+    method: 'POST', headers: miniMemberHeaders, body: JSON.stringify({ versionNo: miniReported.batch.versionNo, equipmentCode: dryer.code }),
+  }, 409)
+  const detailAfterDry = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}`, { headers: miniMemberHeaders })
+  if (detailAfterDry.canDry) throw new Error('批次烘干后 mini 制芯详情仍错误开放烘干动作')
 
   const { task: resourceTask } = await createTask()
   await prisma.furnace.update({ where: { code: equipment.code }, data: { status: '停用' } })
@@ -554,7 +663,7 @@ try {
   await request(baseUrl, `/admin/production/core-batches/${secondReport.batch.id}/dry`, { method: 'POST', headers, body: JSON.stringify([]) }, 400)
   await request(baseUrl, `/admin/production/core-batches/${secondReport.batch.id}/scrap`, { method: 'POST', headers, body: JSON.stringify({ versionNo: 'bad', reason: 'x' }) }, 400)
 
-  console.log(JSON.stringify({ ok: true, assertions: 50, batches: mainCounts[1] + 3 }))
+  console.log(JSON.stringify({ ok: true, assertions: 69, batches: mainCounts[1] + 3 }))
 } catch (error) {
   testError = error
 } finally {

@@ -124,3 +124,102 @@ export interface HeatExecutionOptions {
   furnaces: Array<{ code: string; name: string; equipmentType: string; capacity: number | null; capacityUnit: string; isPlanned: boolean }>
   transferDevices: Array<{ code: string; name: string; equipmentType: string }>
 }
+
+export type CoreTaskStatus = 'PENDING_DISPATCH' | 'WAITING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELED'
+export type CoreBatchStatus = 'UNDRIED' | 'AVAILABLE' | 'WARNING' | 'EXPIRED' | 'LOCKED' | 'SCRAPPED' | 'CONSUMED'
+
+export interface CoreProductionReport {
+  id: string
+  taskId: string
+  equipmentCode: string
+  equipmentName: string
+  teamCode: string
+  teamName: string
+  shiftCode: string
+  operatorName: string
+  sandBatchCode: string
+  qualifiedQuantity: number
+  scrapQuantity: number
+  defectReason: string
+  dryingRequired: boolean
+  remark: string
+  reportedAt: string
+  createdAt: string
+  batch: { id: string; code: string; status: CoreBatchStatus; versionNo: number; dryingRequired: boolean } | null
+}
+
+export interface CoreInventoryBatch {
+  id: string
+  code: string
+  taskId: string
+  taskCode: string
+  coreBoxCode: string
+  coreBoxName: string
+  initialQuantity: number
+  currentQuantity: number
+  dryingRequired: boolean
+  driedAt: string
+  dryingEquipmentCode: string
+  dryingEquipmentName: string
+  shelfLifeHours: number | null
+  shelfLifeStartedAt: string
+  expiresAt: string
+  status: CoreBatchStatus
+  versionNo: number
+  createdAt: string
+  canDry: boolean
+  statusText?: string
+  createdAtText?: string
+  expiresAtText?: string
+}
+
+export interface MobileCoreTask {
+  id: string
+  code: string
+  workOrderId: string
+  workOrderCode: string
+  productCode: string
+  productName: string
+  operationName: string
+  coreBoxCode: string
+  coreBoxName: string
+  moldCode: string
+  moldName: string
+  quantityPerProduct: number
+  cavityCount: number
+  shelfLifeHours: number | null
+  plannedQuantity: number
+  plannedPressCount: number
+  equipmentCode: string
+  equipmentName: string
+  teamCode: string
+  teamName: string
+  plannedStartAt: string
+  qualifiedQuantity: number
+  scrapQuantity: number
+  status: CoreTaskStatus
+  versionNo: number
+  remark: string
+  startedAt: string
+  completedAt: string
+  createdAt: string
+  canStart: boolean
+  canReport: boolean
+  canDry: boolean
+  reports: CoreProductionReport[]
+  batches: CoreInventoryBatch[]
+  statusText?: string
+  statusTone?: string
+  plannedStartText?: string
+}
+
+export interface CoreExecutionOptions {
+  shifts: Array<{ code: string; name: string; status: string }>
+  dryingEquipment: Array<{ code: string; name: string; equipmentType: string; workshopCode: string; workshopName: string }>
+}
+
+export interface CoreReportResult {
+  task: MobileCoreTask
+  report: CoreProductionReport
+  batch: CoreInventoryBatch
+}

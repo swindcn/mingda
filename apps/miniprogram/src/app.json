@@ -11,7 +11,11 @@
     "pages/heat/detail/index",
     "pages/heat/start/index",
     "pages/heat/transfer/index",
-    "pages/heat/complete/index"
+    "pages/heat/complete/index",
+    "pages/core/list/index",
+    "pages/core/detail/index",
+    "pages/core/report/index",
+    "pages/core/dry/index"
   ],
   "window": {
     "navigationBarTitleText": "闽大铸件",

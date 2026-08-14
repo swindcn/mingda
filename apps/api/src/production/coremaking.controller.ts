@@ -112,3 +112,44 @@ export class CoremakingController {
     return this.coremaking.scrapBatch(request, id, body)
   }
 }
+
+@Controller('mini/production')
+@UseGuards(AdminAuthGuard, ProductionPermissionGuard)
+export class MobileCoremakingController {
+  constructor(private readonly coremaking: CoremakingService) {}
+
+  @Get('core-tasks')
+  list(@Req() request: RequestWithAdmin, @Query('status') status?: string) {
+    return this.coremaking.listTasks(request, { status }, true)
+  }
+
+  @Get('core-tasks/:id')
+  detail(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.coremaking.getTask(request, id, true)
+  }
+
+  @Get('core-tasks/:id/execution-options')
+  executionOptions(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.coremaking.getCoreTaskOptions(request, id, true)
+  }
+
+  @Get('core-tasks/:id/drying-batches')
+  dryingBatches(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.coremaking.listDryingBatches(request, id)
+  }
+
+  @Post('core-tasks/:id/start')
+  start(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: StartCoreTaskBody) {
+    return this.coremaking.startTask(request, id, body, true)
+  }
+
+  @Post('core-tasks/:id/report')
+  report(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: ReportCoreTaskBody) {
+    return this.coremaking.reportTask(request, id, body, true)
+  }
+
+  @Post('core-batches/:id/dry')
+  dry(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: DryCoreBatchBody) {
+    return this.coremaking.dryBatch(request, id, body, true)
+  }
+}

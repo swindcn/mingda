@@ -40,6 +40,10 @@
         <view class="feature-icon heat-feature-icon">火</view>
         <view class="feature-text">熔炼任务</view>
       </view>
+      <view wx:if="{{canViewCoreTasks}}" class="feature-card" bindtap="goCoreTasks">
+        <view class="feature-icon core-feature-icon">芯</view>
+        <view class="feature-text">制芯任务</view>
+      </view>
     </view>
   </view>
 </view>
