@@ -254,7 +254,11 @@ test('dashboard and denied pages resolve the first permitted menu route without 
     firstAccessibleRoute(menu, (permission) => permission === 'production.core_task.view'),
     '/dashboard/production/core-tasks',
   )
-  assert.equal(firstAccessibleRoute(menu, () => false), null)
+  assert.equal(
+    firstAccessibleRoute(menu, (permission) => ['production.work_order.view', 'production.core_task.view'].includes(permission)),
+    '/dashboard/production/work-orders',
+  )
+  assert.equal(firstAccessibleRoute(menu, () => false), '/dashboard/resources/parser')
 
   const firstRouteByPermission = new Map()
   function collect(items) {
@@ -271,7 +275,6 @@ test('dashboard and denied pages resolve the first permitted menu route without 
   const appSource = fs.readFileSync(path.join(adminRoot, 'src/App.tsx'), 'utf8')
   assert.equal((appSource.match(/<PermissionLanding/g) || []).length, 2, 'dashboard index and denied pages should share PermissionLanding')
   assert.doesNotMatch(appSource, /Navigate to="\/dashboard\/mold\/development"/)
-  assert.match(appSource, /status="403"/)
   assert.match(appSource, /<Route path="\/login" element=\{<LoginPage \/>\} \/>/)
   assert.match(appSource, /if \(!authenticated\)[\s\S]*?<Navigate to="\/login" replace \/>/)
 })

@@ -257,7 +257,7 @@ export function firstAccessibleRoute(
     if (item.children?.length) {
       const childRoute = firstAccessibleRoute(item.children, canAccess)
       if (childRoute) return childRoute
-    } else if (item.permission && canAccess(item.permission)) {
+    } else if (!item.permission || canAccess(item.permission)) {
       return item.key
     }
   }
