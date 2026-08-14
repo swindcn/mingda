@@ -5,6 +5,7 @@ import { getAdminContext, hasAdminPermission, visibleOwnershipEntityIds, type Ad
 import { calculateCoreBatchExpiresAt, calculateCoreDemand, calculatePressCount, coreBatchStatus } from './coremaking.calculations'
 import type {
   CancelCoreTaskBody,
+  CoreInventoryQuery,
   CoreTaskInput,
   CoreTaskPreviewBody,
   CreateCoreTasksBody,
@@ -40,6 +41,12 @@ function requiredInteger(value: unknown, label: string, minimum: number) {
 function requiredBoolean(value: unknown, label: string) {
   if (typeof value !== 'boolean') throw new BadRequestException(`${label}必须为布尔值`)
   return value
+}
+
+function positiveInteger(value: unknown, fallback: number, maximum?: number) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) return fallback
+  return maximum === undefined ? parsed : Math.min(parsed, maximum)
 }
 
 function textValue(value: unknown, label: string, required = false) {
@@ -78,6 +85,12 @@ function isSerializableConflict(error: unknown) {
   return error.code === 'P2010' && String(error.meta?.code || '') === '40001'
 }
 
+function isBatchCodeConflict(error: unknown) {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return false
+  const target = error.meta?.target
+  return Array.isArray(target) && target.length === 1 && target[0] === 'code'
+}
+
 function requestBody(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('请求体格式不正确')
   return value as Record<string, unknown>
@@ -111,14 +124,14 @@ export class CoremakingService {
     }
   }
 
-  private batchInclude() {
+  private batchInclude(includeLedgers = true) {
     return {
       report: { include: { task: { select: { id: true, code: true, workOrderId: true, status: true } } } },
       driedBy: { select: { id: true, name: true } },
       dryingEquipment: { select: { code: true, name: true, equipmentType: true } },
       lockedBy: { select: { id: true, name: true } },
       scrappedBy: { select: { id: true, name: true } },
-      ledgers: { orderBy: { createdAt: 'asc' as const } },
+      ...(includeLedgers ? { ledgers: { orderBy: { createdAt: 'asc' as const } } } : {}),
     }
   }
 
@@ -306,7 +319,7 @@ export class CoremakingService {
   private async nextBatchCode(tx: Prisma.TransactionClient, coreBoxCode: string, shiftCode: string, reportedAt: Date) {
     const current = businessDate(reportedAt)
     const documentType = `CORE_BATCH:${coreBoxCode}:${shiftCode}`
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 999; attempt += 1) {
       const [sequence] = await tx.$queryRaw<Array<{ currentValue: number }>>(Prisma.sql`
         INSERT INTO "DocumentSequence" ("documentType", "businessDate", "currentValue", "updatedAt")
         VALUES (${documentType}, ${current.date}, 1, CURRENT_TIMESTAMP)
@@ -322,13 +335,18 @@ export class CoremakingService {
     throw new ConflictException('砂芯批次编码生成冲突，请重试')
   }
 
-  private async serializable<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+  private async serializable<T>(
+    operation: (tx: Prisma.TransactionClient) => Promise<T>,
+    options: { maxAttempts?: number; retryBatchCodeConflict?: boolean } = {},
+  ) {
+    const maxAttempts = options.maxAttempts || 3
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
         return await this.prisma.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
       } catch (error) {
-        if (isSerializableConflict(error)) {
-          if (attempt < 2) continue
+        const retryable = isSerializableConflict(error) || (options.retryBatchCodeConflict && isBatchCodeConflict(error))
+        if (retryable) {
+          if (attempt < maxAttempts - 1) continue
           throw new ConflictException('数据并发冲突，请重试')
         }
         throw error
@@ -588,7 +606,7 @@ export class CoremakingService {
   }
 
   private batchDto(record: any) {
-    return {
+    const result = {
       id: record.id,
       code: record.code,
       qrContent: record.qrContent,
@@ -621,7 +639,11 @@ export class CoremakingService {
       scrapReason: record.scrapReason || '',
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
-      ledgers: (record.ledgers || []).map((item: any) => ({
+    }
+    if (!Array.isArray(record.ledgers)) return result
+    return {
+      ...result,
+      ledgers: record.ledgers.map((item: any) => ({
         id: item.id,
         action: item.action,
         quantityChange: item.quantityChange,
@@ -639,6 +661,22 @@ export class CoremakingService {
     return record
   }
 
+  private async refreshBatchStatus(id: string) {
+    const current = await this.prisma.coreInventoryBatch.findUnique({
+      where: { id },
+      select: { id: true, status: true, expiresAt: true },
+    })
+    if (!current) throw new NotFoundException('砂芯批次不存在')
+    const status = this.liveBatchStatus(current, new Date())
+    if (status !== current.status) {
+      await this.prisma.coreInventoryBatch.updateMany({
+        where: { id, status: current.status },
+        data: { status },
+      })
+    }
+    return this.findBatch(id)
+  }
+
   private async assertBatchVisible(request: RequestWithAdmin, id: string) {
     const batch = await this.prisma.coreInventoryBatch.findUnique({
       where: { id },
@@ -651,6 +689,49 @@ export class CoremakingService {
   private liveBatchStatus(record: { status: CoreBatchStatus; expiresAt: Date | null }, now: Date) {
     if (!['AVAILABLE', 'WARNING', 'EXPIRED'].includes(record.status)) return record.status
     return coreBatchStatus(now, record.expiresAt) as CoreBatchStatus
+  }
+
+  private async refreshInventoryStatuses(where: Prisma.CoreInventoryBatchWhereInput) {
+    const now = new Date()
+    const candidates = await this.prisma.coreInventoryBatch.findMany({
+      where: { AND: [where, { status: { in: ['AVAILABLE', 'WARNING', 'EXPIRED'] } }] },
+      select: { id: true, status: true, expiresAt: true },
+    })
+    const groups = new Map<string, { from: CoreBatchStatus; to: CoreBatchStatus; ids: string[] }>()
+    for (const batch of candidates) {
+      const status = this.liveBatchStatus(batch, now)
+      if (status === batch.status) continue
+      const key = `${batch.status}:${status}`
+      const group = groups.get(key) || { from: batch.status, to: status, ids: [] }
+      group.ids.push(batch.id)
+      groups.set(key, group)
+    }
+    const updates = Array.from(groups.values()).map((group) => this.prisma.coreInventoryBatch.updateMany({
+      where: { id: { in: group.ids }, status: group.from },
+      data: { status: group.to },
+    }))
+    if (updates.length) await this.prisma.$transaction(updates)
+  }
+
+  private async validateStartResources(
+    tx: Prisma.TransactionClient,
+    task: { routingNodeId: string; equipmentCode: string | null; teamCode: string | null },
+  ) {
+    if (!task.equipmentCode || !task.teamCode) throw new BadRequestException('制芯任务缺少完整派工信息')
+    const [equipmentLink, team] = await Promise.all([
+      tx.routingNodeEquipment.findUnique({
+        where: { routingNodeId_equipmentCode: { routingNodeId: task.routingNodeId, equipmentCode: task.equipmentCode } },
+        include: { equipment: { include: { workshop: true } } },
+      }),
+      tx.team.findUnique({ where: { code: task.teamCode }, include: { workshop: true } }),
+    ])
+    if (!equipmentLink) throw new BadRequestException('派工设备已解除当前制芯工序绑定，不能开始任务')
+    const equipment = equipmentLink.equipment
+    if (equipment.status !== '启用') throw new BadRequestException('派工设备已停用，不能开始任务')
+    if (!equipment.workshop || equipment.workshop.status !== '启用') throw new BadRequestException('派工设备所属车间不存在或已停用')
+    if (!team || team.status !== '启用') throw new BadRequestException('派工班组不存在或已停用，不能开始任务')
+    if (team.workshop.status !== '启用') throw new BadRequestException('派工班组所属车间已停用')
+    if (team.workshopCode !== equipment.workshopCode) throw new BadRequestException('派工设备与班组不属于同一车间')
   }
 
   async startTask(request: RequestWithAdmin, id: string, value: StartCoreTaskBody | unknown) {
@@ -672,6 +753,7 @@ export class CoremakingService {
       if (current.status !== 'WAITING' || !current.equipmentCode || !current.teamCode || !current.plannedStartAt) {
         throw new ConflictException('仅已完成派工的待生产任务可以开始')
       }
+      await this.validateStartResources(tx, current)
       const result = await tx.coreProductionTask.updateMany({
         where: { id, versionNo, status: 'WAITING' },
         data: { status: 'IN_PROGRESS', startedByUserId: user.id, startedAt: new Date(), versionNo: { increment: 1 } },
@@ -768,7 +850,7 @@ export class CoremakingService {
           shelfLifeHoursSnapshot: current.shelfLifeHoursSnapshot,
           shelfLifeStartedAt: dryingRequired ? null : reportedAt,
           expiresAt,
-          status: dryingRequired ? 'UNDRIED' : 'AVAILABLE',
+          status: dryingRequired ? 'UNDRIED' : coreBatchStatus(reportedAt, expiresAt),
         },
       })
       await tx.coreInventoryLedger.create({
@@ -784,8 +866,11 @@ export class CoremakingService {
         },
       })
       return report.id
-    })
+    }, { maxAttempts: 5, retryBatchCodeConflict: true })
 
+    const created = await this.prisma.coreProductionReport.findUnique({ where: { id: reportId }, select: { batch: { select: { id: true } } } })
+    if (!created?.batch) throw new NotFoundException('报工库存批次不存在')
+    await this.refreshBatchStatus(created.batch.id)
     const report = await this.prisma.coreProductionReport.findUnique({ where: { id: reportId }, include: { batch: { include: this.batchInclude() } } })
     if (!report?.batch) throw new NotFoundException('报工库存批次不存在')
     return {
@@ -795,28 +880,48 @@ export class CoremakingService {
     }
   }
 
-  async listInventory(request: RequestWithAdmin) {
+  async listInventory(request: RequestWithAdmin, query: CoreInventoryQuery) {
     const taskIds = await visibleOwnershipEntityIds(this.prisma, getAdminContext(request), 'production:core_tasks')
-    if (taskIds?.length === 0) return []
-    const where = taskIds ? { report: { taskId: { in: taskIds } } } : {}
-    const now = new Date()
-    const candidates = await this.prisma.coreInventoryBatch.findMany({
-      where: { ...where, status: { in: ['AVAILABLE', 'WARNING', 'EXPIRED'] } },
-      select: { id: true, status: true, expiresAt: true },
-    })
-    await this.prisma.$transaction(candidates.map((batch) => {
-      const status = this.liveBatchStatus(batch, now)
-      return this.prisma.coreInventoryBatch.updateMany({
-        where: { id: batch.id, status: batch.status },
-        data: { status },
-      })
-    }))
-    const records = await this.prisma.coreInventoryBatch.findMany({
-      where,
-      include: this.batchInclude(),
-      orderBy: [{ createdAt: 'desc' }, { code: 'desc' }],
-    })
-    return records.map((record) => this.batchDto(record))
+    const page = positiveInteger(query.page, 1)
+    const pageSize = positiveInteger(query.pageSize, 20, 100)
+    if (taskIds?.length === 0) return { items: [], page, pageSize, total: 0, totalPages: 0 }
+    const visibilityWhere: Prisma.CoreInventoryBatchWhereInput = taskIds ? { report: { taskId: { in: taskIds } } } : {}
+    await this.refreshInventoryStatuses(visibilityWhere)
+    const keyword = query.keyword?.trim()
+    const status = query.status && query.status !== 'ALL' && Object.values(CoreBatchStatus).includes(query.status as CoreBatchStatus)
+      ? query.status as CoreBatchStatus
+      : undefined
+    const where: Prisma.CoreInventoryBatchWhereInput = {
+      AND: [
+        visibilityWhere,
+        ...(status ? [{ status }] : []),
+        ...(keyword ? [{ OR: [
+          { code: { contains: keyword, mode: 'insensitive' as const } },
+          { coreBoxCodeSnapshot: { contains: keyword, mode: 'insensitive' as const } },
+          { coreBoxNameSnapshot: { contains: keyword, mode: 'insensitive' as const } },
+          { productCodeSnapshot: { contains: keyword, mode: 'insensitive' as const } },
+          { productNameSnapshot: { contains: keyword, mode: 'insensitive' as const } },
+          { workOrderCodeSnapshot: { contains: keyword, mode: 'insensitive' as const } },
+          { report: { task: { code: { contains: keyword, mode: 'insensitive' as const } } } },
+        ] }] : []),
+      ],
+    }
+    const [total, records] = await Promise.all([
+      this.prisma.coreInventoryBatch.count({ where }),
+      this.prisma.coreInventoryBatch.findMany({
+        where,
+        include: this.batchInclude(false),
+        orderBy: [{ createdAt: 'desc' }, { code: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ])
+    return { items: records.map((record) => this.batchDto(record)), page, pageSize, total, totalPages: Math.ceil(total / pageSize) }
+  }
+
+  async getInventoryBatch(request: RequestWithAdmin, id: string) {
+    await this.assertBatchVisible(request, id)
+    return this.batchDto(await this.refreshBatchStatus(id))
   }
 
   async dryBatch(request: RequestWithAdmin, id: string, value: DryCoreBatchBody | unknown) {
@@ -846,13 +951,13 @@ export class CoremakingService {
           dryingEquipmentNameSnapshot: equipment.name,
           shelfLifeStartedAt: driedAt,
           expiresAt,
-          status: 'AVAILABLE',
+          status: coreBatchStatus(driedAt, expiresAt),
           versionNo: { increment: 1 },
         },
       })
       if (!updated.count) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
     })
-    return this.batchDto(await this.findBatch(id))
+    return this.batchDto(await this.refreshBatchStatus(id))
   }
 
   async lockBatch(request: RequestWithAdmin, id: string, value: LockCoreBatchBody | unknown) {

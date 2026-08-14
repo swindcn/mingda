@@ -4,6 +4,7 @@ import type { RequestWithAdmin } from '../shared/admin-context'
 import { CoremakingService } from './coremaking.service'
 import type {
   CancelCoreTaskBody,
+  CoreInventoryQuery,
   CreateCoreTasksBody,
   DispatchCoreTaskBody,
   DryCoreBatchBody,
@@ -67,8 +68,13 @@ export class CoremakingController {
   }
 
   @Get('core-inventory')
-  inventory(@Req() request: RequestWithAdmin) {
-    return this.coremaking.listInventory(request)
+  inventory(@Req() request: RequestWithAdmin, @Query() query: CoreInventoryQuery) {
+    return this.coremaking.listInventory(request, query)
+  }
+
+  @Get('core-inventory/:id')
+  inventoryDetail(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.coremaking.getInventoryBatch(request, id)
   }
 
   @Post('core-batches/:id/dry')

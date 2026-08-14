@@ -117,6 +117,25 @@ try {
   const admin = await prisma.user.create({
     data: { username: 'admin', phone: '13665068911', name: '系统管理员', passwordHash: hashPassword('13665068911'), userType: 'SUPER_ADMIN' },
   })
+  const restrictedUsername = `${prefix}-RESTRICTED`
+  const restrictedRole = await prisma.role.create({
+    data: {
+      name: `${prefix}-INVENTORY-VIEWER`,
+      app: 'admin',
+      dataScope: 'OWN',
+      dataScopes: ['OWN'],
+      permissions: ['production.core_inventory.view'],
+    },
+  })
+  await prisma.user.create({
+    data: {
+      username: restrictedUsername,
+      phone: `CORE-${stamp}`,
+      name: '受限库存查看员',
+      passwordHash: hashPassword('123456'),
+      roles: { create: { roleId: restrictedRole.id } },
+    },
+  })
   const grade = await prisma.materialGrade.create({ data: { code: `${prefix}-GRADE`, name: '测试灰铁', status: '启用' } })
   const workshop = await prisma.workshop.create({ data: { code: `${prefix}-WS`, name: '测试制芯车间', type: '制芯', status: '启用' } })
   const team = await prisma.team.create({ data: { code: `${prefix}-TEAM`, name: '制芯一班', workshopCode: workshop.code, leaderUserId: admin.id, status: '启用' } })
@@ -152,11 +171,11 @@ try {
   let workOrderSerial = 0
   let taskSerial = 0
   async function createTask({ coreBox = dryCoreBox, shelfLifeHours = 2, plannedQuantity = 10, status = 'WAITING', productionStatus = 'RELEASED' } = {}) {
-    workOrderSerial += 1
-    taskSerial += 1
+    const workOrderNumber = ++workOrderSerial
+    const taskNumber = ++taskSerial
     const workOrder = await prisma.workOrder.create({
       data: {
-        code: `${prefix}-WO-${workOrderSerial}`, productCode: product.code, productCodeSnapshot: product.code, productNameSnapshot: product.name,
+        code: `${prefix}-WO-${workOrderNumber}`, productCode: product.code, productCodeSnapshot: product.code, productNameSnapshot: product.name,
         bomVersionId: bomVersion.id, bomCodeSnapshot: bom.code, bomVersionSnapshot: bomVersion.version,
         routingVersionId: routingVersion.id, routingCodeSnapshot: routing.code, routingNameSnapshot: routing.name, routingVersionSnapshot: routingVersion.version,
         materialGradeCode: grade.code, materialGradeNameSnapshot: grade.name, plannedQuantity, plannedDeliveryDate: new Date('2026-09-01T00:00:00Z'),
@@ -167,7 +186,7 @@ try {
     })
     const task = await prisma.coreProductionTask.create({
       data: {
-        code: `${prefix}-TASK-${taskSerial}`, workOrderId: workOrder.id, bomVersionId: bomVersion.id, routingNodeId: node.id, coreBoxCode: coreBox.code,
+        code: `${prefix}-TASK-${taskNumber}`, workOrderId: workOrder.id, bomVersionId: bomVersion.id, routingNodeId: node.id, coreBoxCode: coreBox.code,
         productCodeSnapshot: product.code, productNameSnapshot: product.name, workOrderCodeSnapshot: workOrder.code,
         bomCodeSnapshot: bom.code, bomVersionSnapshot: bomVersion.version, routingCodeSnapshot: routing.code, routingVersionSnapshot: routingVersion.version,
         operationCodeSnapshot: operation.code, operationNameSnapshot: operation.name, coreBoxNameSnapshot: coreBox.name,
@@ -195,6 +214,24 @@ try {
   await waitForHealth(baseUrl)
   const login = await request(baseUrl, '/auth/login', { method: 'POST', body: JSON.stringify({ username: 'admin', password: '13665068911' }) })
   const headers = { authorization: `Bearer ${login.token}` }
+  const restrictedLogin = await request(baseUrl, '/auth/login', { method: 'POST', body: JSON.stringify({ username: restrictedUsername, password: '123456' }) })
+  const restrictedHeaders = { authorization: `Bearer ${restrictedLogin.token}` }
+
+  const { task: resourceTask } = await createTask()
+  await prisma.furnace.update({ where: { code: equipment.code }, data: { status: '停用' } })
+  await request(baseUrl, `/admin/production/core-tasks/${resourceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: resourceTask.versionNo }) }, 400)
+  await prisma.furnace.update({ where: { code: equipment.code }, data: { status: '启用' } })
+  await prisma.team.update({ where: { code: team.code }, data: { status: '停用' } })
+  await request(baseUrl, `/admin/production/core-tasks/${resourceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: resourceTask.versionNo }) }, 400)
+  await prisma.team.update({ where: { code: team.code }, data: { status: '启用' } })
+  await prisma.workshop.update({ where: { code: workshop.code }, data: { status: '停用' } })
+  await request(baseUrl, `/admin/production/core-tasks/${resourceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: resourceTask.versionNo }) }, 400)
+  await prisma.workshop.update({ where: { code: workshop.code }, data: { status: '启用' } })
+  await prisma.routingNodeEquipment.delete({ where: { routingNodeId_equipmentCode: { routingNodeId: node.id, equipmentCode: equipment.code } } })
+  await request(baseUrl, `/admin/production/core-tasks/${resourceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: resourceTask.versionNo }) }, 400)
+  await prisma.routingNodeEquipment.create({ data: { routingNodeId: node.id, equipmentCode: equipment.code } })
+  const resourceStarted = await request(baseUrl, `/admin/production/core-tasks/${resourceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: resourceTask.versionNo }) })
+  if (resourceStarted.status !== 'IN_PROGRESS') throw new Error('资源恢复后制芯任务仍无法开始')
 
   const { task: mainTask } = await createTask()
   const started = await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: mainTask.versionNo }) })
@@ -231,7 +268,7 @@ try {
   const dried = await request(baseUrl, `/admin/production/core-batches/${firstReport.batch.id}/dry`, {
     method: 'POST', headers, body: JSON.stringify({ versionNo: firstReport.batch.versionNo, equipmentCode: dryer.code }),
   })
-  if (dried.status !== 'AVAILABLE' || dried.dryingEquipmentCode !== dryer.code || !dried.driedAt || Math.abs(hoursBetween(dried.expiresAt, dried.driedAt) - 2) > 0.0001) {
+  if (dried.status !== 'WARNING' || dried.dryingEquipmentCode !== dryer.code || !dried.driedAt || Math.abs(hoursBetween(dried.expiresAt, dried.driedAt) - 2) > 0.0001) {
     throw new Error('烘干确认未正确记录设备、状态或保质期')
   }
   await request(baseUrl, `/admin/production/core-batches/${secondReport.batch.id}/dry`, {
@@ -247,11 +284,28 @@ try {
     method: 'POST', headers,
     body: JSON.stringify({ versionNo: directStarted.versionNo, qualifiedQuantity: 3, scrapQuantity: 0, shiftCode: shift.code, dryingRequired: false }),
   })
-  if (directReport.batch.status !== 'AVAILABLE' || directReport.batch.shelfLifeStartedAt !== directReport.report.reportedAt || Math.abs(hoursBetween(directReport.batch.expiresAt, directReport.report.reportedAt) - 8.5) > 0.0001) {
+  if (directReport.batch.status !== 'WARNING' || directReport.batch.shelfLifeStartedAt !== directReport.report.reportedAt || Math.abs(hoursBetween(directReport.batch.expiresAt, directReport.report.reportedAt) - 8.5) > 0.0001) {
     throw new Error('免烘干批次状态或保质期起点错误')
   }
-  const warningInventory = await request(baseUrl, '/admin/production/core-inventory', { headers })
-  if (warningInventory.find((item) => item.id === directReport.batch.id)?.status !== 'WARNING') throw new Error('库存查询未实时刷新预警状态')
+  const warningBefore = await prisma.coreInventoryBatch.findUnique({ where: { id: directReport.batch.id }, select: { updatedAt: true } })
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
+  const warningInventory = await request(baseUrl, `/admin/production/core-inventory?page=1&pageSize=2&status=WARNING&keyword=${encodeURIComponent(directCoreBox.code)}`, { headers })
+  if (!Array.isArray(warningInventory.items) || warningInventory.items.length !== 1 || warningInventory.items[0].id !== directReport.batch.id) {
+    throw new Error('库存分页状态或关键词筛选错误')
+  }
+  if (warningInventory.page !== 1 || warningInventory.pageSize !== 2 || warningInventory.total !== 1 || warningInventory.totalPages !== 1) {
+    throw new Error('库存分页元数据错误')
+  }
+  if ('ledgers' in warningInventory.items[0]) throw new Error('库存列表不应加载完整流水')
+  const warningDetail = await request(baseUrl, `/admin/production/core-inventory/${directReport.batch.id}`, { headers })
+  if (warningDetail.id !== directReport.batch.id || !Array.isArray(warningDetail.ledgers) || !warningDetail.ledgers.some((item) => item.action === 'PRODUCED')) {
+    throw new Error('库存详情未返回完整流水')
+  }
+  await request(baseUrl, `/admin/production/core-inventory/${directReport.batch.id}`, { headers: restrictedHeaders }, 404)
+  const warningAfter = await prisma.coreInventoryBatch.findUnique({ where: { id: directReport.batch.id }, select: { updatedAt: true } })
+  if (warningBefore?.updatedAt.getTime() !== warningAfter?.updatedAt.getTime()) throw new Error('库存列表对未变化状态执行了无效更新')
+  const cappedInventory = await request(baseUrl, '/admin/production/core-inventory?page=1&pageSize=1000', { headers })
+  if (cappedInventory.pageSize !== 100 || !Array.isArray(cappedInventory.items)) throw new Error('库存分页上限未生效')
 
   const { task: overTask } = await createTask({ plannedQuantity: 5 })
   const overStarted = await request(baseUrl, `/admin/production/core-tasks/${overTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: overTask.versionNo }) })
@@ -275,6 +329,45 @@ try {
     prisma.coreInventoryLedger.count({ where: { batch: { report: { taskId: raceTask.id } } } }),
   ])
   if (raceCounts.some((count) => count !== 1)) throw new Error(`并发报工产生重复记录: ${raceCounts.join('/')}`)
+
+  const collisionTasks = await Promise.all([createTask({ plannedQuantity: 2 }), createTask({ plannedQuantity: 2 })])
+  for (const { task } of collisionTasks) {
+    const collisionStarted = await request(baseUrl, `/admin/production/core-tasks/${task.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: task.versionNo }) })
+    await request(baseUrl, `/admin/production/core-tasks/${task.id}/report`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ versionNo: collisionStarted.versionNo, qualifiedQuantity: 1, scrapQuantity: 0, shiftCode: shift.code, dryingRequired: false }),
+    })
+  }
+  await prisma.documentSequence.update({
+    where: { documentType_businessDate: { documentType: batchSequence.documentType, businessDate: batchSequence.businessDate } },
+    data: { currentValue: 0 },
+  })
+  const { task: skippedTask } = await createTask({ plannedQuantity: 2 })
+  const skippedStarted = await request(baseUrl, `/admin/production/core-tasks/${skippedTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: skippedTask.versionNo }) })
+  const skippedReport = await request(baseUrl, `/admin/production/core-tasks/${skippedTask.id}/report`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ versionNo: skippedStarted.versionNo, qualifiedQuantity: 1, scrapQuantity: 0, shiftCode: shift.code, dryingRequired: false }),
+  })
+  if (!skippedReport.batch.code.endsWith('-007')) throw new Error(`未跳过连续六个历史批次编码: ${skippedReport.batch.code}`)
+
+  const crossTaskRecords = await Promise.all([createTask({ plannedQuantity: 2 }), createTask({ plannedQuantity: 2 })])
+  const crossTaskStarted = await Promise.all(crossTaskRecords.map(({ task }) => request(
+    baseUrl,
+    `/admin/production/core-tasks/${task.id}/start`,
+    { method: 'POST', headers, body: JSON.stringify({ versionNo: task.versionNo }) },
+  )))
+  const crossTaskReports = await Promise.all(crossTaskRecords.map(({ task }, index) => request(
+    baseUrl,
+    `/admin/production/core-tasks/${task.id}/report`,
+    {
+      method: 'POST', headers,
+      body: JSON.stringify({ versionNo: crossTaskStarted[index].versionNo, qualifiedQuantity: 1, scrapQuantity: 0, shiftCode: shift.code, dryingRequired: false }),
+    },
+  )))
+  if (new Set(crossTaskReports.map((item) => item.batch.code)).size !== 2) throw new Error('跨任务并发报工生成重复批次编码')
+  const crossBatchIds = crossTaskReports.map((item) => item.batch.id)
+  const crossLedgers = await prisma.coreInventoryLedger.count({ where: { batchId: { in: crossBatchIds }, action: 'PRODUCED' } })
+  if (crossLedgers !== 2) throw new Error('跨任务并发报工未分别生成库存流水')
 
   const { task: exhaustedTask } = await createTask({ plannedQuantity: 2 })
   const exhaustedStarted = await request(baseUrl, `/admin/production/core-tasks/${exhaustedTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: exhaustedTask.versionNo }) })
@@ -318,8 +411,8 @@ try {
   if (!scrapLedger || scrapLedger.quantityChange !== -3 || scrapLedger.quantityAfter !== 0) throw new Error('报废流水数量语义错误')
 
   await prisma.coreInventoryBatch.update({ where: { id: dried.id }, data: { status: 'AVAILABLE', expiresAt: new Date(Date.now() - 60_000) } })
-  const inventory = await request(baseUrl, '/admin/production/core-inventory', { headers })
-  const expired = inventory.find((item) => item.id === dried.id)
+  const inventory = await request(baseUrl, '/admin/production/core-inventory?page=1&pageSize=100&status=EXPIRED', { headers })
+  const expired = inventory.items.find((item) => item.id === dried.id)
   if (!expired || expired.status !== 'EXPIRED' || expired.currentQuantity !== dried.currentQuantity) throw new Error('库存查询未实时刷新失效状态或错误清空数量')
   const persistedExpired = await prisma.coreInventoryBatch.findUnique({ where: { id: dried.id } })
   if (persistedExpired?.status !== 'EXPIRED') throw new Error('实时库存状态未持久化')

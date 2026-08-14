@@ -44,6 +44,13 @@ export interface ReportCoreTaskBody {
   remark?: string
 }
 
+export interface CoreInventoryQuery {
+  page?: string
+  pageSize?: string
+  status?: string
+  keyword?: string
+}
+
 export interface DryCoreBatchBody {
   versionNo?: number
   equipmentCode?: string
