@@ -133,6 +133,23 @@ const miniPermissionKeys = [
   'mini.production.core.dry',
 ]
 
+test('backend administrator defaults grant every coremaking permission', () => {
+  const expectedPermissions = [...adminPermissionKeys, ...miniPermissionKeys]
+  const defaultSources = [
+    'apps/api/src/basic-data.controller.ts',
+    'apps/api/src/mold-development.controller.ts',
+  ]
+
+  for (const relativePath of defaultSources) {
+    const permissions = literalModuleValues(sourceFile(relativePath)).get('adminPermissions')
+    assert.deepEqual(
+      expectedPermissions.filter((permission) => !permissions.includes(permission)),
+      [],
+      `${relativePath} should grant all coremaking permissions`,
+    )
+  }
+})
+
 test('coremaking permissions are selectable and granted to the default administrator', () => {
   const roles = literalModuleValues(sourceFile('apps/admin/src/utils/roles.ts'))
   const productionKeys = roles.get('productionPermissionKeys')
