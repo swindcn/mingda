@@ -28,6 +28,33 @@ export interface ModelingRecord {
   [key: string]: unknown
 }
 
+export interface MoldCoreBoxRecord {
+  id?: string
+  code: string
+  name: string
+  images: string[]
+  maxLife?: number
+  usedLife?: number
+  status: string
+  remark?: string
+}
+
+export interface MoldArchiveRecord extends ModelingRecord {
+  code: string
+  name: string
+  itemCode: string
+  moldType?: string
+  supplierCode?: string
+  supplierName?: string
+  specModel?: string
+  sourceMoldDevelopmentCode?: string
+  images: string[]
+  cavityCount?: number
+  maxLife?: number
+  usedLife?: number
+  coreBoxes: MoldCoreBoxRecord[]
+}
+
 export interface ModelingOptions {
   workshops: ModelingRecord[]
   lines: ModelingRecord[]

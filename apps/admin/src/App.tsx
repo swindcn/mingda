@@ -16,6 +16,7 @@ import { MoldDevelopmentPage } from './pages/mold/MoldDevelopmentPage'
 import { ShiftSchedulePage } from './pages/modeling/ShiftSchedulePage'
 import { RecipeManagementPage } from './pages/modeling/RecipeManagementPage'
 import { CastingBomManagementPage } from './pages/modeling/CastingBomManagementPage'
+import { MoldArchivePage } from './pages/modeling/MoldArchivePage'
 import { WorkshopLinePage } from './pages/modeling/WorkshopLinePage'
 import { OperationManagementPage } from './pages/modeling/OperationManagementPage'
 import { ProcessRoutingListPage } from './pages/modeling/ProcessRoutingListPage'
@@ -130,7 +131,7 @@ export default function App() {
         <Route path="model/material" element={protectedPage('model.material.view', createModelingPage(modelingPages[5]))} />
         <Route path="model/recipe" element={protectedPage('model.recipe.view', <RecipeManagementPage />)} />
         <Route path="model/bom" element={protectedPage('model.bom.view', <CastingBomManagementPage />)} />
-        <Route path="mold/model" element={protectedPage('mold.model.view', createModelingPage(modelingPages[7]))} />
+        <Route path="mold/model" element={protectedPage('mold.model.view', <MoldArchivePage />)} />
         <Route path="mold/corebox" element={protectedPage('mold.corebox.view', createModelingPage(modelingPages[8]))} />
         <Route path="model/shift" element={protectedPage('model.calendar.view', createModelingPage(modelingPages[9]))} />
         <Route path="model/calendar" element={protectedPage('model.calendar.view', createModelingPage(modelingPages[10]))} />
