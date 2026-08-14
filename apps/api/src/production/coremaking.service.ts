@@ -113,7 +113,7 @@ export class CoremakingService {
   private taskInclude() {
     return {
       workOrder: { select: { id: true, code: true, productionStatus: true } },
-      routingNode: { include: { operation: true, equipmentLinks: { include: { equipment: true } } } },
+      routingNode: { include: { operation: true, equipmentLinks: { include: { equipment: { include: { workshop: true } } } } } },
       coreBox: { include: { mold: true } },
       equipment: { include: { workshop: true } },
       team: { include: { workshop: true } },
@@ -256,6 +256,14 @@ export class CoremakingService {
     const rows = workOrder.bomVersion.coreBoxes
       .filter((item) => !existingCodes.has(item.coreBoxCode))
       .map((item) => this.previewRow(workOrder, item, inputByCode.get(item.coreBoxCode)))
+    const workshopCodes = Array.from(new Set(nodes.flatMap((node) => node.equipmentLinks
+      .filter((link) => link.equipment.status === '启用' && link.equipment.workshopCode)
+      .map((link) => link.equipment.workshopCode as string))))
+    const teams = workshopCodes.length ? await this.prisma.team.findMany({
+      where: { status: '启用', workshopCode: { in: workshopCodes } },
+      include: { workshop: true },
+      orderBy: { code: 'asc' },
+    }) : []
     return {
       workOrderId,
       workOrderCode: workOrder.code,
@@ -274,6 +282,13 @@ export class CoremakingService {
           workshopCode: link.equipment.workshopCode || '',
           workshopName: link.equipment.workshop?.name || '',
         })),
+      })),
+      teams: teams.map((team) => ({
+        code: team.code,
+        name: team.name,
+        status: team.status,
+        workshopCode: team.workshopCode,
+        workshopName: team.workshop.name,
       })),
     }
   }
@@ -532,15 +547,60 @@ export class CoremakingService {
     return records.map((record) => this.taskDto(record, user))
   }
 
-  private async findTask(id: string) {
-    const record = await this.prisma.coreProductionTask.findUnique({ where: { id }, include: this.taskInclude() })
+  private async findTask(id: string, includeReports = false) {
+    const record = await this.prisma.coreProductionTask.findUnique({
+      where: { id },
+      include: {
+        ...this.taskInclude(),
+        ...(includeReports ? { reports: { include: { batch: true }, orderBy: { reportedAt: 'desc' as const } } } : {}),
+      },
+    })
     if (!record) throw new NotFoundException('制芯任务不存在')
     return record
   }
 
   async getTask(request: RequestWithAdmin, id: string) {
     await this.assertTaskVisible(request, id)
-    return this.taskDto(await this.findTask(id), getAdminContext(request))
+    const record = await this.findTask(id, true)
+    return {
+      ...this.taskDto(record, getAdminContext(request)),
+      reports: Array.isArray((record as any).reports) ? (record as any).reports.map((item: any) => this.reportDto(item)) : [],
+    }
+  }
+
+  async getCoreTaskOptions(request: RequestWithAdmin, id: string) {
+    await this.assertTaskVisible(request, id)
+    const task = await this.findTask(id)
+    const equipment = task.routingNode.equipmentLinks
+      .map((link) => link.equipment)
+      .filter((item, index, records) => item.status === '启用' && records.findIndex((record) => record.code === item.code) === index)
+    const workshopCodes = Array.from(new Set(equipment.map((item) => item.workshopCode).filter((code): code is string => Boolean(code))))
+    const [teams, shifts] = await Promise.all([
+      workshopCodes.length ? this.prisma.team.findMany({
+        where: { status: '启用', workshopCode: { in: workshopCodes } },
+        include: { workshop: true },
+        orderBy: { code: 'asc' },
+      }) : [],
+      this.prisma.shiftMaster.findMany({ where: { status: '启用' }, orderBy: { code: 'asc' } }),
+    ])
+    return {
+      equipment: equipment.map((item) => ({
+        code: item.code,
+        name: item.name,
+        status: item.status,
+        workshopCode: item.workshopCode || '',
+        workshopName: item.workshop?.name || '',
+        equipmentType: item.equipmentType,
+      })),
+      teams: teams.map((item) => ({
+        code: item.code,
+        name: item.name,
+        status: item.status,
+        workshopCode: item.workshopCode,
+        workshopName: item.workshop.name,
+      })),
+      shifts: shifts.map((item) => ({ code: item.code, name: item.name, status: item.status })),
+    }
   }
 
   async dispatchTask(request: RequestWithAdmin, id: string, value: DispatchCoreTaskBody | unknown) {
@@ -615,6 +675,13 @@ export class CoremakingService {
       remark: record.remark || '',
       reportedAt: record.reportedAt.toISOString(),
       createdAt: record.createdAt.toISOString(),
+      batch: record.batch ? {
+        id: record.batch.id,
+        code: record.batch.code,
+        status: record.batch.status,
+        versionNo: record.batch.versionNo,
+        dryingRequired: record.batch.dryingRequired,
+      } : null,
     }
   }
 
@@ -1135,6 +1202,26 @@ export class CoremakingService {
   async getInventoryBatch(request: RequestWithAdmin, id: string) {
     await this.assertBatchVisible(request, id)
     return this.batchDto(await this.refreshBatchStatus(id))
+  }
+
+  async getCoreInventoryOptions() {
+    const equipment = await this.prisma.furnace.findMany({
+      where: { status: '启用' },
+      include: { workshop: true },
+      orderBy: { code: 'asc' },
+    })
+    return {
+      dryingEquipment: equipment
+        .filter((item) => /(芯|烘干)/.test(item.equipmentType))
+        .map((item) => ({
+          code: item.code,
+          name: item.name,
+          status: item.status,
+          workshopCode: item.workshopCode || '',
+          workshopName: item.workshop?.name || '',
+          equipmentType: item.equipmentType,
+        })),
+    }
   }
 
   async dryBatch(request: RequestWithAdmin, id: string, value: DryCoreBatchBody | unknown) {

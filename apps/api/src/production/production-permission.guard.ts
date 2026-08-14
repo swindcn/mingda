@@ -24,6 +24,10 @@ function permissionFor(request: Request) {
       if (method === 'POST') return 'production.core_task.cancel'
       throw new NotFoundException('生产管理资源不存在')
     }
+    if (/\/core-tasks\/[^/]+\/options$/.test(path)) {
+      if (method === 'GET') return 'production.core_task.view'
+      throw new NotFoundException('生产管理资源不存在')
+    }
     const corePermissionPrefix = isMiniProgram ? 'mini.production.core' : 'production.core_task'
     if (/\/core-tasks\/[^/]+\/start$/.test(path)) {
       if (method === 'POST') return `${corePermissionPrefix}.start`

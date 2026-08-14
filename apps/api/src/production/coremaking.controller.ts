@@ -52,6 +52,11 @@ export class CoremakingController {
     return this.coremaking.getTask(request, id)
   }
 
+  @Get('core-tasks/:id/options')
+  taskOptions(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.coremaking.getCoreTaskOptions(request, id)
+  }
+
   @Put('core-tasks/:id/dispatch')
   dispatch(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: DispatchCoreTaskBody) {
     return this.coremaking.dispatchTask(request, id, body)
@@ -75,6 +80,11 @@ export class CoremakingController {
   @Get('core-inventory')
   inventory(@Req() request: RequestWithAdmin, @Query() query: CoreInventoryQuery) {
     return this.coremaking.listInventory(request, query)
+  }
+
+  @Get('core-inventory/options')
+  inventoryOptions() {
+    return this.coremaking.getCoreInventoryOptions()
   }
 
   @Get('core-inventory/:id')

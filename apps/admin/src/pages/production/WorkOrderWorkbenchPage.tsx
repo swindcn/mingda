@@ -1,9 +1,14 @@
-import { ArrowLeftOutlined, SendOutlined } from '@ant-design/icons'
-import { Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Select, Space, Table, Tag, message } from 'antd'
+import { EyeOutlined, SendOutlined, ToolOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Select, Space, Table, Tag, message } from 'antd'
 import dayjs from 'dayjs'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
+import { SubPageHeader } from '../../components/SubPageHeader'
+import { resolveCoreTaskEntry } from '../../utils/coremaking'
 import { createWorkOrder, fetchWorkOrder, fetchWorkOrderOptions, fetchWorkOrderPreview, updateWorkOrder, type WorkOrderPayload, type WorkOrderPreview, type WorkOrderRecord } from '../../utils/production'
+import { hasPermission } from '../../utils/roles'
+import { CoreReadinessPanel } from './CoreReadinessPanel'
+import { CoreTaskGenerationModal } from './CoreTaskGenerationModal'
 
 type FormValues = Omit<WorkOrderPayload, 'plannedStartDate' | 'plannedDeliveryDate'> & { plannedStartDate?: dayjs.Dayjs; plannedDeliveryDate: dayjs.Dayjs }
 
@@ -16,7 +21,11 @@ export function WorkOrderWorkbenchPage() {
   const [preview, setPreview] = useState<WorkOrderPreview | null>(null)
   const [record, setRecord] = useState<WorkOrderRecord | null>(null)
   const [loading, setLoading] = useState(false)
+  const [generationOpen, setGenerationOpen] = useState(false)
   const viewing = Boolean(id && !location.pathname.endsWith('/edit'))
+  const canCreateCoreTask = hasPermission('production.core_task.create')
+  const canViewCoreTask = hasPermission('production.core_task.view')
+  const canSave = hasPermission(id ? 'production.work_order.edit' : 'production.work_order.create')
 
   useEffect(() => {
     void (async () => {
@@ -89,16 +98,32 @@ export function WorkOrderWorkbenchPage() {
   const totalNet = preview ? quantity * preview.unitNetWeightKg : 0
   const totalMelt = preview ? quantity * preview.unitGrossWeightKg : 0
   const totalReturn = preview ? quantity * preview.unitReturnWeightKg : 0
+  const coreTaskEntry = record ? resolveCoreTaskEntry(record, canCreateCoreTask, canViewCoreTask) : 'NONE'
+
+  const refreshRecord = async () => {
+    if (!id) return
+    setLoading(true)
+    try {
+      setRecord(await fetchWorkOrder(id))
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '工单信息刷新失败')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <>
-      <div className="page-header">
-        <div><h1 className="page-title">{viewing ? '生产工单详情' : id ? '编辑生产工单' : '新建生产工单'}</h1><p className="page-description">工单提交后立即进入待合炉排产池，产生有效炉次分配后关键字段将锁定。</p></div>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard/production/work-orders')}>返回</Button>
-          {!viewing && <Button type="primary" icon={<SendOutlined />} loading={loading} onClick={() => void save()}>提交排产</Button>}
-        </Space>
-      </div>
+      <SubPageHeader
+        title={viewing ? '生产工单详情' : id ? '编辑生产工单' : '新建生产工单'}
+        description="工单提交后立即进入待合炉排产池，产生有效炉次分配后关键字段将锁定。"
+        onBack={() => navigate('/dashboard/production/work-orders')}
+        extra={<Space>
+          {viewing && (record?.coreTaskCount || 0) > 0 && canViewCoreTask && <Button icon={<EyeOutlined />} onClick={() => navigate(`/dashboard/production/core-tasks?workOrderId=${record?.id}`)}>制芯任务</Button>}
+          {viewing && coreTaskEntry === 'GENERATE' && <Button type="primary" icon={<ToolOutlined />} onClick={() => setGenerationOpen(true)}>生成制芯任务</Button>}
+          {!viewing && canSave && <Button type="primary" icon={<SendOutlined />} loading={loading} onClick={() => void save()}>提交排产</Button>}
+        </Space>}
+      />
       <Form form={form} layout="vertical" disabled={viewing}>
         <Card title="工单基本信息" loading={loading}>
           <div className="production-form-grid">
@@ -146,6 +171,16 @@ export function WorkOrderWorkbenchPage() {
           { title: '状态', dataIndex: 'status' },
         ]} />
       </Card>}
+      {viewing && record && <Card title="制芯计划" className="production-section-card">
+        {coreTaskEntry === 'NOT_REQUIRED' ? <Alert type="info" showIcon message="该工单无需制芯" /> : <Descriptions bordered size="small" column={4}>
+          <Descriptions.Item label="任务总数">{record.coreTaskSummary.total}</Descriptions.Item>
+          <Descriptions.Item label="待派工">{record.coreTaskSummary.pendingDispatch}</Descriptions.Item>
+          <Descriptions.Item label="待生产/生产中">{record.coreTaskSummary.waiting} / {record.coreTaskSummary.inProgress}</Descriptions.Item>
+          <Descriptions.Item label="已完成/已取消">{record.coreTaskSummary.completed} / {record.coreTaskSummary.canceled}</Descriptions.Item>
+        </Descriptions>}
+      </Card>}
+      {viewing && record && hasPermission('production.work_order.view') && <CoreReadinessPanel workOrderId={record.id} />}
+      {viewing && record && <CoreTaskGenerationModal open={generationOpen} workOrderId={record.id} workOrderQuantity={record.plannedQuantity} onClose={() => setGenerationOpen(false)} onSuccess={refreshRecord} />}
     </>
   )
 }

@@ -1,0 +1,124 @@
+import { EyeOutlined, LockOutlined, PrinterOutlined, SearchOutlined, StopOutlined, UnlockOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Descriptions, Input, Modal, Segmented, Select, Table, Tag, message } from 'antd'
+import type { TableColumnsType } from 'antd'
+import { useEffect, useState } from 'react'
+import { ResizableTable } from '../../components/ResizableTable'
+import { TableActions } from '../../components/TableActions'
+import { ApiRequestError } from '../../services/api'
+import {
+  dryCoreBatch,
+  fetchCoreInventory,
+  fetchCoreInventoryBatch,
+  fetchCoreInventoryOptions,
+  lockCoreBatch,
+  remainingCoreHours,
+  scrapCoreBatch,
+  unlockCoreBatch,
+  type CoreBatchRecord,
+  type CoreBatchStatus,
+} from '../../utils/coremaking'
+import { hasPermission } from '../../utils/roles'
+import { CoreBatchLabel } from './CoreBatchLabel'
+
+const batchStatusLabels = { UNDRIED: '待烘干', AVAILABLE: '可用', WARNING: '临期', EXPIRED: '过期', LOCKED: '冻结', SCRAPPED: '报废', CONSUMED: '耗尽' }
+const batchStatusColors = { UNDRIED: 'processing', AVAILABLE: 'success', WARNING: 'warning', EXPIRED: 'error', LOCKED: 'purple', SCRAPPED: 'error', CONSUMED: 'default' }
+const batchFilters: Array<{ label: string; value: CoreBatchStatus | 'ALL' }> = [
+  { label: '全部', value: 'ALL' }, { label: '待烘干', value: 'UNDRIED' }, { label: '可用', value: 'AVAILABLE' }, { label: '临期', value: 'WARNING' }, { label: '过期', value: 'EXPIRED' }, { label: '冻结', value: 'LOCKED' }, { label: '报废', value: 'SCRAPPED' }, { label: '耗尽', value: 'CONSUMED' },
+]
+const ledgerLabels: Record<string, string> = { PRODUCED: '报工入库', DRIED: '确认烘干', LOCKED: '冻结', UNLOCKED: '解冻', SCRAPPED: '报废', CONSUMED: '领用' }
+
+export function CoreInventoryPage() {
+  const [records, setRecords] = useState<CoreBatchRecord[]>([])
+  const [keyword, setKeyword] = useState('')
+  const [status, setStatus] = useState<CoreBatchStatus | 'ALL'>('ALL')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [detail, setDetail] = useState<CoreBatchRecord | null>(null)
+  const [labelBatch, setLabelBatch] = useState<CoreBatchRecord | null>(null)
+  const canView = hasPermission('production.core_inventory.view')
+  const canDry = hasPermission('production.core_inventory.dry')
+  const canLock = hasPermission('production.core_inventory.lock')
+  const canScrap = hasPermission('production.core_inventory.scrap')
+
+  const refresh = async (nextPage = page, nextPageSize = pageSize, nextStatus = status) => {
+    setLoading(true); setError('')
+    try {
+      const result = await fetchCoreInventory({ page: nextPage, pageSize: nextPageSize, status: nextStatus, keyword: keyword.trim() })
+      setRecords(result.items); setPage(result.page); setPageSize(result.pageSize); setTotal(result.total)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '砂芯库存加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+  // Initial query intentionally synchronizes remote inventory into local page state.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { void refresh(1) }, [])
+
+  const refreshAfterAction = async () => { await refresh(); if (detail) setDetail(await fetchCoreInventoryBatch(detail.id)) }
+  const submit = async (action: () => Promise<unknown>) => {
+    try { await action(); await refreshAfterAction(); return true } catch (reason) {
+      if (reason instanceof ApiRequestError && reason.status === 409) { message.warning('数据已被其他用户更新，请刷新后重试；页面已刷新'); await refreshAfterAction(); return false }
+      message.error(reason instanceof Error ? reason.message : '库存操作失败'); throw reason
+    }
+  }
+  const openDetail = async (record: CoreBatchRecord) => {
+    try { setDetail(await fetchCoreInventoryBatch(record.id)) } catch (reason) { message.error(reason instanceof Error ? reason.message : '批次详情加载失败') }
+  }
+  const openLabel = async (record: CoreBatchRecord) => {
+    try { setLabelBatch(await fetchCoreInventoryBatch(record.id)) } catch (reason) { message.error(reason instanceof Error ? reason.message : '批次标签加载失败') }
+  }
+  const runDry = async (record: CoreBatchRecord) => {
+    const latest = await fetchCoreInventoryBatch(record.id)
+    const options = await fetchCoreInventoryOptions()
+    let equipmentCode = ''
+    Modal.confirm({ title: '确认烘干', content: <Select showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="请选择真实烘干设备" options={options.dryingEquipment.map((item) => ({ value: item.code, label: `${item.name}（${item.code}） · ${item.equipmentType}` }))} onChange={(value) => { equipmentCode = value }} />, okText: '确认烘干', cancelText: '取消', onOk: async () => { if (!equipmentCode) throw new Error('请选择烘干设备'); if (await submit(() => dryCoreBatch(latest.id, { versionNo: latest.versionNo, equipmentCode }))) message.success('批次已确认烘干') } })
+  }
+  const runReasonAction = async (record: CoreBatchRecord, action: 'lock' | 'scrap') => {
+    const latest = await fetchCoreInventoryBatch(record.id)
+    let reason = ''
+    const label = action === 'lock' ? '冻结' : '报废'
+    Modal.confirm({ title: `${label}砂芯批次`, content: <Input.TextArea rows={3} placeholder={`请输入${label}理由`} onChange={(event) => { reason = event.target.value }} />, okText: `确认${label}`, cancelText: '取消', okButtonProps: action === 'scrap' ? { danger: true } : undefined, onOk: async () => { if (!reason.trim()) throw new Error(`请输入${label}理由`); const request = action === 'lock' ? lockCoreBatch(latest.id, { versionNo: latest.versionNo, reason }) : scrapCoreBatch(latest.id, { versionNo: latest.versionNo, reason }); if (await submit(() => request)) message.success(`批次已${label}`) } })
+  }
+  const runUnlock = async (record: CoreBatchRecord) => {
+    const latest = await fetchCoreInventoryBatch(record.id)
+    Modal.confirm({ title: '解冻砂芯批次', content: `确认解冻批次 ${latest.code}？`, okText: '确认解冻', cancelText: '取消', onOk: async () => { if (await submit(() => unlockCoreBatch(latest.id, { versionNo: latest.versionNo }))) message.success('批次已解冻') } })
+  }
+  const run = (action: Promise<void>) => void action.catch((reason) => message.error(reason instanceof Error ? reason.message : '操作失败'))
+
+  const columns: TableColumnsType<CoreBatchRecord> = [
+    { title: '批次编号', dataIndex: 'code', key: 'code', width: 235 },
+    { title: '剩余小时', dataIndex: 'expiresAt', key: 'remainingHours', width: 110, render: (value: string, row) => row.status === 'UNDRIED' ? '待起算' : remainingCoreHours(value) === null ? '长期有效' : `${remainingCoreHours(value)} 小时` },
+    { title: '芯盒', key: 'coreBox', width: 220, render: (_, row) => `${row.coreBoxName}（${row.coreBoxCode}）` },
+    { title: '产品', key: 'product', width: 220, render: (_, row) => `${row.productName}（${row.productCode}）` },
+    { title: '生产工单', dataIndex: 'workOrderCode', key: 'workOrderCode', width: 160 },
+    { title: '初始数量', dataIndex: 'initialQuantity', key: 'initialQuantity', width: 100 },
+    { title: '当前数量', dataIndex: 'currentQuantity', key: 'currentQuantity', width: 100 },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (value: CoreBatchStatus) => <Tag color={batchStatusColors[value]}>{batchStatusLabels[value]}</Tag> },
+    { title: '失效时间', dataIndex: 'expiresAt', key: 'expiresAt', width: 175, render: (value: string, row) => row.status === 'UNDRIED' ? '烘干后起算' : value ? new Date(value).toLocaleString() : '长期有效' },
+    { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 175, render: (value: string) => new Date(value).toLocaleString() },
+    { title: '操作', key: 'actions', fixed: 'right', width: 220, render: (_, record) => <TableActions actions={[
+      ...(canView ? [{ key: 'detail', label: '详情', icon: <EyeOutlined />, onClick: () => void openDetail(record) }, { key: 'label', label: '标签', icon: <PrinterOutlined />, onClick: () => void openLabel(record) }] : []),
+      ...(record.status === 'UNDRIED' && canDry ? [{ key: 'dry', label: '烘干', onClick: () => run(runDry(record)) }] : []),
+      ...(['AVAILABLE', 'WARNING', 'EXPIRED'].includes(record.status) && record.currentQuantity > 0 && canLock ? [{ key: 'lock', label: '冻结', icon: <LockOutlined />, onClick: () => run(runReasonAction(record, 'lock')) }] : []),
+      ...(record.status === 'LOCKED' && canLock ? [{ key: 'unlock', label: '解冻', icon: <UnlockOutlined />, onClick: () => run(runUnlock(record)) }] : []),
+      ...(!['SCRAPPED', 'CONSUMED'].includes(record.status) && record.currentQuantity > 0 && canScrap ? [{ key: 'scrap', label: '报废', icon: <StopOutlined />, danger: true, onClick: () => run(runReasonAction(record, 'scrap')) }] : []),
+    ]} /> },
+  ]
+
+  return <>
+    <div className="page-header"><div><h1 className="page-title">砂芯库存</h1><p className="page-description">按批次管理烘干、保质期、冻结与报废状态。</p></div>{canView && <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={() => void refresh(1)}>查询</Button>}</div>
+    <Card>
+      <div className="production-query-row core-inventory-query"><Input allowClear prefix={<SearchOutlined />} placeholder="批次/芯盒/产品/工单" value={keyword} onChange={(event) => setKeyword(event.target.value)} onPressEnter={() => void refresh(1)} /><Segmented value={status} options={batchFilters} onChange={(value) => { const next = value as CoreBatchStatus | 'ALL'; setStatus(next); void refresh(1, pageSize, next) }} /></div>
+      {error && <Alert className="coremaking-load-error" type="error" showIcon message={error} action={<Button size="small" onClick={() => void refresh()}>重试</Button>} />}
+      <ResizableTable storageKey="production-core-inventory-widths" rowKey="id" columns={columns} dataSource={records} loading={loading} locale={{ emptyText: '暂无砂芯库存' }} pagination={{ current: page, pageSize, total, onChange: (nextPage, nextPageSize) => void refresh(nextPage, nextPageSize) }} />
+    </Card>
+    <Modal open={Boolean(detail)} title="砂芯批次详情" width={880} footer={<Button onClick={() => setDetail(null)}>关闭</Button>} onCancel={() => setDetail(null)} destroyOnHidden>
+      {detail && <><Descriptions bordered size="small" column={3}><Descriptions.Item label="批次编号" span={2}>{detail.code}</Descriptions.Item><Descriptions.Item label="状态"><Tag color={batchStatusColors[detail.status]}>{batchStatusLabels[detail.status]}</Tag></Descriptions.Item><Descriptions.Item label="芯盒">{detail.coreBoxName}（{detail.coreBoxCode}）</Descriptions.Item><Descriptions.Item label="产品">{detail.productName}（{detail.productCode}）</Descriptions.Item><Descriptions.Item label="生产工单">{detail.workOrderCode}</Descriptions.Item><Descriptions.Item label="当前/初始">{detail.currentQuantity} / {detail.initialQuantity}</Descriptions.Item><Descriptions.Item label="烘干设备">{detail.dryingEquipmentName || '-'}</Descriptions.Item><Descriptions.Item label="失效时间">{detail.expiresAt ? new Date(detail.expiresAt).toLocaleString() : '-'}</Descriptions.Item><Descriptions.Item label="冻结理由">{detail.lockReason || '-'}</Descriptions.Item><Descriptions.Item label="报废理由">{detail.scrapReason || '-'}</Descriptions.Item></Descriptions><Table className="core-inventory-ledger" rowKey="id" size="small" pagination={false} dataSource={detail.ledgers || []} locale={{ emptyText: '暂无库存流水' }} columns={[{ title: '动作', dataIndex: 'action', render: (value: string) => ledgerLabels[value] || value }, { title: '数量变化', dataIndex: 'quantityChange', render: (value: number) => value > 0 ? `+${value}` : value }, { title: '结存', dataIndex: 'quantityAfter' }, { title: '操作人', dataIndex: 'operatorName' }, { title: '时间', dataIndex: 'createdAt', render: (value: string) => new Date(value).toLocaleString() }, { title: '理由', dataIndex: 'reason', render: (value: string) => value || '-' }]} /></>}
+    </Modal>
+    <CoreBatchLabel batch={labelBatch} open={Boolean(labelBatch)} onClose={() => setLabelBatch(null)} />
+  </>
+}

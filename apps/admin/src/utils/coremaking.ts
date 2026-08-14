@@ -48,6 +48,26 @@ export interface CoreTaskPreview {
   canGenerateCoreTasks: boolean
   rows: CoreTaskPreviewRow[]
   routingNodes: CoreTaskRoutingNode[]
+  teams: CoreOption[]
+}
+
+export interface CoreOption {
+  code: string
+  name: string
+  status?: string
+  workshopCode?: string
+  workshopName?: string
+  equipmentType?: string
+}
+
+export interface CoreTaskOptions {
+  equipment: CoreOption[]
+  teams: CoreOption[]
+  shifts: CoreOption[]
+}
+
+export interface CoreInventoryOptions {
+  dryingEquipment: CoreOption[]
 }
 
 export interface CoreTaskRecord {
@@ -98,6 +118,7 @@ export interface CoreTaskRecord {
   canStart: boolean
   canReport: boolean
   canCancel: boolean
+  reports?: CoreProductionReport[]
 }
 
 export interface CoreTaskCreatePayload {
@@ -149,6 +170,13 @@ export interface CoreProductionReport {
   remark: string
   reportedAt: string
   createdAt: string
+  batch: null | {
+    id: string
+    code: string
+    status: CoreBatchStatus
+    versionNo: number
+    dryingRequired: boolean
+  }
 }
 
 export interface CoreInventoryLedger {
@@ -269,6 +297,37 @@ function jsonRequest<T>(path: string, method: 'POST' | 'PUT', body: unknown) {
   return apiRequest<T>(path, { method, body: JSON.stringify(body) })
 }
 
+export function calculateCorePlan(workOrderQuantity: number, quantityPerProduct: number, expectedScrapRate: number, cavityCount: number) {
+  if (!Number.isInteger(workOrderQuantity) || workOrderQuantity <= 0) throw new Error('工单计划数量必须为正整数')
+  if (!Number.isFinite(quantityPerProduct) || quantityPerProduct <= 0) throw new Error('芯件比必须大于 0')
+  if (!Number.isFinite(expectedScrapRate) || expectedScrapRate < 0) throw new Error('预计废品率不能小于 0')
+  if (!Number.isInteger(cavityCount) || cavityCount <= 0) throw new Error('芯盒穴数必须为正整数')
+  const scale = 10_000n
+  const ratio = BigInt(Math.round(quantityPerProduct * Number(scale)))
+  const scrapRate = BigInt(Math.round(expectedScrapRate * Number(scale)))
+  const numerator = BigInt(workOrderQuantity) * ratio * (scale + scrapRate)
+  const plannedQuantity = Number((numerator + scale * scale - 1n) / (scale * scale))
+  return { plannedQuantity, plannedPressCount: Math.ceil(plannedQuantity / cavityCount) }
+}
+
+export function resolveCoreTaskEntry(
+  workOrder: { requiresCoremaking?: boolean; canGenerateCoreTasks?: boolean; coreTaskCount?: number },
+  canCreate: boolean,
+  canView: boolean,
+) {
+  if (!workOrder.requiresCoremaking) return 'NOT_REQUIRED' as const
+  if (workOrder.canGenerateCoreTasks && canCreate) return 'GENERATE' as const
+  if ((workOrder.coreTaskCount || 0) > 0 && canView) return 'VIEW' as const
+  return 'NONE' as const
+}
+
+export function remainingCoreHours(expiresAt: string, now = new Date()) {
+  if (!expiresAt) return null
+  const expiration = new Date(expiresAt).getTime()
+  if (!Number.isFinite(expiration)) return null
+  return Number(Math.max((expiration - now.getTime()) / 3_600_000, 0).toFixed(1))
+}
+
 export function fetchCoreReadiness(workOrderId: string) {
   return apiRequest<CoreReadiness>(`/admin/production/work-orders/${encodeId(workOrderId)}/core-readiness`)
 }
@@ -287,6 +346,10 @@ export function fetchCoreTasks(params: { keyword?: string; status?: CoreTaskStat
 
 export function fetchCoreTask(id: string) {
   return apiRequest<CoreTaskRecord>(`/admin/production/core-tasks/${encodeId(id)}`)
+}
+
+export function fetchCoreTaskOptions(id: string) {
+  return apiRequest<CoreTaskOptions>(`/admin/production/core-tasks/${encodeId(id)}/options`)
 }
 
 export function dispatchCoreTask(id: string, payload: CoreTaskDispatchPayload) {
@@ -311,6 +374,10 @@ export function fetchCoreInventory(params: { page?: number; pageSize?: number; s
 
 export function fetchCoreInventoryBatch(id: string) {
   return apiRequest<CoreBatchRecord>(`/admin/production/core-inventory/${encodeId(id)}`)
+}
+
+export function fetchCoreInventoryOptions() {
+  return apiRequest<CoreInventoryOptions>('/admin/production/core-inventory/options')
 }
 
 export function dryCoreBatch(id: string, payload: CoreBatchDryPayload) {

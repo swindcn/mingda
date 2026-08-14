@@ -46,7 +46,115 @@ a {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.35;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
+}
+
+.coremaking-load-error {
+  margin-bottom: 14px;
+}
+
+.core-readiness-summary {
+  display: grid;
+  grid-template-columns: minmax(280px, 520px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.core-action-form {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding-top: 12px;
+}
+
+.core-action-form > label {
+  color: #475569;
+  font-size: 13px;
+}
+
+.core-action-form .ant-input-number,
+.core-action-form .ant-picker,
+.core-action-form .ant-select {
+  width: 100%;
+}
+
+.core-inventory-query {
+  align-items: flex-start;
+}
+
+.core-inventory-query .ant-segmented {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.core-inventory-ledger {
+  margin-top: 16px;
+}
+
+.core-batch-label {
+  width: 500px;
+  padding: 20px;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #111827;
+}
+
+.core-batch-label-title {
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-align: center;
+  border-bottom: 2px solid #111827;
+}
+
+.core-batch-label-body {
+  display: grid;
+  grid-template-columns: 156px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.core-batch-label-fields {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 7px 10px;
+  align-items: start;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.core-batch-label-fields strong,
+.core-batch-label-fields span {
+  overflow-wrap: anywhere;
+}
+
+@media print {
+  @page {
+    size: 100mm 70mm;
+    margin: 4mm;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .core-batch-label,
+  .core-batch-label * {
+    visibility: visible !important;
+  }
+
+  .core-batch-label {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 92mm;
+    padding: 4mm;
+    border: 1px solid #000;
+  }
 }
 
 .page-description {
@@ -166,6 +274,8 @@ a {
   .production-form-grid { grid-template-columns: 1fr; }
   .melt-calculator-summary { grid-template-columns: 1fr; }
   .melt-calculator-form { grid-template-columns: 1fr; }
+  .core-readiness-summary, .core-batch-label-body { grid-template-columns: 1fr; }
+  .core-action-form { grid-template-columns: 1fr; }
 }
 
 /* ===== 数据表格通用增强：冻结列 / 斑马纹 / hover / 冻结表头 ===== */

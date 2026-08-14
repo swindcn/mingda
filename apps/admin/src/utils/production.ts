@@ -53,6 +53,17 @@ export interface WorkOrderRecord {
   createdAt: string
   updatedAt: string
   canEdit: boolean
+  requiresCoremaking: boolean
+  canGenerateCoreTasks: boolean
+  coreTaskCount: number
+  coreTaskSummary: {
+    total: number
+    pendingDispatch: number
+    waiting: number
+    inProgress: number
+    completed: number
+    canceled: number
+  }
   routingNodes: RoutingNodePreview[]
   heatOrders: Array<{ allocationId: string; heatOrderId: string; heatOrderCode: string; status: HeatOrderStatus; allocatedQuantity: number; plannedWeightKg: number; actualWeightKg: number | null; furnaceCode: string; furnaceName: string; actualFurnaceCode: string; actualFurnaceName: string; transferTotalWeightKg: number; startedByName: string; startedAt: string; completedByName: string; completedAt: string }>
 }
