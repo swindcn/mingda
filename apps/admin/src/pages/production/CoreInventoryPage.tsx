@@ -11,6 +11,7 @@ import {
   fetchCoreInventoryBatch,
   fetchCoreInventoryOptions,
   lockCoreBatch,
+  loadLatestCoreBatchLabel,
   remainingCoreHours,
   resolveCoreInventoryPage,
   scrapCoreBatch,
@@ -42,6 +43,7 @@ export function CoreInventoryPage() {
   const [labelBatch, setLabelBatch] = useState<CoreBatchRecord | null>(null)
   const [listRequestGate] = useState(() => createLatestRequestGate())
   const [detailRequestGate] = useState(() => createLatestRequestGate())
+  const [labelRequestGate] = useState(() => createLatestRequestGate())
   const canView = hasPermission('production.core_inventory.view')
   const canDry = hasPermission('production.core_inventory.dry')
   const canLock = hasPermission('production.core_inventory.lock')
@@ -68,7 +70,7 @@ export function CoreInventoryPage() {
     // Initial query synchronizes the remote inventory into local page state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh(1)
-    return () => { listRequestGate.invalidate(); detailRequestGate.invalidate() }
+    return () => { listRequestGate.invalidate(); detailRequestGate.invalidate(); labelRequestGate.invalidate() }
     // The initial query deliberately snapshots the default filter state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -93,7 +95,14 @@ export function CoreInventoryPage() {
     await loadDetail(record.id)
   }
   const openLabel = async (record: CoreBatchRecord) => {
-    try { setLabelBatch(await fetchCoreInventoryBatch(record.id)) } catch (reason) { message.error(reason instanceof Error ? reason.message : '批次标签加载失败') }
+    await loadLatestCoreBatchLabel(
+      labelRequestGate,
+      record.id,
+      {
+        success: setLabelBatch,
+        error: (reason) => message.error(reason instanceof Error ? reason.message : '批次标签加载失败'),
+      },
+    )
   }
   const runDry = async (record: CoreBatchRecord) => {
     const latest = await fetchCoreInventoryBatch(record.id)

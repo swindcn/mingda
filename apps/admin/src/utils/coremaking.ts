@@ -1,4 +1,5 @@
 import { apiRequest } from '../services/api'
+import type { LatestRequestGate, LatestRequestHandlers } from './latestRequest'
 
 export type CoreTaskStatus = 'PENDING_DISPATCH' | 'WAITING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELED'
 export type CoreBatchStatus = 'UNDRIED' | 'AVAILABLE' | 'WARNING' | 'EXPIRED' | 'LOCKED' | 'SCRAPPED' | 'CONSUMED'
@@ -417,6 +418,15 @@ export function fetchCoreInventory(params: { page?: number; pageSize?: number; s
 
 export function fetchCoreInventoryBatch(id: string) {
   return apiRequest<CoreBatchRecord>(`/admin/production/core-inventory/${encodeId(id)}`)
+}
+
+export function loadLatestCoreBatchLabel(
+  gate: LatestRequestGate,
+  id: string,
+  handlers: LatestRequestHandlers<CoreBatchRecord>,
+  request: (batchId: string) => Promise<CoreBatchRecord> = fetchCoreInventoryBatch,
+) {
+  return gate.run(() => request(id), handlers)
 }
 
 export function fetchCoreInventoryOptions() {

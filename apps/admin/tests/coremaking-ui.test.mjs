@@ -85,6 +85,46 @@ test('latest request gate ignores delayed stale responses and invalidated unmoun
   assert.deepEqual(values, ['new'])
 })
 
+test('inventory label B remains selected when label A settles later', async () => {
+  const { client } = compileCoremakingClient()
+  const { createLatestRequestGate } = compileLatestRequest()
+  const gate = createLatestRequestGate()
+  const selected = []
+  const errors = []
+  const settled = []
+  const requests = new Map()
+  const request = (id) => new Promise((resolve, reject) => { requests.set(id, { resolve, reject }) })
+  const handlers = {
+    success: (batch) => selected.push(batch.code),
+    error: (reason) => errors.push(reason.message),
+    settled: () => settled.push('settled'),
+  }
+
+  const labelA = client.loadLatestCoreBatchLabel(gate, 'A', handlers, request)
+  const labelB = client.loadLatestCoreBatchLabel(gate, 'B', handlers, request)
+  requests.get('B').resolve({ code: 'B' })
+  await labelB
+  requests.get('A').resolve({ code: 'A' })
+  await labelA
+  assert.deepEqual(selected, ['B'])
+  assert.deepEqual(errors, [])
+  assert.equal(settled.length, 1)
+
+  const staleFailure = client.loadLatestCoreBatchLabel(gate, 'A-error', handlers, request)
+  const currentSuccess = client.loadLatestCoreBatchLabel(gate, 'B-current', handlers, request)
+  requests.get('B-current').resolve({ code: 'B-current' })
+  await currentSuccess
+  requests.get('A-error').reject(new Error('A stale error'))
+  await staleFailure
+  assert.deepEqual(selected, ['B', 'B-current'])
+  assert.deepEqual(errors, [])
+
+  const currentFailure = client.loadLatestCoreBatchLabel(gate, 'B-error', handlers, request)
+  requests.get('B-error').reject(new Error('B current error'))
+  await currentFailure
+  assert.deepEqual(errors, ['B current error'])
+})
+
 test('core plan preview calculation follows backend decimal scrap-rate semantics', () => {
   const { client } = compileCoremakingClient()
   assert.deepEqual(client.calculateCorePlan(100, 1.5, 0.03, 4), {
@@ -164,6 +204,9 @@ test('coremaking pages use the shared industrial table and operation patterns', 
   assert.match(inventory, /production\.core_inventory\.lock/)
   assert.match(inventory, /production\.core_inventory\.scrap/)
   assert.match(inventory, /createLatestRequestGate/)
+  assert.match(inventory, /labelRequestGate/)
+  assert.match(inventory, /labelRequestGate\.invalidate\(\)/)
+  assert.match(inventory, /loadLatestCoreBatchLabel/)
   assert.match(inventory, /resolveCoreInventoryPage/)
   assert.match(inventory, /status === 409[\s\S]*?await refreshAfterAction\(\)/)
   for (const label of ['全部', '待烘干', '可用', '临期', '过期', '冻结', '报废', '耗尽']) assert.match(inventory, new RegExp(label))
