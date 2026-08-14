@@ -1,0 +1,17 @@
+<view class="operation-page">
+  <view class="form-card" wx:if="{{options}}">
+    <view class="field-label">浇注包/球化包</view>
+    <view class="device-control">
+      <picker class="device-picker" mode="selector" range="{{options.transferDevices}}" range-key="name" value="{{deviceIndex}}" bindchange="selectDevice"><view class="picker-value">{{deviceIndex >= 0 ? options.transferDevices[deviceIndex].name + '（' + options.transferDevices[deviceIndex].code + '）' : '请选择转运设备'}}</view></picker>
+      <button class="scan-button" bindtap="scanDevice">扫码包号</button>
+    </view>
+    <view class="field-title-row">
+      <view class="field-label">转运重量</view>
+      <view class="remaining-weight">可转运数量：<text>{{options.remainingTransferWeightKg}} kg</text></view>
+    </view>
+    <view class="weight-input"><input type="digit" value="{{weightKg}}" bindinput="inputWeight" placeholder="请输入本次转运重量" /><text>kg</text></view>
+    <view class="field-label">转运备注</view>
+    <textarea value="{{remark}}" bindinput="inputRemark" placeholder="选填" maxlength="300"></textarea>
+  </view>
+  <button class="submit-button" loading="{{submitting}}" disabled="{{submitting || loading}}" bindtap="submit">确认转运</button>
+</view>

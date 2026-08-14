@@ -29,9 +29,12 @@ services:
       PORT: 3000
       JWT_SECRET: local-docker-change-me
       MARKITDOWN_BIN: markitdown
+      UPLOAD_DIR: /app/uploads
       TZ: Asia/Shanghai
     ports:
       - "3000:3000"
+    volumes:
+      - mingda-api-uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,3 +53,4 @@ services:
 
 volumes:
   mingda-postgres-data:
+  mingda-api-uploads:

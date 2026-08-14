@@ -181,10 +181,30 @@ const adminPermissions = [
   'model.recipe.create',
   'model.recipe.edit',
   'model.recipe.delete',
+  'model.recipe.clone',
+  'model.recipe.activate',
+  'model.recipe.disable',
+  'model.bom.view',
+  'model.bom.create',
+  'model.bom.edit',
+  'model.bom.delete',
+  'model.bom.clone',
+  'model.bom.activate',
+  'model.bom.disable',
+  'model.bom.new_version',
+  'model.operation.view',
+  'model.operation.create',
+  'model.operation.edit',
+  'model.operation.disable',
   'model.routing.view',
   'model.routing.create',
   'model.routing.edit',
   'model.routing.delete',
+  'model.routing.version',
+  'model.routing.clone',
+  'model.routing.activate',
+  'model.routing.disable',
+  'model.routing.default',
   'model.calendar.view',
   'model.calendar.create',
   'model.calendar.edit',
@@ -198,6 +218,26 @@ const adminPermissions = [
   'model.defect.create',
   'model.defect.edit',
   'model.defect.delete',
+  'production',
+  'production.work_order.view',
+  'production.work_order.create',
+  'production.work_order.edit',
+  'production.work_order.close',
+  'production.work_order.view_synced_public',
+  'production.schedule.view',
+  'production.schedule.create',
+  'production.schedule.adjust',
+  'production.schedule.cancel',
+  'production.heat.view',
+  'production.heat.start',
+  'production.heat.transfer',
+  'production.heat.complete',
+  'mini',
+  'mini.production',
+  'mini.production.heat.view',
+  'mini.production.heat.start',
+  'mini.production.heat.transfer',
+  'mini.production.heat.complete',
 ]
 
 function hashPassword(password: string) {
@@ -394,7 +434,7 @@ function isSupplierEmployeeViewer({ viewer, authorization }: ViewerOptions = {})
   return token.startsWith('mock-token-')
 }
 
-function isSupplierUser(user?: MobileViewerUser | null): user is MobileViewerUser {
+function isSupplierUser(user?: MobileViewerUser | null): user is MobileViewerUser & { userType: 'SUPPLIER' } {
   return user?.userType === 'SUPPLIER'
 }
 
@@ -716,9 +756,7 @@ export class MoldDevelopmentController {
     const product = await this.upsertProduct(body.productCode, body.productName || body.productCode)
     const supplier = await this.upsertSupplier(body.supplierId || 'SUP_CUSTOM', body.supplierName || body.supplierId || '')
     const code = await this.createNextMoldCode()
-    const images = body.attachments?.length
-      ? body.attachments.map((_item, index) => imageFallbacks[index % imageFallbacks.length])
-      : []
+    const images = body.attachments || []
     const now = new Date()
 
     const mold = await this.prisma.moldDevelopment.create({
@@ -784,9 +822,7 @@ export class MoldDevelopmentController {
     const customer = await this.upsertCustomer(body.customerId || 'CUS_CUSTOM', body.customerName || body.customerId || '')
     const product = await this.upsertProduct(body.productCode, body.productName || body.productCode)
     const supplier = await this.upsertSupplier(body.supplierId || 'SUP_CUSTOM', body.supplierName || body.supplierId || '')
-    const images = body.attachments?.length
-      ? [...arrayFromJson(mold.attachments), ...body.attachments.map((_item, index) => imageFallbacks[index % imageFallbacks.length])]
-      : arrayFromJson(mold.attachments)
+    const images = body.attachments || arrayFromJson(mold.attachments)
 
     await this.prisma.moldDevelopment.update({
       where: { id: mold.id },
@@ -1089,9 +1125,12 @@ export class MoldDevelopmentController {
 
   private async findMoldsForViewer(user?: MobileViewerUser | null, request?: RequestWithAdmin) {
     if (!isSupplierUser(user)) {
+      const followerName = user?.name || ''
       const visibleCodes = request ? await this.visibleMoldCodes(request) : null
       const records = await this.findMolds()
-      return visibleCodes ? records.filter((record) => visibleCodes.includes(record.code)) : records
+      return visibleCodes
+        ? records.filter((record) => visibleCodes.includes(record.code) || Boolean(followerName && record.followerName === followerName))
+        : records
     }
     if (!user.belongsTo) return []
     return this.prisma.moldDevelopment.findMany({
@@ -1117,7 +1156,8 @@ export class MoldDevelopmentController {
     if (isSupplierUser(user) && record.supplier.name !== user.belongsTo && record.supplier.code !== user.belongsTo) {
       throw new NotFoundException('模具开发任务不存在')
     }
-    if (request && !isSupplierUser(user)) {
+    const followerName = !isSupplierUser(user) ? user?.name || '' : ''
+    if (request && !isSupplierUser(user) && (!followerName || record.followerName !== followerName)) {
       await this.assertMoldVisible(record.code, request)
     }
     return record

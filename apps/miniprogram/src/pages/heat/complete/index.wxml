@@ -1,0 +1,11 @@
+<view class="complete-page">
+  <view class="form-card">
+    <view class="target-row"><text>目标出炉重量</text><text>{{targetWeightKg}} kg</text></view>
+    <view class="target-row transfer-total"><text>转运累计重量</text><text>{{transferTotalWeightKg}} kg</text></view>
+    <view class="field-label">实际出炉重量</view>
+    <view class="weight-input"><input type="digit" value="{{actualOutputWeightKg}}" bindinput="inputWeight" placeholder="请输入实际重量" /><text>kg</text></view>
+    <view class="field-label">完工备注</view>
+    <textarea value="{{remark}}" bindinput="inputRemark" placeholder="选填" maxlength="300"></textarea>
+  </view>
+  <button class="submit-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submit">确认完成</button>
+</view>

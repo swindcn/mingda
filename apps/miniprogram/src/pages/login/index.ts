@@ -82,9 +82,11 @@ Page({
       wx.setStorageSync('mingda_token', result.token)
       wx.setStorageSync('mingda_user_type', result.user.userType)
       wx.setStorageSync('mingda_is_supplier_employee', Boolean(result.user.isSupplierEmployee))
+      wx.setStorageSync('mingda_permissions', result.user.permissions || [])
       getApp<IAppOption>().globalData.token = result.token
       getApp<IAppOption>().globalData.userType = result.user.userType
       getApp<IAppOption>().globalData.isSupplierEmployee = Boolean(result.user.isSupplierEmployee)
+      getApp<IAppOption>().globalData.permissions = result.user.permissions || []
       wx.switchTab({ url: '/pages/home/index' })
     } catch (error) {
       wx.showToast({

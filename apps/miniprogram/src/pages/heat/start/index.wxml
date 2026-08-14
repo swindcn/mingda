@@ -1,0 +1,11 @@
+<view class="operation-page">
+  <view class="form-card" wx:if="{{options}}">
+    <view class="summary-row"><text>计划熔炉</text><text>{{options.plannedFurnaceName}}</text></view>
+    <view class="field-label">实际熔炉</view>
+    <view class="device-control">
+      <picker class="device-picker" mode="selector" range="{{options.furnaces}}" range-key="name" value="{{furnaceIndex}}" bindchange="selectFurnace"><view class="picker-value">{{furnaceIndex >= 0 ? options.furnaces[furnaceIndex].name + '（' + options.furnaces[furnaceIndex].code + '）' : '请选择熔炉'}}</view></picker>
+      <button class="scan-button" bindtap="scanFurnace">扫码炉号</button>
+    </view>
+  </view>
+  <button class="submit-button" loading="{{submitting}}" disabled="{{submitting || loading}}" bindtap="submit">开始生产</button>
+</view>

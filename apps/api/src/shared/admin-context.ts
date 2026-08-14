@@ -116,6 +116,7 @@ export async function collectDepartmentIds(prisma: PrismaClient, rootId: string,
 const publicSyncEntityPermissions: Record<string, string> = {
   'basic:products': 'basic.product.view_synced_public',
   'modeling:items': 'basic.product.view_synced_public',
+  'production:work-orders': 'production.work_order.view_synced_public',
 }
 
 export async function visibleOwnershipEntityIds(prisma: PrismaClient, user: AdminContext, entityType: string) {
@@ -167,7 +168,7 @@ export async function visibleOwnershipEntityIds(prisma: PrismaClient, user: Admi
 }
 
 export async function upsertOwnership(
-  prisma: PrismaClient,
+  prisma: Pick<PrismaClient, 'businessDataOwnership'>,
   user: AdminContext | undefined,
   entityType: string,
   entityId: string,

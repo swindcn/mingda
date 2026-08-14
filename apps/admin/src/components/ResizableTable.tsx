@@ -19,6 +19,14 @@ interface ResizableTableProps<RecordType extends AnyObject> extends TableProps<R
   columns: ResizableColumnsType<RecordType>
 }
 
+/** 布局内容区滚动容器（AppLayout Content），用于冻结表头定位 */
+const SCROLL_CONTAINER_SELECTOR = '.app-content-scroll'
+
+function resolveScrollContainer(): HTMLElement | Window {
+  if (typeof document === 'undefined') return window
+  return document.querySelector<HTMLElement>(SCROLL_CONTAINER_SELECTOR) ?? window
+}
+
 function getColumnKey(column: { key?: React.Key; dataIndex?: unknown }, index: number) {
   if (column.key) return String(column.key)
   if (Array.isArray(column.dataIndex)) return column.dataIndex.join('.')
@@ -82,6 +90,9 @@ export function ResizableTable<RecordType extends AnyObject>({
   columns,
   scroll,
   components,
+  pagination,
+  sticky,
+  className,
   ...tableProps
 }: ResizableTableProps<RecordType>) {
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
@@ -127,9 +138,31 @@ export function ResizableTable<RecordType extends AnyObject>({
 
   const mergedScrollX = mergedColumns.reduce((total, column) => total + Number(column.width || 0), 0)
 
+  const mergedPagination = useMemo(() => {
+    if (pagination === false) return false
+    return {
+      showSizeChanger: true,
+      showQuickJumper: true,
+      pageSizeOptions: [10, 20, 50],
+      showTotal: (total: number) => `共 ${total} 条`,
+      ...(typeof pagination === 'object' ? pagination : {}),
+    }
+  }, [pagination])
+
+  const mergedSticky = useMemo(() => {
+    if (sticky === false) return false
+    return {
+      offsetHeader: 0,
+      getContainer: resolveScrollContainer,
+      ...(typeof sticky === 'object' ? sticky : {}),
+    }
+  }, [sticky])
+
   return (
     <Table<RecordType>
+      size="middle"
       {...tableProps}
+      className={className ? `fixed-action-table ${className}` : 'fixed-action-table'}
       columns={mergedColumns}
       components={{
         ...components,
@@ -138,6 +171,8 @@ export function ResizableTable<RecordType extends AnyObject>({
           cell: ResizableTitle,
         },
       }}
+      pagination={mergedPagination}
+      sticky={mergedSticky}
       scroll={{
         ...scroll,
         x: scroll?.x ?? mergedScrollX,

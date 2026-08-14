@@ -4,6 +4,7 @@ import {
   submitReceive,
   submitShipping,
   submitTrial,
+  uploadImage,
 } from '../../../services/api'
 
 const titleMap: Record<string, string> = {
@@ -74,8 +75,19 @@ Page({
       count: remaining,
       mediaType: ['image'],
       sourceType,
-      success: (result) => {
-        this.setData({ [field]: [...current, ...result.tempFiles.map((file) => file.tempFilePath)] })
+      success: async (result) => {
+        wx.showLoading({ title: '上传中' })
+        try {
+          const uploaded = await Promise.all(result.tempFiles.map((file) => uploadImage(file.tempFilePath)))
+          this.setData({ [field]: [...current, ...uploaded.map((file) => file.url)] })
+        } catch (error) {
+          wx.showToast({
+            title: error instanceof Error ? error.message : '上传失败',
+            icon: 'none',
+          })
+        } finally {
+          wx.hideLoading()
+        }
       },
     })
   },

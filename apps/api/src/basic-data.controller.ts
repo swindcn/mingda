@@ -52,6 +52,12 @@ interface DictionaryBody {
   productTypes?: unknown[]
   positions?: string[]
   workshopTypes?: string[]
+  operationSections?: string[]
+  materialTypes?: string[]
+  equipmentTypes?: string[]
+  chemicalElements?: Array<{ name?: string; unit?: string }>
+  mechanicalProperties?: Array<{ name?: string; unit?: string; testMethod?: string }>
+  processRequirements?: Array<{ name?: string; unit?: string; valueType?: 'number' | 'text' }>
 }
 
 interface ProductTypeNode {
@@ -131,17 +137,41 @@ const defaultDictionaries = {
   productUnits: ['片', '个', '套', '台', '件'],
   productTypes: [
     { name: '成品' },
-    { name: '半成品' },
+    { name: '半成品', children: [{ name: '砂芯' }] },
     { name: '原材料' },
     {
       name: '模具工装',
       children: [{ name: '磨边工装' }, { name: '铝模具' }, { name: '砂芯模具' }],
     },
     { name: '辅助材料' },
+    { name: '铸造辅材' },
+    { name: '工装耗材' },
     { name: '零辅配件' },
   ],
   positions: ['生产主管', '销售经理', '运营负责人', '产品经理', '会计', '项目成员'],
   workshopTypes: ['熔炼', '造型', '制芯', '清理', '机加工', '检验'],
+  operationSections: ['熔炼', '制芯', '造型', '浇注', '清理', '后处理', '质检'],
+  materialTypes: ['球铁', '灰铁', '碳钢'],
+  equipmentTypes: ['熔炼炉', '浇注包', '球化包', '其他设备'],
+  chemicalElements: [
+    { name: 'C', unit: '%' },
+    { name: 'Si', unit: '%' },
+    { name: 'Mn', unit: '%' },
+    { name: 'P', unit: '%' },
+    { name: 'S', unit: '%' },
+  ],
+  mechanicalProperties: [
+    { name: '抗拉强度', unit: 'MPa', testMethod: 'GB/T 228.1' },
+    { name: '屈服强度', unit: 'MPa', testMethod: 'GB/T 228.1' },
+    { name: '伸长率', unit: '%', testMethod: 'GB/T 228.1' },
+    { name: '硬度', unit: 'HB', testMethod: 'GB/T 231.1' },
+  ],
+  processRequirements: [
+    { name: '熔炼温度', unit: '℃', valueType: 'number' as const },
+    { name: '浇注温度', unit: '℃', valueType: 'number' as const },
+    { name: '热处理方式', unit: '', valueType: 'text' as const },
+    { name: '保温时间', unit: 'min', valueType: 'number' as const },
+  ],
 }
 
 const adminPermissions = [
@@ -213,10 +243,30 @@ const adminPermissions = [
   'model.recipe.create',
   'model.recipe.edit',
   'model.recipe.delete',
+  'model.recipe.clone',
+  'model.recipe.activate',
+  'model.recipe.disable',
+  'model.bom.view',
+  'model.bom.create',
+  'model.bom.edit',
+  'model.bom.delete',
+  'model.bom.clone',
+  'model.bom.activate',
+  'model.bom.disable',
+  'model.bom.new_version',
+  'model.operation.view',
+  'model.operation.create',
+  'model.operation.edit',
+  'model.operation.disable',
   'model.routing.view',
   'model.routing.create',
   'model.routing.edit',
   'model.routing.delete',
+  'model.routing.version',
+  'model.routing.clone',
+  'model.routing.activate',
+  'model.routing.disable',
+  'model.routing.default',
   'model.calendar.view',
   'model.calendar.create',
   'model.calendar.edit',
@@ -230,6 +280,26 @@ const adminPermissions = [
   'model.defect.create',
   'model.defect.edit',
   'model.defect.delete',
+  'production',
+  'production.work_order.view',
+  'production.work_order.create',
+  'production.work_order.edit',
+  'production.work_order.close',
+  'production.work_order.view_synced_public',
+  'production.schedule.view',
+  'production.schedule.create',
+  'production.schedule.adjust',
+  'production.schedule.cancel',
+  'production.heat.view',
+  'production.heat.start',
+  'production.heat.transfer',
+  'production.heat.complete',
+  'mini',
+  'mini.production',
+  'mini.production.heat.view',
+  'mini.production.heat.start',
+  'mini.production.heat.transfer',
+  'mini.production.heat.complete',
 ]
 
 
@@ -338,6 +408,32 @@ function stringArray(value: Prisma.JsonValue | null | undefined) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
+type DictionaryOption = { name: string; unit?: string; testMethod?: string; valueType?: 'number' | 'text' }
+
+function dictionaryOptions(value: Prisma.JsonValue | null | undefined, fallback: DictionaryOption[]): DictionaryOption[] {
+  if (!Array.isArray(value)) return fallback
+  const result = value
+    .map((item) => {
+      if (typeof item === 'string') return { name: item.trim() }
+      if (!item || typeof item !== 'object' || !('name' in item)) return null
+      const record = item as { name?: unknown; unit?: unknown; testMethod?: unknown; valueType?: unknown }
+      const name = String(record.name || '').trim()
+      if (!name) return null
+      return {
+        name,
+        unit: String(record.unit || ''),
+        ...(record.testMethod ? { testMethod: String(record.testMethod) } : {}),
+        ...(record.valueType === 'text' ? { valueType: 'text' as const } : record.valueType === 'number' ? { valueType: 'number' as const } : {}),
+      }
+    })
+    .filter((item): item is DictionaryOption => Boolean(item))
+  return result.length ? result : fallback
+}
+
+function normalizeDictionaryOptions(value: unknown, fallback: DictionaryOption[]): DictionaryOption[] {
+  return dictionaryOptions(Array.isArray(value) ? value as Prisma.JsonValue : undefined, fallback)
+}
+
 function productTypeTree(
   value: Prisma.JsonValue | null | undefined,
   fallback: ProductTypeNode[] = defaultDictionaries.productTypes,
@@ -395,6 +491,12 @@ export class BasicDataController {
       productTypes: productTypeTree(body.productTypes as Prisma.JsonValue),
       positions: body.positions?.length ? body.positions : defaultDictionaries.positions,
       workshopTypes: body.workshopTypes?.length ? body.workshopTypes : defaultDictionaries.workshopTypes,
+      operationSections: body.operationSections?.length ? body.operationSections : defaultDictionaries.operationSections,
+      materialTypes: body.materialTypes?.length ? body.materialTypes : defaultDictionaries.materialTypes,
+      equipmentTypes: body.equipmentTypes?.length ? body.equipmentTypes : defaultDictionaries.equipmentTypes,
+      chemicalElements: normalizeDictionaryOptions(body.chemicalElements, defaultDictionaries.chemicalElements),
+      mechanicalProperties: normalizeDictionaryOptions(body.mechanicalProperties, defaultDictionaries.mechanicalProperties),
+      processRequirements: normalizeDictionaryOptions(body.processRequirements, defaultDictionaries.processRequirements),
     }
     await Promise.all(
       Object.entries(next).map(([key, values]) => {
@@ -693,7 +795,7 @@ export class BasicDataController {
     const counts = await Promise.all([
       this.prisma.moldDevelopment.count({ where: { product: { code: id } } }),
       this.prisma.moldMaster.count({ where: { itemCode: id } }),
-      this.prisma.processRouting.count({ where: { itemCode: id } }),
+      this.prisma.routingApplicableProduct.count({ where: { productCode: id } }),
       this.prisma.meltRecipeItem.count({ where: { itemCode: id } }),
     ])
     if (counts.some((count) => count > 0)) {
@@ -924,13 +1026,19 @@ export class BasicDataController {
 
   private async getDictionaries() {
     const records = await this.prisma.dictionarySetting.findMany()
-    const map = new Map(records.map((record) => [record.key, stringArray(record.values)]))
+    const map = new Map(records.map((record) => [record.key, record.values]))
     return {
-      moldTypes: map.get('moldTypes')?.length ? map.get('moldTypes') : defaultDictionaries.moldTypes,
-      productUnits: map.get('productUnits')?.length ? map.get('productUnits') : defaultDictionaries.productUnits,
+      moldTypes: stringArray(map.get('moldTypes')).length ? stringArray(map.get('moldTypes')) : defaultDictionaries.moldTypes,
+      productUnits: stringArray(map.get('productUnits')).length ? stringArray(map.get('productUnits')) : defaultDictionaries.productUnits,
       productTypes: productTypeTree(records.find((record) => record.key === 'productTypes')?.values),
-      positions: map.get('positions')?.length ? map.get('positions') : defaultDictionaries.positions,
-      workshopTypes: map.get('workshopTypes')?.length ? map.get('workshopTypes') : defaultDictionaries.workshopTypes,
+      positions: stringArray(map.get('positions')).length ? stringArray(map.get('positions')) : defaultDictionaries.positions,
+      workshopTypes: stringArray(map.get('workshopTypes')).length ? stringArray(map.get('workshopTypes')) : defaultDictionaries.workshopTypes,
+      operationSections: stringArray(map.get('operationSections')).length ? stringArray(map.get('operationSections')) : defaultDictionaries.operationSections,
+      materialTypes: stringArray(map.get('materialTypes')).length ? stringArray(map.get('materialTypes')) : defaultDictionaries.materialTypes,
+      equipmentTypes: stringArray(map.get('equipmentTypes')).length ? stringArray(map.get('equipmentTypes')) : defaultDictionaries.equipmentTypes,
+      chemicalElements: dictionaryOptions(map.get('chemicalElements'), defaultDictionaries.chemicalElements),
+      mechanicalProperties: dictionaryOptions(map.get('mechanicalProperties'), defaultDictionaries.mechanicalProperties),
+      processRequirements: dictionaryOptions(map.get('processRequirements'), defaultDictionaries.processRequirements),
     }
   }
 

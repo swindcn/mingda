@@ -2,6 +2,7 @@ import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, Image, message } from 'antd'
 import type { ChangeEvent } from 'react'
 import { useRef } from 'react'
+import { uploadImageFile } from '../services/api'
 
 interface ImageUploadFieldProps {
   value?: string[]
@@ -27,7 +28,7 @@ function createImageFallback(label = '图片') {
 }
 
 function resolveImageSrc(src: string) {
-  if (/^(data:image\/|https?:\/\/|\/assets\/|blob:)/.test(src)) return src
+  if (/^(data:image\/|https?:\/\/|\/assets\/|\/api\/uploads\/|blob:)/.test(src)) return src
   return createImageFallback()
 }
 
@@ -66,6 +67,17 @@ async function compressImage(file: File, maxImageSize: number, quality: number) 
   return canvas.toDataURL('image/jpeg', quality)
 }
 
+function dataUrlToFile(dataUrl: string, fileName: string) {
+  const [metadata, payload] = dataUrl.split(',')
+  const mimeType = metadata.match(/data:(.*?);/)?.[1] || 'image/jpeg'
+  const binary = window.atob(payload)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new File([bytes], fileName, { type: mimeType })
+}
+
 export function ImageUploadField({
   value = [],
   onChange,
@@ -90,7 +102,13 @@ export function ImageUploadField({
     }
 
     try {
-      const images = await Promise.all(acceptedFiles.map((file) => compressImage(file, maxImageSize, quality)))
+      const images = await Promise.all(
+        acceptedFiles.map(async (file) => {
+          const compressed = await compressImage(file, maxImageSize, quality)
+          const uploaded = await uploadImageFile(dataUrlToFile(compressed, file.name || 'image.jpg'))
+          return uploaded.url
+        }),
+      )
       onChange?.([...value, ...images])
     } catch {
       message.error('图片处理失败，请重新选择图片')

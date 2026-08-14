@@ -7,11 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:heat-execution": "node --test tests/heat-execution-concurrency.test.mjs",
+    "test:heat-schedule-drag": "node --test tests/heat-schedule-drag.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
     "@tanstack/react-query": "^5.90.12",
+    "@xyflow/react": "^12.11.3",
     "antd": "^6.0.0",
     "dayjs": "^1.11.20",
     "lucide-react": "^0.555.0",

@@ -1,7 +1,9 @@
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
-import { json, urlencoded } from 'express'
+import { json, static as serveStatic, urlencoded } from 'express'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { AppModule } from './app.module'
 import { HttpExceptionFilter } from './shared/http-exception.filter'
 import { ResponseInterceptor } from './shared/response.interceptor'
@@ -15,6 +17,9 @@ async function bootstrap() {
   app.use(urlencoded({ limit: '25mb', extended: true }))
 
   app.setGlobalPrefix('api')
+  const uploadRoot = configService.get<string>('UPLOAD_DIR') || join(process.cwd(), 'uploads')
+  mkdirSync(uploadRoot, { recursive: true })
+  app.use('/api/uploads', serveStatic(uploadRoot))
   const corsOrigin = configService.get<string>('CORS_ORIGIN')
   app.enableCors({
     origin: corsOrigin

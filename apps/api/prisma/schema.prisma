@@ -64,19 +64,50 @@ enum MoldProductionRecordType {
   EVALUATION
 }
 
+enum WorkOrderScheduleStatus {
+  PENDING
+  PARTIAL
+  FULL
+}
+
+enum WorkOrderProductionStatus {
+  RELEASED
+  IN_PRODUCTION
+  MELT_COMPLETED
+  COMPLETED
+  CLOSED
+}
+
+enum HeatOrderStatus {
+  WAITING
+  IN_PROGRESS
+  TRANSFERRING
+  COMPLETED
+  CANCELED
+}
+
+enum HeatOrderAction {
+  CREATED
+  SCHEDULE_ADJUSTED
+  STARTED
+  TRANSFERRED
+  COMPLETED
+  CANCELED
+}
+
 model Department {
-  id                 String       @id @default(cuid())
-  name               String
-  code               String       @unique
-  parentId           String?
-  parent             Department?  @relation("DepartmentTree", fields: [parentId], references: [id])
-  children           Department[] @relation("DepartmentTree")
-  source             SyncProvider @default(LOCAL)
-  externalId         String?
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
-  users              User[]
-  ownedUsers         User[]       @relation("UserOwnerDepartment")
+  id                  String                  @id @default(cuid())
+  name                String
+  code                String                  @unique
+  parentId            String?
+  parent              Department?             @relation("DepartmentTree", fields: [parentId], references: [id])
+  children            Department[]            @relation("DepartmentTree")
+  source              SyncProvider            @default(LOCAL)
+  externalId          String?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  users               User[]
+  ownedUsers          User[]                  @relation("UserOwnerDepartment")
   createdBusinessData BusinessDataOwnership[] @relation("BusinessDataCreatedDepartment")
   ownedBusinessData   BusinessDataOwnership[] @relation("BusinessDataOwnerDepartment")
 
@@ -85,31 +116,41 @@ model Department {
 }
 
 model User {
-  id                    String       @id @default(cuid())
-  username              String?      @unique
-  name                  String
-  phone                 String       @unique
-  passwordHash          String?
-  userType              UserType     @default(EMPLOYEE)
-  organizationName      String?
-  departmentId          String?
-  department            Department?  @relation(fields: [departmentId], references: [id])
-  ownerDepartmentId     String?
-  ownerDepartment       Department?  @relation("UserOwnerDepartment", fields: [ownerDepartmentId], references: [id])
-  position              String?
-  status                UserStatus   @default(ENABLED)
-  lockStatus            LockStatus   @default(NORMAL)
-  source                SyncProvider @default(LOCAL)
-  externalId            String?
-  belongsTo             String?
-  deletedAt             DateTime?
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
-  roles                 UserRole[]
-  createdBusinessData   BusinessDataOwnership[] @relation("BusinessDataCreatedUser")
-  ownedBusinessData     BusinessDataOwnership[] @relation("BusinessDataOwnerUser")
-  leadingTeams          Team[]       @relation("TeamLeader")
-  teamMemberships       TeamMember[]
+  id                     String                  @id @default(cuid())
+  username               String?                 @unique
+  name                   String
+  phone                  String                  @unique
+  passwordHash           String?
+  userType               UserType                @default(EMPLOYEE)
+  organizationName       String?
+  departmentId           String?
+  department             Department?             @relation(fields: [departmentId], references: [id])
+  ownerDepartmentId      String?
+  ownerDepartment        Department?             @relation("UserOwnerDepartment", fields: [ownerDepartmentId], references: [id])
+  position               String?
+  status                 UserStatus              @default(ENABLED)
+  lockStatus             LockStatus              @default(NORMAL)
+  source                 SyncProvider            @default(LOCAL)
+  externalId             String?
+  belongsTo              String?
+  deletedAt              DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  roles                  UserRole[]
+  createdBusinessData    BusinessDataOwnership[] @relation("BusinessDataCreatedUser")
+  ownedBusinessData      BusinessDataOwnership[] @relation("BusinessDataOwnerUser")
+  leadingTeams           Team[]                  @relation("TeamLeader")
+  teamMemberships        TeamMember[]
+  createdRecipes         MeltRecipe[]            @relation("RecipeCreator")
+  createdBomVersions     CastingBomVersion[]     @relation("BomVersionCreator")
+  createdRoutingVersions ProcessRoutingVersion[] @relation("RoutingVersionCreator")
+  createdWorkOrders      WorkOrder[]             @relation("WorkOrderCreator")
+  createdHeatOrders      HeatOrder[]             @relation("HeatOrderCreator")
+  startedHeatOrders      HeatOrder[]             @relation("HeatOrderStarter")
+  completedHeatOrders    HeatOrder[]             @relation("HeatOrderCompleter")
+  canceledHeatOrders     HeatOrder[]             @relation("HeatOrderCanceler")
+  heatOrderRecords       HeatOrderRecord[]       @relation("HeatOrderRecordOperator")
+  heatOrderTransfers     HeatOrderTransfer[]     @relation("HeatOrderTransferOperator")
 
   @@index([departmentId])
   @@index([ownerDepartmentId])
@@ -118,19 +159,19 @@ model User {
 }
 
 model Role {
-  id                 String       @id @default(cuid())
-  name               String
-  organizationName   String?
-  description        String?
-  app                String       @default("admin")
-  dataScope          DataScope    @default(OWN)
-  dataScopes         Json         @default("[]")
-  permissions        Json         @default("[]")
-  columnPermissions  Json         @default("[]")
-  customDepartments  Json         @default("[]")
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
-  users              UserRole[]
+  id                String     @id @default(cuid())
+  name              String
+  organizationName  String?
+  description       String?
+  app               String     @default("admin")
+  dataScope         DataScope  @default(OWN)
+  dataScopes        Json       @default("[]")
+  permissions       Json       @default("[]")
+  columnPermissions Json       @default("[]")
+  customDepartments Json       @default("[]")
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  users             UserRole[]
 
   @@unique([name, app])
 }
@@ -152,83 +193,91 @@ model DictionarySetting {
 }
 
 model Customer {
-  id        String   @id @default(cuid())
-  code      String   @unique
+  id        String            @id @default(cuid())
+  code      String            @unique
   name      String
   address   String?
   contact   String?
   phone     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
   molds     MoldDevelopment[]
 }
 
 model Supplier {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  name      String
-  address   String?
-  contact   String?
-  phone     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  molds     MoldDevelopment[]
+  id          String            @id @default(cuid())
+  code        String            @unique
+  name        String
+  address     String?
+  contact     String?
+  phone       String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  molds       MoldDevelopment[]
   moldMasters MoldMaster[]
 }
 
 model Product {
-  id            String   @id @default(cuid())
-  code          String   @unique
-  name          String
-  spec          String?
-  unit          String?
-  type          String?
-  source        String?
-  workshop      String?
-  purchaseUnit  String?
-  salesUnit     String?
-  inventoryUnit String?
-  unitConversions Json  @default("[]")
-  salePrice     Decimal? @db.Decimal(12, 2)
-  costPrice     Decimal? @db.Decimal(12, 2)
-  stockMax      Int?
-  stockMin      Int?
-  minPurchase   Int?
-  dailyCapacity Int?
-  remark        String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  molds         MoldDevelopment[]
-  moldMasters   MoldMaster[]
-  routings      ProcessRouting[]
-  recipeItems   MeltRecipeItem[]
+  id                  String                     @id @default(cuid())
+  code                String                     @unique
+  name                String
+  spec                String?
+  unit                String?
+  type                String?
+  source              String?
+  workshop            String?
+  purchaseUnit        String?
+  salesUnit           String?
+  inventoryUnit       String?
+  unitConversions     Json                       @default("[]")
+  salePrice           Decimal?                   @db.Decimal(12, 2)
+  costPrice           Decimal?                   @db.Decimal(12, 2)
+  stockMax            Int?
+  stockMin            Int?
+  minPurchase         Int?
+  dailyCapacity       Int?
+  materialGradeCode   String?
+  remark              String?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  molds               MoldDevelopment[]
+  moldMasters         MoldMaster[]
+  routingApplications RoutingApplicableProduct[]
+  defaultRouting      ProductDefaultRouting?
+  recipeItems         MeltRecipeItem[]
+  castingBom          CastingBom?
+  castingBomItems     CastingBomItem[]
+  workOrders          WorkOrder[]
+  materialGrade       MaterialGrade?             @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
+
+  @@index([materialGradeCode])
 }
 
 model MoldDevelopment {
-  id                    String                @id @default(cuid())
-  code                  String                @unique
-  customerId            String
-  customer              Customer              @relation(fields: [customerId], references: [id])
-  productId             String
-  product               Product               @relation(fields: [productId], references: [id])
-  supplierId            String
-  supplier              Supplier              @relation(fields: [supplierId], references: [id])
-  customerNotifyDate    DateTime
-  moldName              String?
-  moldType              String
-  followerName          String?
-  expectedDate          DateTime?
-  status                MoldDevelopmentStatus @default(WAITING_SUPPLIER_CONFIRM)
-  archivedMoldCode      String?
-  supplierPromiseDate   DateTime?
-  shippedAt             DateTime?
-  trackingNumber        String?
-  attachments           Json                  @default("[]")
-  remark                String?
-  createdAt             DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
-  flowRecords           MoldDevelopmentFlowRecord[]
-  productionRecords     MoldProductionRecord[]
+  id                  String                      @id @default(cuid())
+  code                String                      @unique
+  customerId          String
+  customer            Customer                    @relation(fields: [customerId], references: [id])
+  productId           String
+  product             Product                     @relation(fields: [productId], references: [id])
+  supplierId          String
+  supplier            Supplier                    @relation(fields: [supplierId], references: [id])
+  customerNotifyDate  DateTime
+  moldName            String?
+  moldType            String
+  followerName        String?
+  expectedDate        DateTime?
+  status              MoldDevelopmentStatus       @default(WAITING_SUPPLIER_CONFIRM)
+  archivedMoldCode    String?
+  supplierPromiseDate DateTime?
+  shippedAt           DateTime?
+  trackingNumber      String?
+  attachments         Json                        @default("[]")
+  remark              String?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  flowRecords         MoldDevelopmentFlowRecord[]
+  productionRecords   MoldProductionRecord[]
 }
 
 model MoldDevelopmentFlowRecord {
@@ -289,18 +338,17 @@ model BusinessDataOwnership {
 }
 
 model Workshop {
-  id        String   @id @default(cuid())
-  code      String   @unique
+  id        String           @id @default(cuid())
+  code      String           @unique
   name      String
   type      String?
-  status    String   @default("启用")
+  status    String           @default("启用")
   remark    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
   lines     ProductionLine[]
   teams     Team[]
   furnaces  Furnace[]
-  routingSteps ProcessRoutingStep[]
   schedules ShiftSchedule[]
 
   @@index([status])
@@ -317,27 +365,27 @@ model ProductionLine {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   workshop     Workshop @relation(fields: [workshopCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
-  routingSteps ProcessRoutingStep[]
 
   @@index([workshopCode])
   @@index([status])
 }
 
 model Team {
-  id            String   @id @default(cuid())
-  code          String   @unique
+  id            String          @id @default(cuid())
+  code          String          @unique
   name          String
   workshopCode  String
   leaderUserId  String?
-  memberUserIds Json     @default("[]")
-  status        String   @default("启用")
+  memberUserIds Json            @default("[]")
+  status        String          @default("启用")
   remark        String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  workshop      Workshop @relation(fields: [workshopCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
-  leader        User?    @relation("TeamLeader", fields: [leaderUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  workshop      Workshop        @relation(fields: [workshopCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  leader        User?           @relation("TeamLeader", fields: [leaderUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
   schedules     ShiftSchedule[]
   members       TeamMember[]
+  heatOrders    HeatOrder[]
 
   @@index([workshopCode])
   @@index([leaderUserId])
@@ -361,78 +409,204 @@ model MesItem {
 }
 
 model MaterialGrade {
-  id            String   @id @default(cuid())
-  code          String   @unique
-  name          String
-  standard      String?
-  elementLimits Json     @default("[]")
-  status        String   @default("启用")
-  remark        String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  recipes       MeltRecipe[]
-  allowedFurnaces FurnaceAllowedMaterial[]
+  id                 String                         @id @default(cuid())
+  code               String                         @unique
+  name               String
+  category           String?
+  materialType       String?
+  standard           String?
+  standardVersion    String?
+  elementLimits      Json                           @default("[]")
+  status             String                         @default("启用")
+  remark             String?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  recipes            MeltRecipe[]
+  products           Product[]
+  elements           MaterialGradeElement[]
+  properties         MaterialGradeProperty[]
+  processRules       MaterialGradeProcessRule[]
+  standardVersions   MaterialGradeStandardVersion[]
+  allowedFurnaces    FurnaceAllowedMaterial[]
+  castingBomVersions CastingBomVersion[]
+  workOrders         WorkOrder[]
+  heatOrders         HeatOrder[]
 
   @@index([status])
 }
 
+model MaterialGradeElement {
+  id                String        @id @default(cuid())
+  materialGradeCode String
+  elementName       String
+  valueMode         String        @default("range")
+  fixedValue        Decimal?      @db.Decimal(12, 6)
+  minValue          Decimal?      @db.Decimal(12, 6)
+  maxValue          Decimal?      @db.Decimal(12, 6)
+  unit              String        @default("%")
+  remark            String?
+  materialGrade     MaterialGrade @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
+
+  @@unique([materialGradeCode, elementName])
+  @@index([materialGradeCode])
+}
+
+model MaterialGradeProperty {
+  id                String        @id @default(cuid())
+  materialGradeCode String
+  propertyName      String
+  valueMode         String        @default("range")
+  fixedValue        Decimal?      @db.Decimal(12, 4)
+  minValue          Decimal?      @db.Decimal(12, 4)
+  maxValue          Decimal?      @db.Decimal(12, 4)
+  unit              String?
+  testMethod        String?
+  remark            String?
+  materialGrade     MaterialGrade @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
+
+  @@unique([materialGradeCode, propertyName])
+  @@index([materialGradeCode])
+}
+
+model MaterialGradeProcessRule {
+  id                String        @id @default(cuid())
+  materialGradeCode String
+  parameterName     String
+  valueMode         String        @default("range")
+  fixedValue        Decimal?      @db.Decimal(12, 4)
+  minValue          Decimal?      @db.Decimal(12, 4)
+  maxValue          Decimal?      @db.Decimal(12, 4)
+  unit              String?
+  textValue         String?
+  remark            String?
+  materialGrade     MaterialGrade @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
+
+  @@unique([materialGradeCode, parameterName])
+  @@index([materialGradeCode])
+}
+
+model MaterialGradeStandardVersion {
+  id                String        @id @default(cuid())
+  materialGradeCode String
+  version           String
+  standard          String
+  effectiveDate     DateTime?
+  expiryDate        DateTime?
+  status            String        @default("生效")
+  remark            String?
+  materialGrade     MaterialGrade @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
+
+  @@unique([materialGradeCode, version])
+  @@index([materialGradeCode])
+}
+
 model Furnace {
-  id                    String   @id @default(cuid())
-  code                  String   @unique
-  name                  String
-  workshopCode          String?
-  capacity              Decimal? @db.Decimal(12, 2)
-  allowedMaterialCodes  Json     @default("[]")
-  status                String   @default("启用")
-  remark                String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  workshop              Workshop? @relation(fields: [workshopCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
-  allowedMaterials      FurnaceAllowedMaterial[]
+  id                   String                    @id @default(cuid())
+  code                 String                    @unique
+  name                 String
+  equipmentType        String                    @default("熔炼炉")
+  workshopCode         String?
+  capacity             Decimal?                  @db.Decimal(12, 2)
+  capacityUnit         String?
+  allowedMaterialCodes Json                      @default("[]")
+  status               String                    @default("启用")
+  remark               String?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  workshop             Workshop?                 @relation(fields: [workshopCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
+  allowedMaterials     FurnaceAllowedMaterial[]
+  applicableRecipes    RecipeApplicableFurnace[]
+  routingNodeLinks     RoutingNodeEquipment[]
+  plannedHeatOrders    HeatOrder[]               @relation("HeatOrderPlannedFurnace")
+  actualHeatOrders     HeatOrder[]               @relation("HeatOrderActualFurnace")
+  heatOrderTransfers   HeatOrderTransfer[]       @relation("HeatOrderTransferDevice")
 
   @@index([workshopCode])
+  @@index([equipmentType])
   @@index([status])
 }
 
 model MeltRecipe {
-  id                String   @id @default(cuid())
-  code              String   @unique
-  name              String
-  materialGradeCode String
-  version           String?
-  items             Json     @default("[]")
-  status            String   @default("启用")
-  remark            String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  materialGrade     MaterialGrade @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
-  recipeItems       MeltRecipeItem[]
+  id                      String                    @id @default(cuid())
+  code                    String                    @unique
+  name                    String
+  materialGradeCode       String
+  version                 String                    @default("V1.0")
+  baseWeightKg            Decimal                   @default(1000) @db.Decimal(12, 4)
+  meltingDurationMinutes  Int                       @default(0)
+  transferDurationMinutes Int                       @default(0)
+  cleaningDurationMinutes Int                       @default(0)
+  sourceRecipeCode        String?
+  createdByUserId         String?
+  items                   Json                      @default("[]")
+  status                  String                    @default("DRAFT")
+  remark                  String?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  materialGrade           MaterialGrade             @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  sourceRecipe            MeltRecipe?               @relation("RecipeCloneSource", fields: [sourceRecipeCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
+  clones                  MeltRecipe[]              @relation("RecipeCloneSource")
+  createdBy               User?                     @relation("RecipeCreator", fields: [createdByUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  applicableFurnaces      RecipeApplicableFurnace[]
+  targetElements          RecipeTargetElement[]
+  recipeItems             MeltRecipeItem[]
+  heatOrders              HeatOrder[]
 
   @@index([materialGradeCode])
+  @@index([sourceRecipeCode])
+  @@index([createdByUserId])
   @@index([status])
 }
 
+model RecipeApplicableFurnace {
+  recipeCode  String
+  furnaceCode String
+  createdAt   DateTime   @default(now())
+  recipe      MeltRecipe @relation(fields: [recipeCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
+  furnace     Furnace    @relation(fields: [furnaceCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+
+  @@id([recipeCode, furnaceCode])
+  @@index([furnaceCode])
+}
+
+model RecipeTargetElement {
+  id          String     @id @default(cuid())
+  recipeCode  String
+  elementName String
+  minValue    Decimal?   @db.Decimal(12, 6)
+  maxValue    Decimal?   @db.Decimal(12, 6)
+  unit        String     @default("%")
+  remark      String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  recipe      MeltRecipe @relation(fields: [recipeCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
+
+  @@unique([recipeCode, elementName])
+  @@index([recipeCode])
+}
+
 model MoldMaster {
-  id            String   @id @default(cuid())
-  code          String   @unique
-  name          String
-  itemCode      String
-  moldType      String?
-  supplierCode  String?
-  specModel     String?
+  id                        String                  @id @default(cuid())
+  code                      String                  @unique
+  name                      String
+  itemCode                  String
+  moldType                  String?
+  supplierCode              String?
+  specModel                 String?
   sourceMoldDevelopmentCode String?
-  hasCoreBox    Boolean  @default(false)
-  images        Json     @default("[]")
-  cavityCount   Int?
-  maxLife       Int?
-  usedLife      Int      @default(0)
-  status        String   @default("启用")
-  remark        String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  item          Product @relation(fields: [itemCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
-  supplier      Supplier? @relation(fields: [supplierCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
-  coreBoxes     CoreBoxMaster[]
+  hasCoreBox                Boolean                 @default(false)
+  images                    Json                    @default("[]")
+  cavityCount               Int?
+  maxLife                   Int?
+  usedLife                  Int                     @default(0)
+  status                    String                  @default("启用")
+  remark                    String?
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  item                      Product                 @relation(fields: [itemCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  supplier                  Supplier?               @relation(fields: [supplierCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
+  coreBoxes                 CoreBoxMaster[]
+  bomVersions               CastingBomVersionMold[]
 
   @@index([itemCode])
   @@index([supplierCode])
@@ -441,103 +615,196 @@ model MoldMaster {
 }
 
 model CoreBoxMaster {
-  id          String   @id @default(cuid())
-  code        String   @unique
+  id          String                     @id @default(cuid())
+  code        String                     @unique
   name        String
   moldCode    String
-  images      Json     @default("[]")
+  images      Json                       @default("[]")
   cavityCount Int?
   maxLife     Int?
-  usedLife    Int      @default(0)
-  status      String   @default("启用")
+  usedLife    Int                        @default(0)
+  status      String                     @default("启用")
   remark      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  mold        MoldMaster @relation(fields: [moldCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  mold        MoldMaster                 @relation(fields: [moldCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  bomVersions CastingBomVersionCoreBox[]
 
   @@index([moldCode])
   @@index([status])
 }
 
-model ProcessRouting {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  name      String
-  itemCode  String
-  version   String?
-  status    String   @default("启用")
-  remark    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  steps     ProcessRoutingStep[]
-  item      Product @relation(fields: [itemCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+model OperationMaster {
+  id                  String               @id @default(cuid())
+  code                String               @unique
+  name                String
+  section             String
+  reportMode          String               @default("BATCH")
+  qualityControlPoint Boolean              @default(false)
+  pouringMergePoint   Boolean              @default(false)
+  status              String               @default("ENABLED")
+  remark              String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  routingNodes        ProcessRoutingNode[]
 
-  @@index([itemCode])
+  @@index([section])
   @@index([status])
 }
 
-model ProcessRoutingStep {
-  id                 String         @id @default(cuid())
-  routingId          String
-  routing            ProcessRouting @relation(fields: [routingId], references: [id], onDelete: Cascade)
-  seqNo              Int
-  operationName      String
-  workshopCode       String
-  productionLineCode String?
-  standardHours      Decimal?       @db.Decimal(12, 2)
-  remark             String?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  workshop           Workshop       @relation(fields: [workshopCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
-  productionLine     ProductionLine? @relation(fields: [productionLineCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
+model ProcessRouting {
+  id        String                  @id @default(cuid())
+  code      String                  @unique
+  name      String
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
+  versions  ProcessRoutingVersion[]
+}
 
-  @@index([routingId])
-  @@index([workshopCode])
-  @@index([productionLineCode])
+model ProcessRoutingVersion {
+  id              String                     @id @default(cuid())
+  routingId       String
+  version         String
+  status          String                     @default("DRAFT")
+  sourceVersionId String?
+  createdByUserId String?
+  remark          String?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+  routing         ProcessRouting             @relation(fields: [routingId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  sourceVersion   ProcessRoutingVersion?     @relation("RoutingVersionSource", fields: [sourceVersionId], references: [id], onDelete: SetNull)
+  derivedVersions ProcessRoutingVersion[]    @relation("RoutingVersionSource")
+  createdBy       User?                      @relation("RoutingVersionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  products        RoutingApplicableProduct[]
+  defaultProducts ProductDefaultRouting[]
+  nodes           ProcessRoutingNode[]
+  edges           ProcessRoutingEdge[]
+  workOrders      WorkOrder[]
+
+  @@unique([routingId, version])
+  @@index([status])
+  @@index([sourceVersionId])
+  @@index([createdByUserId])
+}
+
+model RoutingApplicableProduct {
+  routingVersionId String
+  productCode      String
+  createdAt        DateTime              @default(now())
+  routingVersion   ProcessRoutingVersion @relation(fields: [routingVersionId], references: [id], onDelete: Cascade)
+  product          Product               @relation(fields: [productCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+
+  @@id([routingVersionId, productCode])
+  @@index([productCode])
+}
+
+model ProductDefaultRouting {
+  productCode      String                @id
+  routingVersionId String
+  updatedAt        DateTime              @updatedAt
+  product          Product               @relation(fields: [productCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
+  routingVersion   ProcessRoutingVersion @relation(fields: [routingVersionId], references: [id], onDelete: Cascade)
+
+  @@index([routingVersionId])
+}
+
+model ProcessRoutingNode {
+  id                    String                 @id @default(cuid())
+  routingVersionId      String
+  operationCode         String
+  seqNo                 Int
+  routeType             String
+  reportEnabled         Boolean                @default(true)
+  qualityControlEnabled Boolean                @default(false)
+  qualityRequirement    String?
+  requireFurnaceBatch   Boolean                @default(false)
+  requireLadle          Boolean                @default(false)
+  requireCoreBatch      Boolean                @default(false)
+  standardCycleSeconds  Int?
+  positionX             Decimal                @default(0) @db.Decimal(12, 2)
+  positionY             Decimal                @default(0) @db.Decimal(12, 2)
+  remark                String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  routingVersion        ProcessRoutingVersion  @relation(fields: [routingVersionId], references: [id], onDelete: Cascade)
+  operation             OperationMaster        @relation(fields: [operationCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  equipmentLinks        RoutingNodeEquipment[]
+  outgoingEdges         ProcessRoutingEdge[]   @relation("RoutingEdgeSource")
+  incomingEdges         ProcessRoutingEdge[]   @relation("RoutingEdgeTarget")
+
+  @@unique([routingVersionId, seqNo])
+  @@index([operationCode])
+}
+
+model RoutingNodeEquipment {
+  routingNodeId String
+  equipmentCode String
+  createdAt     DateTime           @default(now())
+  routingNode   ProcessRoutingNode @relation(fields: [routingNodeId], references: [id], onDelete: Cascade)
+  equipment     Furnace            @relation(fields: [equipmentCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+
+  @@id([routingNodeId, equipmentCode])
+  @@index([equipmentCode])
+}
+
+model ProcessRoutingEdge {
+  id               String                @id @default(cuid())
+  routingVersionId String
+  sourceNodeId     String
+  targetNodeId     String
+  createdAt        DateTime              @default(now())
+  routingVersion   ProcessRoutingVersion @relation(fields: [routingVersionId], references: [id], onDelete: Cascade)
+  sourceNode       ProcessRoutingNode    @relation("RoutingEdgeSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode       ProcessRoutingNode    @relation("RoutingEdgeTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([routingVersionId, sourceNodeId, targetNodeId])
+  @@index([sourceNodeId])
+  @@index([targetNodeId])
 }
 
 model ShiftMaster {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  name      String
-  startTime String
-  endTime   String
-  crossDay  Boolean  @default(false)
-  status    String   @default("启用")
-  remark    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  schedules ShiftSchedule[]
+  id           String                 @id @default(cuid())
+  code         String                 @unique
+  name         String
+  startTime    String
+  endTime      String
+  crossDay     Boolean                @default(false)
+  status       String                 @default("启用")
+  remark       String?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  schedules    ShiftSchedule[]
   calendarDays FactoryCalendarShift[]
+  heatOrders   HeatOrder[]
 
   @@index([status])
 }
 
 model FactoryCalendar {
-  id          String   @id @default(cuid())
-  date        DateTime @unique @db.Date
-  dayType     String   @default("工作日")
-  shiftCodes  Json     @default("[]")
-  remark      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  shifts      FactoryCalendarShift[]
+  id         String                 @id @default(cuid())
+  date       DateTime               @unique @db.Date
+  dayType    String                 @default("工作日")
+  shiftCodes Json                   @default("[]")
+  remark     String?
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+  shifts     FactoryCalendarShift[]
 
   @@index([dayType])
 }
 
 model ShiftSchedule {
-  id           String   @id @default(cuid())
-  date         DateTime @db.Date
+  id           String      @id @default(cuid())
+  date         DateTime    @db.Date
   workshopCode String
   shiftCode    String
   teamCode     String
   remark       String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  workshop     Workshop @relation(fields: [workshopCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  workshop     Workshop    @relation(fields: [workshopCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
   shift        ShiftMaster @relation(fields: [shiftCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
-  team         Team @relation(fields: [teamCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  team         Team        @relation(fields: [teamCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
 
   @@unique([date, workshopCode, shiftCode])
   @@index([workshopCode])
@@ -583,20 +850,299 @@ model FurnaceAllowedMaterial {
 }
 
 model MeltRecipeItem {
-  id         String     @id @default(cuid())
-  recipeCode String
-  itemCode   String
-  ratio      Decimal?   @db.Decimal(12, 4)
-  quantity   Decimal?   @db.Decimal(12, 4)
-  unit       String?
-  remark     String?
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  recipe     MeltRecipe @relation(fields: [recipeCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
-  item       Product    @relation(fields: [itemCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  id               String     @id @default(cuid())
+  recipeCode       String
+  itemCode         String
+  materialCategory String     @default("RAW")
+  ratio            Decimal?   @db.Decimal(12, 4)
+  quantity         Decimal?   @db.Decimal(12, 4)
+  unit             String?
+  remark           String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  recipe           MeltRecipe @relation(fields: [recipeCode], references: [code], onUpdate: Cascade, onDelete: Cascade)
+  item             Product    @relation(fields: [itemCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
 
+  @@unique([recipeCode, itemCode])
   @@index([recipeCode])
   @@index([itemCode])
+}
+
+model CastingBom {
+  id          String              @id @default(cuid())
+  code        String              @unique
+  productCode String              @unique
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  product     Product             @relation(fields: [productCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  versions    CastingBomVersion[]
+}
+
+model CastingBomVersion {
+  id                  String                     @id @default(cuid())
+  bomId               String
+  version             String
+  materialGradeCode   String
+  productNameSnapshot String
+  netWeightKg         Decimal                    @db.Decimal(12, 4)
+  grossWeightKg       Decimal                    @db.Decimal(12, 4)
+  yieldRate           Decimal                    @db.Decimal(12, 4)
+  returnWeightKg      Decimal                    @db.Decimal(12, 4)
+  status              String                     @default("DRAFT")
+  sourceVersionId     String?
+  createdByUserId     String?
+  remark              String?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  bom                 CastingBom                 @relation(fields: [bomId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  materialGrade       MaterialGrade              @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  sourceVersion       CastingBomVersion?         @relation("BomVersionSource", fields: [sourceVersionId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  derivedVersions     CastingBomVersion[]        @relation("BomVersionSource")
+  createdBy           User?                      @relation("BomVersionCreator", fields: [createdByUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  items               CastingBomItem[]
+  molds               CastingBomVersionMold[]
+  coreBoxes           CastingBomVersionCoreBox[]
+  workOrders          WorkOrder[]
+
+  @@unique([bomId, version])
+  @@index([materialGradeCode])
+  @@index([sourceVersionId])
+  @@index([createdByUserId])
+  @@index([status])
+}
+
+model CastingBomItem {
+  id               String            @id @default(cuid())
+  bomVersionId     String
+  itemCode         String
+  itemNameSnapshot String
+  itemTypeSnapshot String
+  standardQuantity Decimal           @db.Decimal(12, 4)
+  unit             String
+  lossRate         Decimal           @default(0) @db.Decimal(8, 4)
+  remark           String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  bomVersion       CastingBomVersion @relation(fields: [bomVersionId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  item             Product           @relation(fields: [itemCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+
+  @@unique([bomVersionId, itemCode])
+  @@index([itemCode])
+}
+
+model CastingBomVersionMold {
+  bomVersionId     String
+  moldCode         String
+  moldNameSnapshot String
+  createdAt        DateTime          @default(now())
+  bomVersion       CastingBomVersion @relation(fields: [bomVersionId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  mold             MoldMaster        @relation(fields: [moldCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+
+  @@id([bomVersionId, moldCode])
+  @@index([moldCode])
+}
+
+model CastingBomVersionCoreBox {
+  bomVersionId        String
+  coreBoxCode         String
+  coreBoxNameSnapshot String
+  moldCodeSnapshot    String
+  createdAt           DateTime          @default(now())
+  bomVersion          CastingBomVersion @relation(fields: [bomVersionId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  coreBox             CoreBoxMaster     @relation(fields: [coreBoxCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+
+  @@id([bomVersionId, coreBoxCode])
+  @@index([coreBoxCode])
+}
+
+model WorkOrder {
+  id                        String                    @id @default(cuid())
+  code                      String                    @unique
+  source                    String                    @default("MANUAL")
+  externalNo                String?
+  productCode               String
+  productCodeSnapshot       String
+  productNameSnapshot       String
+  bomVersionId              String
+  bomCodeSnapshot           String
+  bomVersionSnapshot        String
+  routingVersionId          String
+  routingCodeSnapshot       String
+  routingNameSnapshot       String
+  routingVersionSnapshot    String
+  materialGradeCode         String
+  materialGradeNameSnapshot String
+  plannedQuantity           Int
+  plannedStartDate          DateTime?                 @db.Date
+  plannedDeliveryDate       DateTime                  @db.Date
+  priority                  String                    @default("NORMAL")
+  unitNetWeightKg           Decimal                   @db.Decimal(14, 4)
+  unitGrossWeightKg         Decimal                   @db.Decimal(14, 4)
+  yieldRate                 Decimal                   @db.Decimal(8, 4)
+  unitReturnWeightKg        Decimal                   @db.Decimal(14, 4)
+  totalNetWeightKg          Decimal                   @db.Decimal(14, 4)
+  totalMeltWeightKg         Decimal                   @db.Decimal(14, 4)
+  expectedReturnWeightKg    Decimal                   @db.Decimal(14, 4)
+  scheduledQuantity         Int                       @default(0)
+  meltCompletedQuantity     Int                       @default(0)
+  meltCompletedWeightKg     Decimal                   @default(0) @db.Decimal(14, 4)
+  completedQuantity         Int                       @default(0)
+  scheduleStatus            WorkOrderScheduleStatus   @default(PENDING)
+  productionStatus          WorkOrderProductionStatus @default(RELEASED)
+  meltCompletedAt           DateTime?
+  completedAt               DateTime?
+  closedAt                  DateTime?
+  closeReason               String?
+  versionNo                 Int                       @default(1)
+  remark                    String?
+  createdByUserId           String?
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  product                   Product                   @relation(fields: [productCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  bomVersion                CastingBomVersion         @relation(fields: [bomVersionId], references: [id], onUpdate: Cascade, onDelete: Restrict)
+  routingVersion            ProcessRoutingVersion     @relation(fields: [routingVersionId], references: [id], onUpdate: Cascade, onDelete: Restrict)
+  materialGrade             MaterialGrade             @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  createdBy                 User?                     @relation("WorkOrderCreator", fields: [createdByUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  allocations               HeatOrderAllocation[]
+
+  @@index([productCode])
+  @@index([bomVersionId])
+  @@index([routingVersionId])
+  @@index([materialGradeCode])
+  @@index([scheduleStatus])
+  @@index([productionStatus])
+  @@index([plannedDeliveryDate])
+  @@index([createdByUserId])
+}
+
+model HeatOrder {
+  id                               String                @id @default(cuid())
+  code                             String                @unique
+  materialGradeCode                String
+  materialGradeNameSnapshot        String
+  furnaceCode                      String
+  furnaceNameSnapshot              String
+  furnaceCapacityKgSnapshot        Decimal               @db.Decimal(14, 4)
+  actualFurnaceCode                String?
+  actualFurnaceNameSnapshot        String?
+  workshopCodeSnapshot             String?
+  workshopNameSnapshot             String?
+  recipeCode                       String
+  recipeNameSnapshot               String
+  recipeVersionSnapshot            String
+  teamCode                         String
+  teamNameSnapshot                 String
+  shiftCode                        String?
+  plannedOutputAt                  DateTime
+  plannedStartAt                   DateTime?
+  calculatedFinishAt               DateTime?
+  plannedFinishAt                  DateTime?
+  meltingDurationMinutesSnapshot   Int?
+  transferDurationMinutesSnapshot  Int?
+  cleaningDurationMinutesSnapshot  Int?
+  occupancyDurationMinutesSnapshot Int?
+  finishTimeAdjusted               Boolean               @default(false)
+  targetWeightKg                   Decimal               @db.Decimal(14, 4)
+  actualOutputWeightKg             Decimal?              @db.Decimal(14, 4)
+  status                           HeatOrderStatus       @default(WAITING)
+  versionNo                        Int                   @default(1)
+  startedByUserId                  String?
+  startedAt                        DateTime?
+  completedByUserId                String?
+  completedAt                      DateTime?
+  canceledByUserId                 String?
+  canceledAt                       DateTime?
+  cancelReason                     String?
+  createdByUserId                  String?
+  createdAt                        DateTime              @default(now())
+  updatedAt                        DateTime              @updatedAt
+  materialGrade                    MaterialGrade         @relation(fields: [materialGradeCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  furnace                          Furnace               @relation("HeatOrderPlannedFurnace", fields: [furnaceCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  actualFurnace                    Furnace?              @relation("HeatOrderActualFurnace", fields: [actualFurnaceCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  recipe                           MeltRecipe            @relation(fields: [recipeCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  team                             Team                  @relation(fields: [teamCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  shift                            ShiftMaster?          @relation(fields: [shiftCode], references: [code], onUpdate: Cascade, onDelete: SetNull)
+  createdBy                        User?                 @relation("HeatOrderCreator", fields: [createdByUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  startedBy                        User?                 @relation("HeatOrderStarter", fields: [startedByUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  completedBy                      User?                 @relation("HeatOrderCompleter", fields: [completedByUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  canceledBy                       User?                 @relation("HeatOrderCanceler", fields: [canceledByUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+  allocations                      HeatOrderAllocation[]
+  records                          HeatOrderRecord[]
+  transfers                        HeatOrderTransfer[]
+
+  @@index([materialGradeCode])
+  @@index([furnaceCode])
+  @@index([actualFurnaceCode])
+  @@index([recipeCode])
+  @@index([teamCode])
+  @@index([shiftCode])
+  @@index([status])
+  @@index([plannedOutputAt])
+  @@index([furnaceCode, plannedStartAt, plannedFinishAt])
+}
+
+model HeatOrderAllocation {
+  id                String    @id @default(cuid())
+  heatOrderId       String
+  workOrderId       String
+  allocatedQuantity Int
+  plannedWeightKg   Decimal   @db.Decimal(14, 4)
+  actualWeightKg    Decimal?  @db.Decimal(14, 4)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  heatOrder         HeatOrder @relation(fields: [heatOrderId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  workOrder         WorkOrder @relation(fields: [workOrderId], references: [id], onUpdate: Cascade, onDelete: Restrict)
+
+  @@unique([heatOrderId, workOrderId])
+  @@index([workOrderId])
+}
+
+model HeatOrderRecord {
+  id                   String           @id @default(cuid())
+  heatOrderId          String
+  action               HeatOrderAction
+  fromStatus           HeatOrderStatus?
+  toStatus             HeatOrderStatus
+  operatorUserId       String?
+  operatorNameSnapshot String
+  remark               String?
+  payload              Json             @default("{}")
+  createdAt            DateTime         @default(now())
+  heatOrder            HeatOrder        @relation(fields: [heatOrderId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  operator             User?            @relation("HeatOrderRecordOperator", fields: [operatorUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+
+  @@index([heatOrderId, createdAt])
+  @@index([operatorUserId])
+}
+
+model HeatOrderTransfer {
+  id                         String    @id @default(cuid())
+  heatOrderId                String
+  transferDeviceCode         String
+  transferDeviceNameSnapshot String
+  equipmentTypeSnapshot      String
+  weightKg                   Decimal   @db.Decimal(14, 4)
+  weightSource               String    @default("MANUAL")
+  operatorUserId             String?
+  operatorNameSnapshot       String
+  remark                     String?
+  createdAt                  DateTime  @default(now())
+  heatOrder                  HeatOrder @relation(fields: [heatOrderId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  transferDevice             Furnace   @relation("HeatOrderTransferDevice", fields: [transferDeviceCode], references: [code], onUpdate: Cascade, onDelete: Restrict)
+  operator                   User?     @relation("HeatOrderTransferOperator", fields: [operatorUserId], references: [id], onUpdate: Cascade, onDelete: SetNull)
+
+  @@index([heatOrderId, createdAt])
+  @@index([transferDeviceCode])
+  @@index([operatorUserId])
+}
+
+model DocumentSequence {
+  documentType String
+  businessDate DateTime @db.Date
+  currentValue Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@id([documentType, businessDate])
 }
 
 model FactoryCalendarShift {

@@ -44,7 +44,7 @@ import {
   fetchRolesFromApi,
   hasPermission,
   loadRoles,
-  permissionTree,
+  permissionTreeForApp,
   publicSyncPermissionKeys,
   updateRoleOnApi,
 } from '../../utils/roles'
@@ -118,6 +118,16 @@ const permissionDependencies: Record<string, string> = {
   'model.recipe.create': 'model.recipe.view',
   'model.recipe.edit': 'model.recipe.view',
   'model.recipe.delete': 'model.recipe.view',
+  'model.recipe.clone': 'model.recipe.view',
+  'model.recipe.activate': 'model.recipe.view',
+  'model.recipe.disable': 'model.recipe.view',
+  'model.bom.create': 'model.bom.view',
+  'model.bom.edit': 'model.bom.view',
+  'model.bom.delete': 'model.bom.view',
+  'model.bom.clone': 'model.bom.view',
+  'model.bom.activate': 'model.bom.view',
+  'model.bom.disable': 'model.bom.view',
+  'model.bom.new_version': 'model.bom.view',
   'model.routing.create': 'model.routing.view',
   'model.routing.edit': 'model.routing.view',
   'model.routing.delete': 'model.routing.view',
@@ -131,6 +141,8 @@ const permissionDependencies: Record<string, string> = {
   'model.defect.create': 'model.defect.view',
   'model.defect.edit': 'model.defect.view',
   'model.defect.delete': 'model.defect.view',
+  'mini.production.heat.start': 'mini.production.heat.view',
+  'mini.production.heat.complete': 'mini.production.heat.view',
 }
 
 function normalizePermissions(keys: string[]) {
@@ -156,6 +168,16 @@ function filterPermissionTreeByKeys(nodes: DataNode[], checkedKeys: string[]): D
       }
     })
     .filter(Boolean) as DataNode[]
+}
+
+function permissionKeysInTree(nodes: DataNode[]): Set<string> {
+  const keys = new Set<string>()
+  const visit = (items: DataNode[]) => items.forEach((item) => {
+    keys.add(String(item.key))
+    if (item.children) visit(item.children)
+  })
+  visit(nodes)
+  return keys
 }
 
 function getOrganizationOptions(departments: DepartmentRecord[]) {
@@ -198,9 +220,11 @@ export function RolePermissionPage() {
       })),
     [users],
   )
+  const activePermissionTree = useMemo(() => permissionTreeForApp(activeRole?.app), [activeRole?.app])
+  const activePermissionKeys = useMemo(() => permissionKeysInTree(activePermissionTree), [activePermissionTree])
   const assignedPermissionTree = useMemo(
-    () => filterPermissionTreeByKeys(permissionTree, checkedPermissions),
-    [checkedPermissions],
+    () => filterPermissionTreeByKeys(activePermissionTree, checkedPermissions),
+    [activePermissionTree, checkedPermissions],
   )
 
   const refreshRolePage = async () => {
@@ -258,7 +282,10 @@ export function RolePermissionPage() {
   const handleSubmitRole = async (values: RoleFormValues) => {
     if (editingRole) {
       try {
-        await updateRoleOnApi(editingRole.id, values)
+        await updateRoleOnApi(editingRole.id, {
+          ...values,
+          ...(editingRole.app !== values.app ? { permissions: [] } : {}),
+        })
         setRoles(await fetchRolesFromApi())
         message.success('角色已更新')
       } catch (error) {
@@ -330,7 +357,8 @@ export function RolePermissionPage() {
 
   const openPermissionModal = (role: RoleRecord) => {
     setActiveRole(role)
-    setCheckedPermissions(role.permissions)
+    const rolePermissionKeys = permissionKeysInTree(permissionTreeForApp(role.app))
+    setCheckedPermissions(role.permissions.filter((permission) => rolePermissionKeys.has(permission)))
     setIncludeSyncedPublicData(role.permissions.some((permission) => publicSyncPermissionKeys.includes(permission as (typeof publicSyncPermissionKeys)[number])))
     setDataScopes(role.dataScopes?.length ? role.dataScopes : [role.dataScope])
     setCustomDepartments(role.customDepartments)
@@ -347,8 +375,10 @@ export function RolePermissionPage() {
   const savePermissions = async () => {
     if (!activeRole) return
     const nextPermissions = normalizePermissions([
-      ...checkedPermissions.filter((permission) => !publicSyncPermissionKeys.includes(permission as (typeof publicSyncPermissionKeys)[number])),
-      ...(includeSyncedPublicData ? publicSyncPermissionKeys : []),
+      ...checkedPermissions.filter((permission) =>
+        activePermissionKeys.has(permission) && !publicSyncPermissionKeys.includes(permission as (typeof publicSyncPermissionKeys)[number]),
+      ),
+      ...(activeRole.app !== '小程序端' && includeSyncedPublicData ? publicSyncPermissionKeys : []),
     ])
     try {
       await updateRoleOnApi(activeRole.id, {
@@ -574,7 +604,7 @@ export function RolePermissionPage() {
                         const keys = Array.isArray(checked) ? checked.map(String) : checked.checked.map(String)
                         setCheckedPermissions(normalizePermissions(keys))
                       }}
-                      treeData={permissionTree}
+                      treeData={activePermissionTree}
                     />
                   </Card>
                   <Card title="已分配权限" size="small">
@@ -609,12 +639,14 @@ export function RolePermissionPage() {
                       disabled: dataScopes.includes('organization') && option.value !== 'organization',
                     }))}
                   />
-                  <Checkbox
-                    checked={includeSyncedPublicData}
-                    onChange={(event) => setIncludeSyncedPublicData(event.target.checked)}
-                  >
-                    包含第三方同步公共数据
-                  </Checkbox>
+                  {activeRole?.app !== '小程序端' && (
+                    <Checkbox
+                      checked={includeSyncedPublicData}
+                      onChange={(event) => setIncludeSyncedPublicData(event.target.checked)}
+                    >
+                      包含第三方同步公共数据
+                    </Checkbox>
+                  )}
                   {dataScopes.includes('custom_departments') && (
                     <Card
                       size="small"

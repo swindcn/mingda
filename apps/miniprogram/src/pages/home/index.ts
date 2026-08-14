@@ -1,4 +1,4 @@
-import { getMobileHome } from '../../services/api'
+import { getCurrentUser, getMobileHome } from '../../services/api'
 import { TodoItem } from '../../types/business'
 
 Page({
@@ -7,6 +7,7 @@ Page({
     todos: [] as TodoItem[],
     todoCount: 0,
     moldCount: 0,
+    canViewHeats: false,
     loading: false,
   },
 
@@ -20,6 +21,7 @@ Page({
     getApp<IAppOption>().globalData.token = token
     this.setData({
       username: wx.getStorageSync('mingda_display_name') || wx.getStorageSync('mingda_login_account') || '1',
+      canViewHeats: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.heat.view'),
     })
     void this.loadHome()
   },
@@ -31,11 +33,15 @@ Page({
   async loadHome() {
     this.setData({ loading: true })
     try {
-      const result = await getMobileHome()
+      const [result, user] = await Promise.all([getMobileHome(), getCurrentUser()])
+      const permissions = user.permissions || []
+      wx.setStorageSync('mingda_permissions', permissions)
+      getApp<IAppOption>().globalData.permissions = permissions
       this.setData({
         todos: result.todos,
         todoCount: result.todoCount,
         moldCount: result.moldCount,
+        canViewHeats: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.production.heat.view'),
       })
     } catch (error) {
       wx.showToast({
@@ -62,8 +68,13 @@ Page({
     wx.navigateTo({ url: '/pages/mold/list/index' })
   },
 
+  goHeats() {
+    wx.navigateTo({ url: '/pages/heat/list/index' })
+  },
+
   logout() {
     wx.removeStorageSync('mingda_token')
+    wx.removeStorageSync('mingda_permissions')
     wx.redirectTo({ url: '/pages/login/index' })
   },
 })

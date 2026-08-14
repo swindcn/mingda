@@ -1,5 +1,5 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
-import { Button, Card, Form, Input, Select, Space, Tag, Tree, Typography, message } from 'antd'
+import { Button, Card, Form, Input, Select, Space, Table, Tag, Tree, Typography, message } from 'antd'
 import type { DataNode } from 'antd/es/tree'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -8,10 +8,11 @@ import {
   loadDictionaries,
   updateDictionariesOnApi,
 } from '../../utils/dictionaries'
-import type { DictionaryState, ProductTypeNode } from '../../utils/dictionaries'
+import type { DictionaryOption, DictionaryState, ProductTypeNode } from '../../utils/dictionaries'
 import { hasPermission } from '../../utils/roles'
 
-type SimpleDictionaryKey = Exclude<keyof DictionaryState, 'productTypes'>
+type SimpleDictionaryKey = Exclude<keyof DictionaryState, 'productTypes' | 'chemicalElements' | 'mechanicalProperties' | 'processRequirements'>
+type StructuredDictionaryKey = 'chemicalElements' | 'mechanicalProperties' | 'processRequirements'
 
 const dictionaryMeta: Array<{
   key: SimpleDictionaryKey
@@ -38,6 +39,27 @@ const dictionaryMeta: Array<{
     title: '车间类型配置',
     description: '用于生产建模中车间与产线的车间类型字段。',
   },
+  {
+    key: 'operationSections',
+    title: '工序工段配置',
+    description: '用于标准工序主档中的所属工段字段。',
+  },
+  {
+    key: 'materialTypes',
+    title: '材料类型配置',
+    description: '用于材质牌号中的材料类型字段，例如球铁、灰铁、碳钢。',
+  },
+  {
+    key: 'equipmentTypes',
+    title: '设备类型配置',
+    description: '用于区分熔炼炉、浇注包、球化包和其他生产设备。',
+  },
+]
+
+const structuredDictionaryMeta: Array<{ key: StructuredDictionaryKey; title: string; description: string }> = [
+  { key: 'chemicalElements', title: '化学成分字典', description: '维护材质牌号可选的化学元素及默认单位。' },
+  { key: 'mechanicalProperties', title: '力学性能字典', description: '维护材质牌号可选的力学性能指标、单位和检测方法。' },
+  { key: 'processRequirements', title: '工艺要求字典', description: '维护材质牌号可选的工艺参数、单位和值类型。' },
 ]
 
 function flattenProductTypeNames(nodes: ProductTypeNode[], prefix = ''): string[] {
@@ -64,6 +86,11 @@ export function DictionarySettingsPage() {
   const [typeForm] = Form.useForm<{ parentType?: string; typeName?: string }>()
   const [dictionaries, setDictionaries] = useState<DictionaryState>(() => loadDictionaries())
   const [saving, setSaving] = useState(false)
+  const [structuredDraft, setStructuredDraft] = useState<Record<StructuredDictionaryKey, DictionaryOption>>({
+    chemicalElements: { name: '', unit: '%' },
+    mechanicalProperties: { name: '', unit: '', testMethod: '' },
+    processRequirements: { name: '', unit: '', valueType: 'number' },
+  })
   const canEdit = hasPermission('basic.dictionary.edit')
 
   useEffect(() => {
@@ -111,6 +138,30 @@ export function DictionarySettingsPage() {
     }
     const next = { ...dictionaries, [key]: nextValues }
     await persistDictionaries(next, '字典项已删除')
+  }
+
+  const addStructuredItem = async (key: StructuredDictionaryKey) => {
+    const draft = structuredDraft[key]
+    const name = draft.name.trim()
+    if (!name) {
+      message.warning('请输入字典项名称')
+      return
+    }
+    if (dictionaries[key].some((item) => item.name === name)) {
+      message.warning('字典项已存在')
+      return
+    }
+    await persistDictionaries({ ...dictionaries, [key]: [...dictionaries[key], { ...draft, name }] }, '字典项已新增')
+    setStructuredDraft((current) => ({ ...current, [key]: { ...current[key], name: '' } }))
+  }
+
+  const removeStructuredItem = async (key: StructuredDictionaryKey, name: string) => {
+    const nextValues = dictionaries[key].filter((item) => item.name !== name)
+    if (!nextValues.length) {
+      message.warning('至少保留一个字典项')
+      return
+    }
+    await persistDictionaries({ ...dictionaries, [key]: nextValues }, '字典项已删除')
   }
 
   const productTypePaths = useMemo(
@@ -231,6 +282,65 @@ export function DictionarySettingsPage() {
             )}
           </Card>
         ))}
+
+        <div className="structured-dictionary-grid">
+          {structuredDictionaryMeta.map((meta) => (
+            <Card key={meta.key} title={meta.title} className="structured-dictionary-card">
+            <Typography.Paragraph type="secondary">{meta.description}</Typography.Paragraph>
+            <Table<DictionaryOption>
+              size="small"
+              rowKey="name"
+              pagination={false}
+              dataSource={dictionaries[meta.key]}
+              columns={[
+                { title: '名称', dataIndex: 'name' },
+                { title: '单位', dataIndex: 'unit', width: 120 },
+                ...(meta.key === 'mechanicalProperties' ? [{ title: '检测方法', dataIndex: 'testMethod', width: 180 }] : []),
+                ...(meta.key === 'processRequirements' ? [{ title: '值类型', dataIndex: 'valueType', width: 100, render: (value: string) => value === 'text' ? '文本' : '数值' }] : []),
+                {
+                  title: '操作',
+                  width: 80,
+                  render: (_: unknown, item: DictionaryOption) => canEdit && (
+                    <Button type="text" danger icon={<DeleteOutlined />} onClick={() => void removeStructuredItem(meta.key, item.name)} />
+                  ),
+                },
+              ]}
+            />
+            {canEdit && (
+              <Space wrap style={{ marginTop: 16 }}>
+                <Input
+                  value={structuredDraft[meta.key].name}
+                  placeholder="名称"
+                  onChange={(event) => setStructuredDraft((current) => ({ ...current, [meta.key]: { ...current[meta.key], name: event.target.value } }))}
+                />
+                <Input
+                  value={structuredDraft[meta.key].unit}
+                  placeholder="单位"
+                  style={{ width: 100 }}
+                  onChange={(event) => setStructuredDraft((current) => ({ ...current, [meta.key]: { ...current[meta.key], unit: event.target.value } }))}
+                />
+                {meta.key === 'mechanicalProperties' && (
+                  <Input
+                    value={structuredDraft[meta.key].testMethod}
+                    placeholder="检测方法"
+                    style={{ width: 150 }}
+                    onChange={(event) => setStructuredDraft((current) => ({ ...current, [meta.key]: { ...current[meta.key], testMethod: event.target.value } }))}
+                  />
+                )}
+                {meta.key === 'processRequirements' && (
+                  <Select
+                    value={structuredDraft[meta.key].valueType}
+                    style={{ width: 100 }}
+                    options={[{ label: '数值', value: 'number' }, { label: '文本', value: 'text' }]}
+                    onChange={(value) => setStructuredDraft((current) => ({ ...current, [meta.key]: { ...current[meta.key], valueType: value } }))}
+                  />
+                )}
+                <Button type="primary" icon={<PlusOutlined />} loading={saving} onClick={() => void addStructuredItem(meta.key)}>新增</Button>
+              </Space>
+            )}
+            </Card>
+          ))}
+        </div>
 
         <Card title="物料类型配置">
           <Typography.Paragraph type="secondary">

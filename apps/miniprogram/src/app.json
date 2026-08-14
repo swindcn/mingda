@@ -6,7 +6,12 @@
     "pages/todos/index",
     "pages/mold/list/index",
     "pages/mold/detail/index",
-    "pages/mold/edit/index"
+    "pages/mold/edit/index",
+    "pages/heat/list/index",
+    "pages/heat/detail/index",
+    "pages/heat/start/index",
+    "pages/heat/transfer/index",
+    "pages/heat/complete/index"
   ],
   "window": {
     "navigationBarTitleText": "闽大铸件",

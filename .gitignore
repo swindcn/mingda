@@ -32,3 +32,9 @@ pnpm-debug.log*
 
 # Mini program local private config can contain developer-specific settings
 apps/miniprogram/project.private.config.json
+
+# Local browser/test artifacts
+.playwright-cli/
+.superpowers/
+.workbuddy/
+output/

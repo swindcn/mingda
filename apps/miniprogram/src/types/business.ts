@@ -71,3 +71,56 @@ export interface MoldDevelopmentItem {
   terminationRecord?: TerminationRecord | null
   hideSupplierSensitiveFields?: boolean
 }
+
+export type HeatOrderStatus = 'WAITING' | 'IN_PROGRESS' | 'TRANSFERRING' | 'COMPLETED' | 'CANCELED'
+
+export interface MobileHeatOrder {
+  id: string
+  code: string
+  materialGradeCode: string
+  materialGradeName: string
+  furnaceCode: string
+  furnaceName: string
+  actualFurnaceCode: string
+  actualFurnaceName: string
+  furnaceCapacityKg: number
+  workshopName: string
+  recipeCode: string
+  recipeName: string
+  recipeVersion: string
+  teamCode: string
+  teamName: string
+  plannedOutputAt: string
+  plannedStartAt: string
+  targetWeightKg: number
+  actualOutputWeightKg: number | null
+  deviationWeightKg: number | null
+  status: HeatOrderStatus
+  versionNo: number
+  startedByName: string
+  startedAt: string
+  completedByName: string
+  completedAt: string
+  canStart: boolean
+  canTransfer: boolean
+  canComplete: boolean
+  allocations: Array<{ id: string; workOrderCode: string; productCode: string; productName: string; allocatedQuantity: number; plannedWeightKg: number; actualWeightKg: number | null }>
+  recipeItems: Array<{ itemCode: string; itemName: string; materialCategory: string; ratio: number | null; quantity: number | null; unit: string }>
+  records: Array<{ id: string; action: string; operatorName: string; remark: string; createdAt: string }>
+  transferTotalWeightKg: number
+  transfers: Array<{ id: string; transferDeviceCode: string; transferDeviceName: string; equipmentType: string; weightKg: number; weightSource: string; operatorName: string; remark: string; createdAt: string }>
+  statusText?: string
+  statusTone?: string
+  plannedStartText?: string
+}
+
+export interface HeatExecutionOptions {
+  plannedFurnaceCode: string
+  plannedFurnaceName: string
+  actualFurnaceCode: string
+  targetWeightKg: number
+  transferTotalWeightKg: number
+  remainingTransferWeightKg: number
+  furnaces: Array<{ code: string; name: string; equipmentType: string; capacity: number | null; capacityUnit: string; isPlanned: boolean }>
+  transferDevices: Array<{ code: string; name: string; equipmentType: string }>
+}

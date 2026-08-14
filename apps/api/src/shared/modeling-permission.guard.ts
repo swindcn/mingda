@@ -18,6 +18,8 @@ const resourcePermissions: Record<string, string> = {
   items: 'basic.product',
   materials: 'model.material',
   recipes: 'model.recipe',
+  boms: 'model.bom',
+  operations: 'model.operation',
   molds: 'mold.model',
   coreboxes: 'mold.corebox',
   routings: 'model.routing',
@@ -33,7 +35,26 @@ function stringArray(value: unknown) {
 
 function actionFromRequest(request: Request) {
   if (request.path.endsWith('/admin/modeling/options')) return 'view'
+  if (request.path.endsWith('/admin/modeling/recipe-options')) return 'view'
+  if (request.path.endsWith('/admin/modeling/boms/options')) return 'view'
+  if (request.path.endsWith('/admin/modeling/operations/options')) return 'view'
+  if (request.path.endsWith('/admin/modeling/routings/options')) return 'view'
   if (request.path.endsWith('/admin/modeling/schedules/batch-generate')) return 'batch'
+  if (/\/admin\/modeling\/recipes\/[^/]+\/clone$/.test(request.path)) return 'clone'
+  if (/\/admin\/modeling\/recipes\/[^/]+\/activate$/.test(request.path)) return 'activate'
+  if (/\/admin\/modeling\/recipes\/[^/]+\/disable$/.test(request.path)) return 'disable'
+  if (/\/admin\/modeling\/boms\/[^/]+\/new-version$/.test(request.path)) return 'new_version'
+  if (/\/admin\/modeling\/boms\/[^/]+\/clone$/.test(request.path)) return 'clone'
+  if (/\/admin\/modeling\/boms\/[^/]+\/activate$/.test(request.path)) return 'activate'
+  if (/\/admin\/modeling\/boms\/[^/]+\/disable$/.test(request.path)) return 'disable'
+  if (/\/admin\/modeling\/operations\/[^/]+\/disable$/.test(request.path)) return 'disable'
+  if (/\/admin\/modeling\/operations\/[^/]+\/enable$/.test(request.path)) return 'disable'
+  if (/\/admin\/modeling\/routings\/[^/]+\/new-version$/.test(request.path)) return 'version'
+  if (/\/admin\/modeling\/routings\/[^/]+\/clone$/.test(request.path)) return 'clone'
+  if (/\/admin\/modeling\/routings\/[^/]+\/activate$/.test(request.path)) return 'activate'
+  if (/\/admin\/modeling\/routings\/[^/]+\/disable$/.test(request.path)) return 'disable'
+  if (/\/admin\/modeling\/routings\/[^/]+\/default-products$/.test(request.path)) return 'default'
+  if (/\/admin\/modeling\/routings\/[^/]+\/applicable-products$/.test(request.path)) return 'edit'
   if (request.method === 'GET') return 'view'
   if (request.method === 'POST') return 'create'
   if (request.method === 'PUT' || request.method === 'PATCH') return 'edit'
@@ -57,6 +78,11 @@ export class ModelingPermissionGuard implements CanActivate {
     const resource = String(
       request.params.resource ||
         (request.path.endsWith('/admin/modeling/options') ? 'items' : '') ||
+        (request.path.endsWith('/admin/modeling/recipe-options') ? 'recipes' : '') ||
+        (request.path.includes('/recipes/') ? 'recipes' : '') ||
+        (request.path.includes('/boms') ? 'boms' : '') ||
+        (request.path.includes('/operations') ? 'operations' : '') ||
+        (request.path.includes('/routings') ? 'routings' : '') ||
         (request.path.includes('/schedules/') ? 'schedules' : ''),
     )
     const permissionPrefix = resourcePermissions[resource]

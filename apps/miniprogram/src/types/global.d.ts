@@ -6,5 +6,6 @@ interface IAppOption {
     token: string
     userType?: string
     isSupplierEmployee?: boolean
+    permissions?: string[]
   }
 }

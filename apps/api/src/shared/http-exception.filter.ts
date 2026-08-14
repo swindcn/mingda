@@ -22,11 +22,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
         : exception instanceof Error
           ? exception.message
           : 'Internal server error'
+    const data = typeof payload === 'object' && payload && 'data' in payload ? payload.data : null
+    const conflictCode = typeof payload === 'object' && payload && 'conflictCode' in payload ? payload.conflictCode : undefined
 
     response.status(status).json({
       code: status,
       message,
-      data: null,
+      data,
+      ...(conflictCode ? { conflictCode } : {}),
       timestamp: new Date().toISOString(),
     })
   }

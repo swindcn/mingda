@@ -1,0 +1,15 @@
+<view class="heat-list-page">
+  <view class="heat-tabs">
+    <view wx:for="{{tabs}}" wx:key="key" class="heat-tab {{activeTab === item.key ? 'heat-tab-active' : ''}}" data-key="{{item.key}}" bindtap="changeTab">{{item.label}}</view>
+  </view>
+  <view class="heat-card" wx:for="{{records}}" wx:key="id" data-id="{{item.id}}" bindtap="openDetail">
+    <view class="card-head"><text class="heat-code">{{item.code}}</text><text class="heat-status heat-status-{{item.statusTone}}">{{item.statusText}}</text></view>
+    <view class="heat-material">{{item.materialGradeName}} · {{item.furnaceName}}</view>
+    <view class="heat-data-grid">
+      <view><text class="field-label">目标重量</text><text class="field-value">{{item.targetWeightKg}} kg</text></view>
+      <view><text class="field-label">执行班组</text><text class="field-value">{{item.teamName}}</text></view>
+    </view>
+    <view class="heat-time"><text>计划开始</text><text>{{item.plannedStartText}}</text></view>
+  </view>
+  <view wx:if="{{!loading && !records.length}}" class="empty-state">当前暂无熔炼任务</view>
+</view>

@@ -1,19 +1,25 @@
 import {
   MoldDevelopmentItem,
+  HeatExecutionOptions,
+  MobileHeatOrder,
   TodoItem,
 } from '../types/business'
 import { request } from '../utils/request'
+import { uploadFile } from '../utils/request'
+
+export interface LoginUser {
+  id: string
+  name: string
+  phone?: string
+  username?: string
+  userType: string
+  isSupplierEmployee?: boolean
+  permissions?: string[]
+}
 
 export interface LoginResponse {
   token: string
-  user: {
-    id: string
-    name: string
-    phone?: string
-    username?: string
-    userType: string
-    isSupplierEmployee?: boolean
-  }
+  user: LoginUser
 }
 
 export interface HomeResponse {
@@ -28,6 +34,10 @@ export function login(data: { username: string; password: string }) {
     method: 'POST',
     data,
   })
+}
+
+export function getCurrentUser() {
+  return request<LoginUser>({ url: '/auth/me' })
 }
 
 export function getMobileHome() {
@@ -107,4 +117,36 @@ export function submitEvaluation(
     method: 'POST',
     data,
   })
+}
+
+export function uploadImage(filePath: string) {
+  return uploadFile<{ url: string }>({
+    url: '/admin/uploads/images',
+    filePath,
+    name: 'file',
+  })
+}
+
+export function getHeatOrders(status?: string) {
+  return request<MobileHeatOrder[]>({ url: `/mini/production/heat-orders${status ? `?status=${status}` : ''}` })
+}
+
+export function getHeatOrderDetail(id: string) {
+  return request<MobileHeatOrder>({ url: `/mini/production/heat-orders/${id}` })
+}
+
+export function getHeatExecutionOptions(id: string) {
+  return request<HeatExecutionOptions>({ url: `/mini/production/heat-orders/${id}/execution-options` })
+}
+
+export function startHeatProduction(id: string, data: { versionNo: number; actualFurnaceCode: string; confirmFurnaceChange?: boolean }) {
+  return request<MobileHeatOrder>({ url: `/mini/production/heat-orders/${id}/start`, method: 'POST', data })
+}
+
+export function transferHeatProduction(id: string, data: { versionNo: number; transferDeviceCode: string; weightKg: number; remark?: string }) {
+  return request<MobileHeatOrder>({ url: `/mini/production/heat-orders/${id}/transfer`, method: 'POST', data })
+}
+
+export function completeHeatProduction(id: string, data: { versionNo: number; actualOutputWeightKg: number; remark?: string }) {
+  return request<MobileHeatOrder>({ url: `/mini/production/heat-orders/${id}/complete`, method: 'POST', data })
 }

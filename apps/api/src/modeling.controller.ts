@@ -34,7 +34,6 @@ type ResourceName =
   | 'recipes'
   | 'molds'
   | 'coreboxes'
-  | 'routings'
   | 'shifts'
   | 'calendars'
   | 'schedules'
@@ -74,7 +73,7 @@ const resourceMap = {
   items: {
     delegate: 'product',
     unique: 'code',
-    search: ['code', 'name', 'type', 'spec', 'unit'],
+    search: ['code', 'name', 'type', 'spec', 'unit', 'materialGradeCode'],
     required: ['code', 'name'],
     orderBy: [{ createdAt: 'desc' }],
   },
@@ -96,7 +95,7 @@ const resourceMap = {
     delegate: 'meltRecipe',
     unique: 'code',
     search: ['code', 'name', 'materialGradeCode', 'version', 'status'],
-    required: ['code', 'name', 'materialGradeCode'],
+    required: ['name', 'materialGradeCode'],
     orderBy: [{ createdAt: 'desc' }],
   },
   molds: {
@@ -111,13 +110,6 @@ const resourceMap = {
     unique: 'code',
     search: ['code', 'name', 'moldCode', 'status'],
     required: ['code', 'name', 'moldCode'],
-    orderBy: [{ createdAt: 'desc' }],
-  },
-  routings: {
-    delegate: 'processRouting',
-    unique: 'code',
-    search: ['code', 'name', 'itemCode', 'version', 'status'],
-    required: ['code', 'name', 'itemCode'],
     orderBy: [{ createdAt: 'desc' }],
   },
   shifts: {
@@ -296,6 +288,53 @@ export class ModelingController {
     }
   }
 
+  @Get('recipe-options')
+  async recipeOptions() {
+    const [materials, furnaces, rawMaterials] = await Promise.all([
+      this.prisma.materialGrade.findMany({
+        where: { status: '启用' },
+        include: { elements: { orderBy: { elementName: 'asc' } } },
+        orderBy: { code: 'asc' },
+      }),
+      this.prisma.furnace.findMany({
+        where: { status: '启用', equipmentType: '熔炼炉', workshop: { type: '熔炼' } },
+        include: { workshop: true },
+        orderBy: { code: 'asc' },
+      }),
+      this.prisma.product.findMany({
+        where: { type: { startsWith: '原材料' } },
+        orderBy: { code: 'asc' },
+      }),
+    ])
+    const decimal = (value: unknown) => value === null || value === undefined ? value : Number(value)
+    return {
+      materials: materials.map((material) => ({
+        code: material.code,
+        name: material.name,
+        elements: material.elements.map((item) => ({
+          elementName: item.elementName,
+          minValue: decimal(item.minValue),
+          maxValue: decimal(item.maxValue),
+          unit: item.unit,
+          remark: item.remark || '',
+        })),
+      })),
+      furnaces: furnaces.map((furnace) => ({
+        code: furnace.code,
+        name: furnace.name,
+        capacity: decimal(furnace.capacity),
+        capacityUnit: furnace.capacityUnit || '',
+        workshopName: furnace.workshop?.name || '',
+      })),
+      rawMaterials: rawMaterials.map((item) => ({
+        code: item.code,
+        name: item.name,
+        type: item.type || '',
+        unit: item.unit || '',
+      })),
+    }
+  }
+
   @Get(':resource')
   async list(
     @Req() request: RequestWithAdmin,
@@ -304,6 +343,9 @@ export class ModelingController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('workshopCode') workshopCode?: string,
+    @Query('materialGradeCode') materialGradeCode?: string,
+    @Query('furnaceCode') furnaceCode?: string,
+    @Query('status') status?: string,
   ) {
     this.assertResource(resource)
     const config = resourceMap[resource]
@@ -324,6 +366,11 @@ export class ModelingController {
     }
     if (resource === 'schedules' && workshopCode) {
       where.workshopCode = workshopCode
+    }
+    if (resource === 'recipes') {
+      if (materialGradeCode) where.materialGradeCode = materialGradeCode
+      if (furnaceCode) where.applicableFurnaces = { some: { furnaceCode } }
+      if (status) where.status = status
     }
     const visibleIds = await this.visibleEntityIds(request, resource)
     if (visibleIds) {
@@ -357,15 +404,15 @@ export class ModelingController {
     this.assertRequired(resource, body)
     await this.assertRelations(resource, body)
 
-    if (resource === 'routings') {
-      const record = await this.prisma.processRouting.create({
-        data: {
-          ...(this.normalize(resource, body) as Prisma.ProcessRoutingUncheckedCreateInput),
-          steps: { create: this.normalizeRoutingSteps(body.steps) },
-        },
-        include: { steps: { orderBy: { seqNo: 'asc' } } },
-      })
+    if (resource === 'materials') {
+      const record = await this.createMaterialGrade(body)
       await upsertOwnership(this.prisma, request.adminUser, this.entityType(resource), this.recordCode(resource, record))
+      return this.toDto(resource, record)
+    }
+
+    if (resource === 'recipes') {
+      const record = await this.createRecipe(request, body)
+      await upsertOwnership(this.prisma, request.adminUser, this.entityType(resource), record.code)
       return this.toDto(resource, record)
     }
 
@@ -400,21 +447,13 @@ export class ModelingController {
     const existing = await this.findExistingRecord(resource, id)
     if (!existing) throw new NotFoundException('数据不存在或已被删除，请刷新后重试')
 
-    if (resource === 'routings') {
-      await this.prisma.$transaction([
-        this.prisma.processRoutingStep.deleteMany({ where: { routingId: String((existing as { id: string }).id) } }),
-        this.prisma.processRouting.update({
-          where: { id: String((existing as { id: string }).id) },
-          data: {
-            ...(this.normalize(resource, body) as Prisma.ProcessRoutingUncheckedUpdateInput),
-            steps: { create: this.normalizeRoutingSteps(body.steps) },
-          },
-        }),
-      ])
-      const record = await this.prisma.processRouting.findUniqueOrThrow({
-        where: { id: String((existing as { id: string }).id) },
-        include: { steps: { orderBy: { seqNo: 'asc' } } },
-      })
+    if (resource === 'materials') {
+      const record = await this.updateMaterialGrade(id, body)
+      return this.toDto(resource, record)
+    }
+
+    if (resource === 'recipes') {
+      const record = await this.updateRecipe(id, body)
       return this.toDto(resource, record)
     }
 
@@ -437,9 +476,72 @@ export class ModelingController {
     this.assertResource(resource)
     await this.assertVisible(request, resource, id)
     await this.assertCanDelete(resource, id)
+    if (resource === 'recipes') {
+      const recipe = await this.prisma.meltRecipe.findUnique({ where: { code: id }, select: { status: true } })
+      if (!recipe) throw new NotFoundException('配方不存在')
+      if (recipe.status !== 'DRAFT') throw new BadRequestException('仅草稿配方可以删除')
+    }
     const delegate = getDelegate(this.prisma, resource)
     await delegate.delete({ where: this.whereById(resource, id) })
     return { id }
+  }
+
+  @Post('recipes/:id/activate')
+  async activateRecipe(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    await this.assertVisible(request, 'recipes', id)
+    const recipe = await this.prisma.meltRecipe.findUnique({ where: { code: id }, include: this.recipeInclude() })
+    if (!recipe) throw new NotFoundException('配方不存在')
+    if (recipe.status !== 'DRAFT') throw new BadRequestException('仅草稿配方可以提交生效')
+    this.assertRecipeCanActivate(recipe)
+    const record = await this.prisma.meltRecipe.update({ where: { code: id }, data: { status: 'ACTIVE' }, include: this.recipeInclude() })
+    return this.toDto('recipes', record)
+  }
+
+  @Post('recipes/:id/disable')
+  async disableRecipe(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    await this.assertVisible(request, 'recipes', id)
+    const recipe = await this.prisma.meltRecipe.findUnique({ where: { code: id }, select: { status: true } })
+    if (!recipe) throw new NotFoundException('配方不存在')
+    if (recipe.status !== 'ACTIVE') throw new BadRequestException('仅已生效配方可以停用')
+    const record = await this.prisma.meltRecipe.update({ where: { code: id }, data: { status: 'DISABLED' }, include: this.recipeInclude() })
+    return this.toDto('recipes', record)
+  }
+
+  @Post('recipes/:id/clone')
+  async cloneRecipe(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    await this.assertVisible(request, 'recipes', id)
+    const source = await this.prisma.meltRecipe.findUnique({ where: { code: id }, include: this.recipeInclude() })
+    if (!source) throw new NotFoundException('配方不存在')
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const code = await this.nextRecipeCode()
+      try {
+        const record = await this.prisma.meltRecipe.create({
+          data: {
+            code,
+            name: `${source.name}-副本`,
+            materialGradeCode: source.materialGradeCode,
+            version: 'V1.0',
+            baseWeightKg: source.baseWeightKg,
+            meltingDurationMinutes: source.meltingDurationMinutes,
+            transferDurationMinutes: source.transferDurationMinutes,
+            cleaningDurationMinutes: source.cleaningDurationMinutes,
+            sourceRecipeCode: source.code,
+            createdByUserId: getAdminContext(request).id,
+            status: 'DRAFT',
+            remark: source.remark,
+            applicableFurnaces: { create: source.applicableFurnaces.map((item) => ({ furnaceCode: item.furnaceCode })) },
+            targetElements: { create: source.targetElements.map((item) => ({ elementName: item.elementName, minValue: item.minValue, maxValue: item.maxValue, unit: item.unit, remark: item.remark })) },
+            recipeItems: { create: source.recipeItems.map((item) => ({ itemCode: item.itemCode, materialCategory: item.materialCategory, ratio: item.ratio, quantity: item.quantity, unit: item.unit, remark: item.remark })) },
+          },
+          include: this.recipeInclude(),
+        })
+        await upsertOwnership(this.prisma, request.adminUser, this.entityType('recipes'), code)
+        return this.toDto('recipes', record)
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002' || attempt === 2) throw error
+      }
+    }
+    throw new BadRequestException('配方编码生成失败，请重试')
   }
 
   @Post('schedules/batch-generate')
@@ -609,6 +711,7 @@ export class ModelingController {
       return {
         ...common,
         type: stringValue(body.type),
+        materialGradeCode: stringValue(body.materialGradeCode),
         spec: stringValue(body.spec),
         unit: stringValue(body.unit),
         source: stringValue(body.source),
@@ -624,15 +727,21 @@ export class ModelingController {
     if (resource === 'materials') {
       return {
         ...common,
+        category: stringValue(body.category),
+        materialType: stringValue(body.materialType),
         standard: stringValue(body.standard),
+        standardVersion: stringValue(body.standardVersion),
         elementLimits: toJsonArray(body.elementLimits),
       }
     }
     if (resource === 'equipment') {
+      const workshopCode = stringValue(body.workshopCode)
       return {
         ...common,
-        workshopCode: stringValue(body.workshopCode),
+        equipmentType: stringValue(body.equipmentType) || '熔炼炉',
         capacity: toDecimal(body.capacity),
+        capacityUnit: stringValue(body.capacityUnit),
+        ...(workshopCode ? { workshop: { connect: { code: workshopCode } } } : {}),
         allowedMaterialCodes: toStringArray(body.allowedMaterialCodes),
       }
     }
@@ -668,13 +777,6 @@ export class ModelingController {
         usedLife: toInt(body.usedLife) ?? 0,
       }
     }
-    if (resource === 'routings') {
-      return {
-        ...common,
-        itemCode: stringValue(body.itemCode),
-        version: stringValue(body.version),
-      }
-    }
     if (resource === 'shifts') {
       return {
         ...common,
@@ -707,24 +809,285 @@ export class ModelingController {
     }
   }
 
-  private normalizeRoutingSteps(value: unknown) {
-    const steps = Array.isArray(value) ? value : []
-    return steps
-      .map((step, index) => {
-        const record = step as Record<string, unknown>
-        const operationName = stringValue(record.operationName)
-        const workshopCode = stringValue(record.workshopCode)
-        if (!operationName || !workshopCode) return null
+  private materialGradeDetails(body: Record<string, unknown>) {
+    const elements = toJsonArray(body.elements || body.elementLimits)
+      .map((item) => {
+        const value = item as Record<string, unknown>
         return {
-          seqNo: toInt(record.seqNo) ?? index + 1,
-          operationName,
-          workshopCode,
-          productionLineCode: stringValue(record.productionLineCode),
-          standardHours: toDecimal(record.standardHours),
-          remark: stringValue(record.remark),
+          elementName: stringValue(value.elementName || value.name),
+          valueMode: stringValue(value.valueMode) === 'fixed' ? 'fixed' : 'range',
+          fixedValue: toDecimal(value.fixedValue ?? value.value),
+          minValue: toDecimal(value.valueMode === 'fixed' ? value.fixedValue ?? value.value : value.minValue ?? value.min),
+          maxValue: toDecimal(value.valueMode === 'fixed' ? value.fixedValue ?? value.value : value.maxValue ?? value.max),
+          unit: stringValue(value.unit) || '%',
+          remark: stringValue(value.remark),
         }
       })
-      .filter((step): step is NonNullable<typeof step> => Boolean(step))
+      .filter((item) => Boolean(item.elementName))
+    const properties = toJsonArray(body.properties)
+      .map((item) => {
+        const value = item as Record<string, unknown>
+        return {
+          propertyName: stringValue(value.propertyName || value.name),
+          valueMode: stringValue(value.valueMode) === 'fixed' ? 'fixed' : 'range',
+          fixedValue: toDecimal(value.fixedValue ?? value.value),
+          minValue: toDecimal(value.valueMode === 'fixed' ? value.fixedValue ?? value.value : value.minValue ?? value.min),
+          maxValue: toDecimal(value.valueMode === 'fixed' ? value.fixedValue ?? value.value : value.maxValue ?? value.max),
+          unit: stringValue(value.unit),
+          testMethod: stringValue(value.testMethod),
+          remark: stringValue(value.remark),
+        }
+      })
+      .filter((item) => Boolean(item.propertyName))
+    const processRules = toJsonArray(body.processRules)
+      .map((item) => {
+        const value = item as Record<string, unknown>
+        return {
+          parameterName: stringValue(value.parameterName || value.name),
+          valueMode: stringValue(value.valueMode) === 'fixed' ? 'fixed' : 'range',
+          fixedValue: toDecimal(value.fixedValue ?? value.value),
+          minValue: toDecimal(value.valueMode === 'fixed' ? value.fixedValue ?? value.value : value.minValue ?? value.min),
+          maxValue: toDecimal(value.valueMode === 'fixed' ? value.fixedValue ?? value.value : value.maxValue ?? value.max),
+          unit: stringValue(value.unit),
+          textValue: stringValue(value.valueMode === 'fixed' ? value.fixedValue ?? value.textValue ?? value.value : value.textValue || value.value),
+          remark: stringValue(value.remark),
+        }
+      })
+      .filter((item) => Boolean(item.parameterName))
+    const standardVersions = toJsonArray(body.standardVersions)
+      .map((item) => {
+        const value = item as Record<string, unknown>
+        return {
+          version: stringValue(value.version),
+          standard: stringValue(value.standard),
+          effectiveDate: value.effectiveDate ? toDate(value.effectiveDate) : undefined,
+          expiryDate: value.expiryDate ? toDate(value.expiryDate) : undefined,
+          status: stringValue(value.status) || '生效',
+          remark: stringValue(value.remark),
+        }
+      })
+      .filter((item) => Boolean(item.version && item.standard))
+    const names = [
+      ['元素', elements.map((item) => item.elementName)],
+      ['性能指标', properties.map((item) => item.propertyName)],
+      ['工艺参数', processRules.map((item) => item.parameterName)],
+      ['标准版本', standardVersions.map((item) => item.version)],
+    ] as Array<[string, string[]]>
+    for (const item of [...elements, ...properties, ...processRules]) {
+      if (item.minValue !== undefined && item.maxValue !== undefined && Number(item.minValue) > Number(item.maxValue)) {
+        throw new BadRequestException('标准下限不能大于上限')
+      }
+    }
+    for (const [label, values] of names) {
+      if (new Set(values).size !== values.length) throw new BadRequestException(`${label}不能重复`)
+    }
+    return { elements, properties, processRules, standardVersions }
+  }
+
+  private materialGradeInclude() {
+    return {
+      elements: { orderBy: { elementName: 'asc' as const } },
+      properties: { orderBy: { propertyName: 'asc' as const } },
+      processRules: { orderBy: { parameterName: 'asc' as const } },
+      standardVersions: { orderBy: { version: 'desc' as const } },
+    }
+  }
+
+  private async createMaterialGrade(body: Record<string, unknown>) {
+    const details = this.materialGradeDetails(body)
+    return this.prisma.$transaction(async (tx) => {
+      const record = await tx.materialGrade.create({
+        data: this.normalize('materials', body) as Prisma.MaterialGradeUncheckedCreateInput,
+      })
+      const code = record.code
+      if (details.elements.length) await tx.materialGradeElement.createMany({ data: details.elements.map((item) => ({ ...item, materialGradeCode: code })) as Prisma.MaterialGradeElementCreateManyInput[] })
+      if (details.properties.length) await tx.materialGradeProperty.createMany({ data: details.properties.map((item) => ({ ...item, materialGradeCode: code })) as Prisma.MaterialGradePropertyCreateManyInput[] })
+      if (details.processRules.length) await tx.materialGradeProcessRule.createMany({ data: details.processRules.map((item) => ({ ...item, materialGradeCode: code })) as Prisma.MaterialGradeProcessRuleCreateManyInput[] })
+      if (details.standardVersions.length) await tx.materialGradeStandardVersion.createMany({ data: details.standardVersions.map((item) => ({ ...item, materialGradeCode: code })) as Prisma.MaterialGradeStandardVersionCreateManyInput[] })
+      return tx.materialGrade.findUniqueOrThrow({ where: { code }, include: this.materialGradeInclude() })
+    })
+  }
+
+  private async updateMaterialGrade(id: string, body: Record<string, unknown>) {
+    const details = this.materialGradeDetails(body)
+    return this.prisma.$transaction(async (tx) => {
+      const record = await tx.materialGrade.update({ where: { code: id }, data: this.normalize('materials', body) as Prisma.MaterialGradeUncheckedUpdateInput })
+      await tx.materialGradeElement.deleteMany({ where: { materialGradeCode: id } })
+      await tx.materialGradeProperty.deleteMany({ where: { materialGradeCode: id } })
+      await tx.materialGradeProcessRule.deleteMany({ where: { materialGradeCode: id } })
+      if (details.elements.length) await tx.materialGradeElement.createMany({ data: details.elements.map((item) => ({ ...item, materialGradeCode: record.code })) as Prisma.MaterialGradeElementCreateManyInput[] })
+      if (details.properties.length) await tx.materialGradeProperty.createMany({ data: details.properties.map((item) => ({ ...item, materialGradeCode: record.code })) as Prisma.MaterialGradePropertyCreateManyInput[] })
+      if (details.processRules.length) await tx.materialGradeProcessRule.createMany({ data: details.processRules.map((item) => ({ ...item, materialGradeCode: record.code })) as Prisma.MaterialGradeProcessRuleCreateManyInput[] })
+      for (const item of details.standardVersions) {
+        await tx.materialGradeStandardVersion.upsert({
+          where: { materialGradeCode_version: { materialGradeCode: record.code, version: item.version as string } },
+          update: { standard: item.standard, effectiveDate: item.effectiveDate, expiryDate: item.expiryDate, status: item.status, remark: item.remark },
+          create: { ...item, materialGradeCode: record.code } as Prisma.MaterialGradeStandardVersionCreateManyInput,
+        })
+      }
+      return tx.materialGrade.findUniqueOrThrow({ where: { code: record.code }, include: this.materialGradeInclude() })
+    })
+  }
+
+  private recipeInclude() {
+    return {
+      materialGrade: true,
+      createdBy: { select: { id: true, name: true } },
+      applicableFurnaces: { include: { furnace: true }, orderBy: { furnaceCode: 'asc' as const } },
+      targetElements: { orderBy: { elementName: 'asc' as const } },
+      recipeItems: { include: { item: true }, orderBy: { createdAt: 'asc' as const } },
+    }
+  }
+
+  private async nextRecipeCode() {
+    const now = new Date()
+    const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+    const prefix = `REC-${date}-`
+    const latest = await this.prisma.meltRecipe.findFirst({
+      where: { code: { startsWith: prefix } },
+      orderBy: { code: 'desc' },
+      select: { code: true },
+    })
+    const sequence = latest ? Number(latest.code.slice(prefix.length)) + 1 : 1
+    return `${prefix}${String(sequence).padStart(3, '0')}`
+  }
+
+  private async normalizeRecipeBody(body: Record<string, unknown>) {
+    const name = stringValue(body.name)
+    const materialGradeCode = stringValue(body.materialGradeCode)
+    const furnaceCodes = Array.from(new Set(toStringArray(body.furnaceCodes)))
+    const baseWeightKg = toNullableNumber(body.baseWeightKg) ?? 1000
+    const meltingDurationMinutes = Number(body.meltingDurationMinutes)
+    const transferDurationMinutes = Number(body.transferDurationMinutes)
+    const cleaningDurationMinutes = Number(body.cleaningDurationMinutes)
+    const targetElements = toRecipeTargetElements(body.targetElements)
+    const items = toRecipeItems(body.items).map((item) => ({
+      ...item,
+      quantity: item.materialCategory === 'ADDITIVE'
+        ? item.quantity
+        : item.ratio === undefined ? item.quantity : baseWeightKg * item.ratio / 100,
+      unit: item.unit || 'kg',
+    }))
+    if (!name || !materialGradeCode || !furnaceCodes.length) throw new BadRequestException('请填写配方名称、材质牌号和适用炉型')
+    if (baseWeightKg <= 0) throw new BadRequestException('配方基准重量必须大于 0')
+    const durations = [meltingDurationMinutes, transferDurationMinutes, cleaningDurationMinutes]
+    if (durations.some((value) => !Number.isInteger(value) || value < 0)) throw new BadRequestException('配方时长必须为非负整数分钟')
+    if (durations.reduce((sum, value) => sum + value, 0) <= 0) throw new BadRequestException('配方总占用时长必须大于 0')
+    if (new Set(targetElements.map((item) => item.elementName)).size !== targetElements.length) throw new BadRequestException('目标化学元素不能重复')
+    if (new Set(items.map((item) => item.itemCode)).size !== items.length) throw new BadRequestException('配料物料不能重复')
+    for (const item of targetElements) {
+      if ((item.minValue !== undefined && item.minValue < 0) || (item.maxValue !== undefined && item.maxValue < 0)) throw new BadRequestException('目标成分不能为负数')
+      if (item.minValue !== undefined && item.maxValue !== undefined && item.minValue > item.maxValue) throw new BadRequestException('目标成分下限不能大于上限')
+    }
+    for (const item of items) {
+      if ((item.ratio !== undefined && item.ratio < 0) || (item.quantity !== undefined && item.quantity < 0)) throw new BadRequestException('投料比例和标准用量不能为负数')
+    }
+    const [material, furnaces, products] = await Promise.all([
+      this.prisma.materialGrade.findFirst({ where: { code: materialGradeCode, status: '启用' } }),
+      this.prisma.furnace.findMany({ where: { code: { in: furnaceCodes }, status: '启用', workshop: { type: '熔炼' } }, select: { code: true } }),
+      this.prisma.product.findMany({ where: { code: { in: items.map((item) => item.itemCode) }, type: { startsWith: '原材料' } }, select: { code: true } }),
+    ])
+    if (!material) throw new BadRequestException('材质牌号不存在或未启用')
+    if (furnaces.length !== furnaceCodes.length) throw new BadRequestException('适用炉型不存在、未启用或不属于熔炼车间')
+    if (products.length !== items.length) throw new BadRequestException('配料只能选择物料管理中的原材料')
+    return {
+      name,
+      materialGradeCode,
+      furnaceCodes,
+      version: stringValue(body.version) || 'V1.0',
+      baseWeightKg,
+      meltingDurationMinutes,
+      transferDurationMinutes,
+      cleaningDurationMinutes,
+      targetElements,
+      items,
+      remark: stringValue(body.remark),
+    }
+  }
+
+  private async createRecipe(request: RequestWithAdmin, body: Record<string, unknown>) {
+    const input = await this.normalizeRecipeBody(body)
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const code = await this.nextRecipeCode()
+      try {
+        return await this.prisma.meltRecipe.create({
+          data: {
+            code,
+            name: input.name,
+            materialGradeCode: input.materialGradeCode,
+            version: input.version,
+            baseWeightKg: input.baseWeightKg,
+            meltingDurationMinutes: input.meltingDurationMinutes,
+            transferDurationMinutes: input.transferDurationMinutes,
+            cleaningDurationMinutes: input.cleaningDurationMinutes,
+            createdByUserId: getAdminContext(request).id,
+            status: 'DRAFT',
+            remark: input.remark,
+            applicableFurnaces: { create: input.furnaceCodes.map((furnaceCode) => ({ furnaceCode })) },
+            targetElements: { create: input.targetElements },
+            recipeItems: { create: input.items },
+          },
+          include: this.recipeInclude(),
+        })
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002' || attempt === 2) throw error
+      }
+    }
+    throw new BadRequestException('配方编码生成失败，请重试')
+  }
+
+  private async updateRecipe(code: string, body: Record<string, unknown>) {
+    const existing = await this.prisma.meltRecipe.findUnique({ where: { code }, select: { status: true, version: true } })
+    if (!existing) throw new NotFoundException('配方不存在')
+    if (existing.status === 'ACTIVE') throw new BadRequestException('已生效配方请先停用后再修改')
+    if (existing.status !== 'DRAFT' && existing.status !== 'DISABLED') throw new BadRequestException('当前配方状态不允许编辑')
+    const input = await this.normalizeRecipeBody(body)
+    const version = existing.status === 'DISABLED' ? this.nextRecipeVersion(existing.version) : existing.version
+    return this.prisma.meltRecipe.update({
+      where: { code },
+      data: {
+        name: input.name,
+        materialGradeCode: input.materialGradeCode,
+        version,
+        status: existing.status === 'DISABLED' ? 'DRAFT' : existing.status,
+        baseWeightKg: input.baseWeightKg,
+        meltingDurationMinutes: input.meltingDurationMinutes,
+        transferDurationMinutes: input.transferDurationMinutes,
+        cleaningDurationMinutes: input.cleaningDurationMinutes,
+        remark: input.remark,
+        applicableFurnaces: { deleteMany: {}, create: input.furnaceCodes.map((furnaceCode) => ({ furnaceCode })) },
+        targetElements: { deleteMany: {}, create: input.targetElements },
+        recipeItems: { deleteMany: {}, create: input.items },
+      },
+      include: this.recipeInclude(),
+    })
+  }
+
+  private nextRecipeVersion(version: string) {
+    const matched = /^V(\d+)\.0$/.exec(version)
+    if (!matched) throw new BadRequestException('配方版本格式不正确，无法自动升级')
+    return `V${Number(matched[1]) + 1}.0`
+  }
+
+  private assertRecipeCanActivate(recipe: Prisma.MeltRecipeGetPayload<{ include: ReturnType<ModelingController['recipeInclude']> }>) {
+    if (recipe.meltingDurationMinutes + recipe.transferDurationMinutes + recipe.cleaningDurationMinutes <= 0) {
+      throw new BadRequestException('请先维护熔炼、转运和清炉时长')
+    }
+    if (!recipe.targetElements.length) throw new BadRequestException('至少维护一个目标化学成分')
+    if (!recipe.recipeItems.length) throw new BadRequestException('至少维护一条配料')
+    if (recipe.targetElements.some((item) => item.minValue === null || item.maxValue === null)) {
+      throw new BadRequestException('目标化学成分必须填写下限和上限')
+    }
+    if (recipe.recipeItems.some((item) => item.materialCategory !== 'ADDITIVE' && (item.ratio === null || Number(item.ratio) <= 0))) {
+      throw new BadRequestException('原材料与回炉料必须填写大于 0 的投料比例')
+    }
+    if (recipe.recipeItems.some((item) => item.materialCategory === 'ADDITIVE' && (item.quantity === null || Number(item.quantity) <= 0))) {
+      throw new BadRequestException('辅料/合金必须填写大于 0 的标准用量')
+    }
+    const ratio = recipe.recipeItems
+      .filter((item) => item.materialCategory === 'RAW' || item.materialCategory === 'RETURN')
+      .reduce((total, item) => total + Number(item.ratio || 0), 0)
+    if (Math.abs(ratio - 100) > 0.0001) throw new BadRequestException('原材料与回炉料投料比例合计必须为 100%')
   }
 
   private async assertRelations(resource: ResourceName, body: Record<string, unknown>) {
@@ -732,12 +1095,13 @@ export class ModelingController {
       [body.workshopCode, '车间不存在', (code) => this.prisma.workshop.findUnique({ where: { code } })],
       [body.materialGradeCode, '材质牌号不存在', (code) => this.prisma.materialGrade.findUnique({ where: { code } })],
       [body.itemCode, '物料不存在', (code) => this.prisma.product.findUnique({ where: { code } })],
+      [body.materialGradeCode, '材质牌号不存在', (code) => this.prisma.materialGrade.findUnique({ where: { code } })],
       [body.moldCode, '模具不存在', (code) => this.prisma.moldMaster.findUnique({ where: { code } })],
       [body.supplierCode, '供应商不存在', (code) => this.prisma.supplier.findUnique({ where: { code } })],
       [body.shiftCode, '班次不存在', (code) => this.prisma.shiftMaster.findUnique({ where: { code } })],
       [body.teamCode, '班组不存在', (code) => this.prisma.team.findUnique({ where: { code } })],
     ]
-    if (resource === 'lines' || resource === 'routings') {
+    if (resource === 'lines') {
       checks.push([
         body.productionLineCode,
         '产线不存在',
@@ -784,25 +1148,27 @@ export class ModelingController {
         () => this.prisma.productionLine.count({ where: { workshopCode: id } }),
         () => this.prisma.team.count({ where: { workshopCode: id } }),
         () => this.prisma.furnace.count({ where: { workshopCode: id } }),
-        () => this.prisma.processRoutingStep.count({ where: { workshopCode: id } }),
         () => this.prisma.shiftSchedule.count({ where: { workshopCode: id } }),
       ],
-      lines: [() => this.prisma.processRoutingStep.count({ where: { productionLineCode: id } })],
+      lines: [],
       teams: [() => this.prisma.shiftSchedule.count({ where: { teamCode: id } })],
       items: [
         () => this.prisma.moldMaster.count({ where: { itemCode: id } }),
-        () => this.prisma.processRouting.count({ where: { itemCode: id } }),
+        () => this.prisma.routingApplicableProduct.count({ where: { productCode: id } }),
         () => this.prisma.meltRecipeItem.count({ where: { itemCode: id } }),
       ],
       materials: [
         () => this.prisma.meltRecipe.count({ where: { materialGradeCode: id } }),
         () => this.prisma.furnaceAllowedMaterial.count({ where: { materialGradeCode: id } }),
+        () => this.prisma.product.count({ where: { materialGradeCode: id } }),
       ],
       equipment: [],
       recipes: [],
-      molds: [() => this.prisma.coreBoxMaster.count({ where: { moldCode: id } })],
-      coreboxes: [],
-      routings: [],
+      molds: [
+        () => this.prisma.coreBoxMaster.count({ where: { moldCode: id } }),
+        () => this.prisma.castingBomVersionMold.count({ where: { moldCode: id } }),
+      ],
+      coreboxes: [() => this.prisma.castingBomVersionCoreBox.count({ where: { coreBoxCode: id } })],
       shifts: [
         () => this.prisma.shiftSchedule.count({ where: { shiftCode: id } }),
         () => this.prisma.factoryCalendarShift.count({ where: { shiftCode: id } }),
@@ -839,19 +1205,69 @@ export class ModelingController {
       return {
         ...base,
         capacity: Number(value.capacity || 0),
+        capacityUnit: value.capacityUnit || '',
         allowedMaterialCodes: Array.isArray(value.allowedMaterials)
           ? value.allowedMaterials.map((item) => (item as { materialGradeCode: string }).materialGradeCode)
           : toStringArray(value.allowedMaterialCodes),
       }
     }
-    if (resource === 'recipes') {
+    if (resource === 'materials') {
+      const decimal = (value: unknown) => value === null || value === undefined ? value : Number(value)
       return {
         ...base,
+        elements: Array.isArray(value.elements)
+          ? value.elements.map((item) => ({ ...(item as Record<string, unknown>), fixedValue: decimal((item as { fixedValue?: unknown }).fixedValue), minValue: decimal((item as { minValue?: unknown }).minValue), maxValue: decimal((item as { maxValue?: unknown }).maxValue) }))
+          : toJsonArray(value.elementLimits),
+        properties: Array.isArray(value.properties)
+          ? value.properties.map((item) => ({ ...(item as Record<string, unknown>), fixedValue: decimal((item as { fixedValue?: unknown }).fixedValue), minValue: decimal((item as { minValue?: unknown }).minValue), maxValue: decimal((item as { maxValue?: unknown }).maxValue) }))
+          : [],
+        processRules: Array.isArray(value.processRules)
+          ? value.processRules.map((item) => ({ ...(item as Record<string, unknown>), fixedValue: decimal((item as { fixedValue?: unknown }).fixedValue), minValue: decimal((item as { minValue?: unknown }).minValue), maxValue: decimal((item as { maxValue?: unknown }).maxValue) }))
+          : [],
+        standardVersions: value.standardVersions || [],
+      }
+    }
+    if (resource === 'recipes') {
+      const decimal = (next: unknown) => next === null || next === undefined ? next : Number(next)
+      return {
+        ...base,
+        status: value.status === '启用' ? 'ACTIVE' : value.status === '停用' ? 'DISABLED' : value.status,
+        baseWeightKg: decimal(value.baseWeightKg) || 1000,
+        meltingDurationMinutes: Number(value.meltingDurationMinutes || 0),
+        transferDurationMinutes: Number(value.transferDurationMinutes || 0),
+        cleaningDurationMinutes: Number(value.cleaningDurationMinutes || 0),
+        occupancyDurationMinutes: Number(value.meltingDurationMinutes || 0) + Number(value.transferDurationMinutes || 0) + Number(value.cleaningDurationMinutes || 0),
+        materialGradeName: value.materialGrade && typeof value.materialGrade === 'object'
+          ? String((value.materialGrade as { name?: unknown }).name || '')
+          : '',
+        createdByName: value.createdBy && typeof value.createdBy === 'object'
+          ? String((value.createdBy as { name?: unknown }).name || '')
+          : '',
+        furnaceCodes: Array.isArray(value.applicableFurnaces)
+          ? value.applicableFurnaces.map((item) => String((item as { furnaceCode?: unknown }).furnaceCode || ''))
+          : [],
+        furnaceNames: Array.isArray(value.applicableFurnaces)
+          ? value.applicableFurnaces.map((item) => {
+              const furnace = (item as { furnace?: { name?: unknown } }).furnace
+              return String(furnace?.name || '')
+            }).filter(Boolean)
+          : [],
+        targetElements: Array.isArray(value.targetElements)
+          ? value.targetElements.map((item) => ({
+              ...(item as Record<string, unknown>),
+              minValue: decimal((item as { minValue?: unknown }).minValue),
+              maxValue: decimal((item as { maxValue?: unknown }).maxValue),
+            }))
+          : [],
         items: Array.isArray(value.recipeItems)
           ? value.recipeItems.map((item) => {
               const recipeItem = item as Record<string, unknown>
+              const product = recipeItem.item as { name?: unknown; type?: unknown } | undefined
               return {
                 itemCode: recipeItem.itemCode,
+                itemName: String(product?.name || ''),
+                itemType: String(product?.type || ''),
+                materialCategory: recipeItem.materialCategory || 'RAW',
                 ratio: Number(recipeItem.ratio || 0),
                 quantity: Number(recipeItem.quantity || 0),
                 unit: recipeItem.unit || '',
@@ -867,17 +1283,6 @@ export class ModelingController {
         shiftCodes: Array.isArray(value.shifts)
           ? value.shifts.map((item) => (item as { shiftCode: string }).shiftCode)
           : toStringArray(value.shiftCodes),
-      }
-    }
-    if (resource === 'routings') {
-      return {
-        ...base,
-        steps: Array.isArray(value.steps)
-          ? value.steps.map((step) => ({
-              ...(step as Record<string, unknown>),
-              standardHours: Number((step as { standardHours?: unknown }).standardHours || 0),
-            }))
-          : [],
       }
     }
     if (resource === 'molds') {
@@ -905,10 +1310,10 @@ export class ModelingController {
   private includeFor(resource: ResourceName) {
     if (resource === 'teams') return { members: true }
     if (resource === 'equipment') return { allowedMaterials: true }
-    if (resource === 'recipes') return { recipeItems: { orderBy: { createdAt: 'asc' } } }
+    if (resource === 'recipes') return this.recipeInclude()
     if (resource === 'calendars') return { shifts: true }
-    if (resource === 'routings') return { steps: { orderBy: { seqNo: 'asc' } } }
     if (resource === 'molds') return { supplier: true, coreBoxes: true }
+    if (resource === 'materials') return this.materialGradeInclude()
     return undefined
   }
 
@@ -1036,13 +1441,32 @@ function toRecipeItems(value: unknown) {
       const record = item as Record<string, unknown>
       return {
         itemCode: stringValue(record.itemCode || record.code),
+        materialCategory: ['RAW', 'RETURN', 'ADDITIVE'].includes(String(record.materialCategory))
+          ? String(record.materialCategory)
+          : 'RAW',
         ratio: toNullableNumber(record.ratio),
         quantity: toNullableNumber(record.quantity),
         unit: stringValue(record.unit),
         remark: stringValue(record.remark),
       }
     })
-    .filter((item): item is { itemCode: string; ratio?: number; quantity?: number; unit?: string; remark?: string } =>
+    .filter((item): item is { itemCode: string; materialCategory: string; ratio?: number; quantity?: number; unit?: string; remark?: string } =>
       Boolean(item.itemCode),
     )
+}
+
+function toRecipeTargetElements(value: unknown) {
+  return toJsonArray(value)
+    .flatMap((item) => {
+      const record = item as Record<string, unknown>
+      const elementName = stringValue(record.elementName || record.name)
+      if (!elementName) return []
+      return [{
+        elementName,
+        minValue: toNullableNumber(record.minValue),
+        maxValue: toNullableNumber(record.maxValue),
+        unit: stringValue(record.unit) || '%',
+        remark: stringValue(record.remark),
+      }]
+    })
 }

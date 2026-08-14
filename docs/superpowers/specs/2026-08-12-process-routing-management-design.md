@@ -1,5 +1,7 @@
 # 工序与工艺路线管理设计
 
+> 交互变更说明（2026-08-12）：实施后已取消固定泳道和区域位置约束，改为自由画布。节点有向边仍是唯一流程依赖依据，`routeType` 仅保留兼容和关键汇合校验。本文后续泳道段落属于原始设计记录。
+
 ## 1. 目标与范围
 
 本阶段新增标准工序主档和可视化工艺路线管理，为后续排产、派工、现场报工、质量追溯、成本核算提供结构化基础数据。
@@ -94,6 +96,7 @@
 - `model.routing.view`
 - `model.routing.create`
 - `model.routing.edit`
+- `model.routing.delete`
 - `model.routing.version`
 - `model.routing.clone`
 - `model.routing.activate`

@@ -2,6 +2,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  MinusCircleOutlined,
   PlusOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
@@ -17,6 +18,7 @@ import {
   Space,
   Tag,
   TimePicker,
+  Typography,
   message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
@@ -38,9 +40,9 @@ import {
 import type { ModelingOptions, ModelingRecord, ModelingResource } from '../../utils/modeling'
 import { hasPermission } from '../../utils/roles'
 import { loadDictionaries } from '../../utils/dictionaries'
-import type { ProductTypeNode } from '../../utils/dictionaries'
+import type { DictionaryOption, ProductTypeNode } from '../../utils/dictionaries'
 
-type FieldType = 'text' | 'number' | 'select' | 'multiSelect' | 'checkbox' | 'textarea' | 'json' | 'time'
+type FieldType = 'text' | 'number' | 'select' | 'multiSelect' | 'checkbox' | 'textarea' | 'json' | 'time' | 'detail'
 
 export interface ModelingField {
   name: string
@@ -58,6 +60,7 @@ export interface ModelingField {
   computed?: boolean
   formSpan?: number
   code?: boolean
+  detailNameKey?: 'elementName' | 'propertyName' | 'parameterName'
 }
 
 export interface ModelingMasterPageProps {
@@ -246,7 +249,13 @@ export function ModelingMasterPage({
     if (field.dictionaryKey === 'productTypes') {
       return flattenProductTypePaths(dictionaries.productTypes).map((value) => ({ label: value, value }))
     }
-    if (field.dictionaryKey) return dictionaries[field.dictionaryKey].map((value) => ({ label: value, value }))
+    if (field.dictionaryKey) {
+      const dictionaryValues = dictionaries[field.dictionaryKey]
+      return dictionaryValues.map((value) => {
+        if (typeof value === 'object') return { label: value.name, value: value.name }
+        return { label: value, value }
+      })
+    }
     if (field.options) return field.options.map((value) => ({ label: value, value }))
     if (!field.optionSource || !options) return []
     const source = options[field.optionSource] as Array<ModelingRecord | { id: string; name: string; phone: string; department: string }>
@@ -267,6 +276,14 @@ export function ModelingMasterPage({
           : `${record.name || ('code' in record ? record.code : record.phone)}（${'code' in record ? record.code : record.phone || record.id}）`),
       value: String('code' in record ? record.code : record.id),
     }))
+  }
+
+  const detailOptions = (field: ModelingField) => {
+    if (!field.dictionaryKey) return []
+    const values = dictionaries[field.dictionaryKey]
+    return Array.isArray(values) && values.every((item) => typeof item === 'object')
+      ? values as DictionaryOption[]
+      : []
   }
 
   const displayValue = (field: ModelingField, value: unknown, record: ModelingRecord) => {
@@ -365,7 +382,10 @@ export function ModelingMasterPage({
 
   const recordToFormValues = (record: ModelingRecord) => {
     const values = fields.reduce<Record<string, unknown>>((result, field) => {
-        result[field.name] = record[field.name]
+        const value = record[field.name]
+        result[field.name] = field.type === 'json' && Array.isArray(value)
+          ? JSON.stringify(value, null, 2)
+          : value
         return result
       }, {})
     if (resource === 'molds') {
@@ -650,6 +670,60 @@ export function ModelingMasterPage({
                   >
                     <Input.TextArea disabled={viewing} rows={field.type === 'json' ? 5 : 3} />
                   </Form.Item>
+                )
+              }
+              if (field.type === 'detail') {
+                const nameKey = field.detailNameKey || 'elementName'
+                const optionsForDetail = detailOptions(field)
+                return (
+                  <div key={field.name} style={{ gridColumn: `span ${field.formSpan || 6}`, border: '1px solid #f0f0f0', padding: 12, borderRadius: 4 }}>
+                    <Typography.Text strong>{field.label}</Typography.Text>
+                    <Form.List name={field.name}>
+                      {(listFields, { add, remove }) => (
+                        <>
+                          {listFields.map((listField) => {
+                            const selectedName = form.getFieldValue([field.name, listField.name, nameKey])
+                            const selected = optionsForDetail.find((item) => item.name === selectedName)
+                            const valueType = selected?.valueType === 'text' ? 'text' : 'number'
+                            const mode = form.getFieldValue([field.name, listField.name, 'valueMode']) || 'range'
+                            return (
+                              <Space key={listField.key} align="start" style={{ display: 'flex', marginTop: 10 }}>
+                                <Form.Item name={[listField.name, nameKey]} rules={[{ required: true, message: `请选择${field.label}` }]}>
+                                  <Select
+                                    style={{ width: 170 }}
+                                    placeholder="选择指标"
+                                    options={optionsForDetail.map((item) => ({ label: item.unit ? `${item.name}（${item.unit}）` : item.name, value: item.name }))}
+                                    onChange={(value) => {
+                                      const option = optionsForDetail.find((item) => item.name === value)
+                                      form.setFieldValue([field.name, listField.name, 'unit'], option?.unit || '')
+                                    }}
+                                  />
+                                </Form.Item>
+                                <Form.Item name={[listField.name, 'unit']}>
+                                  <Input disabled placeholder="单位" style={{ width: 80 }} />
+                                </Form.Item>
+                                <Form.Item name={[listField.name, 'valueMode']} initialValue="range">
+                                  <Select style={{ width: 88 }} options={[{ label: '固定值', value: 'fixed' }, { label: '范围', value: 'range' }]} />
+                                </Form.Item>
+                                {mode === 'fixed' ? (
+                                  <Form.Item name={[listField.name, 'fixedValue']} rules={[{ required: true, message: '请输入固定值' }]}>
+                                    {valueType === 'text' ? <Input placeholder="固定值" style={{ width: 150 }} /> : <InputNumber placeholder="固定值" style={{ width: 120 }} />}
+                                  </Form.Item>
+                                ) : (
+                                  <>
+                                    <Form.Item name={[listField.name, 'minValue']}><InputNumber placeholder="下限" style={{ width: 100 }} /></Form.Item>
+                                    <Form.Item name={[listField.name, 'maxValue']}><InputNumber placeholder="上限" style={{ width: 100 }} /></Form.Item>
+                                  </>
+                                )}
+                                {!viewing && <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(listField.name)} />}
+                              </Space>
+                            )
+                          })}
+                          {!viewing && <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ valueMode: 'range' })}>添加{field.label}</Button>}
+                        </>
+                      )}
+                    </Form.List>
+                  </div>
                 )
               }
               return (

@@ -34,7 +34,33 @@ export interface AdminUser {
   columnPermissions?: string[]
 }
 
-export const publicSyncPermissionKeys = ['basic.product.view_synced_public'] as const
+export const publicSyncPermissionKeys = ['basic.product.view_synced_public', 'production.work_order.view_synced_public'] as const
+
+export const productionPermissionKeys = [
+  'production',
+  'production.work_order.view',
+  'production.work_order.create',
+  'production.work_order.edit',
+  'production.work_order.close',
+  'production.work_order.view_synced_public',
+  'production.schedule.view',
+  'production.schedule.create',
+  'production.schedule.adjust',
+  'production.schedule.cancel',
+  'production.heat.view',
+  'production.heat.start',
+  'production.heat.transfer',
+  'production.heat.complete',
+] as const
+
+export const miniProgramPermissionKeys = [
+  'mini',
+  'mini.production',
+  'mini.production.heat.view',
+  'mini.production.heat.start',
+  'mini.production.heat.transfer',
+  'mini.production.heat.complete',
+] as const
 
 export const modelingPermissionKeys = [
   'model',
@@ -59,10 +85,30 @@ export const modelingPermissionKeys = [
   'model.recipe.create',
   'model.recipe.edit',
   'model.recipe.delete',
+  'model.recipe.clone',
+  'model.recipe.activate',
+  'model.recipe.disable',
+  'model.bom.view',
+  'model.bom.create',
+  'model.bom.edit',
+  'model.bom.delete',
+  'model.bom.clone',
+  'model.bom.activate',
+  'model.bom.disable',
+  'model.bom.new_version',
+  'model.operation.view',
+  'model.operation.create',
+  'model.operation.edit',
+  'model.operation.disable',
   'model.routing.view',
   'model.routing.create',
   'model.routing.edit',
   'model.routing.delete',
+  'model.routing.version',
+  'model.routing.clone',
+  'model.routing.activate',
+  'model.routing.disable',
+  'model.routing.default',
   'model.calendar.view',
   'model.calendar.create',
   'model.calendar.edit',
@@ -86,7 +132,7 @@ export const modelingPermissionKeys = [
   'mold.corebox.delete',
 ] as const
 
-export const permissionTree: DataNode[] = [
+export const adminPermissionTree: DataNode[] = [
   {
     title: '管理端',
     key: 'admin',
@@ -264,6 +310,43 @@ export const permissionTree: DataNode[] = [
         ],
       },
       {
+        title: '生产管理',
+        key: 'production',
+        children: [
+          {
+            title: '生产工单',
+            key: 'group.production.work_order',
+            children: [
+              { title: '生产工单-数据列表', key: 'production.work_order.view' },
+              { title: '生产工单-新增并提交', key: 'production.work_order.create' },
+              { title: '生产工单-编辑', key: 'production.work_order.edit' },
+              { title: '生产工单-强制关闭', key: 'production.work_order.close' },
+              { title: '生产工单-查看第三方同步数据', key: 'production.work_order.view_synced_public' },
+            ],
+          },
+          {
+            title: '合炉排产',
+            key: 'group.production.schedule',
+            children: [
+              { title: '合炉排产-数据列表', key: 'production.schedule.view' },
+              { title: '合炉排产-生成熔炼任务', key: 'production.schedule.create' },
+              { title: '合炉排产-调整排程', key: 'production.schedule.adjust' },
+              { title: '合炉排产-撤销熔炼任务', key: 'production.schedule.cancel' },
+            ],
+          },
+          {
+            title: '熔炼执行',
+            key: 'group.production.heat',
+            children: [
+              { title: '熔炼执行-数据列表', key: 'production.heat.view' },
+              { title: '熔炼执行-开始生产', key: 'production.heat.start' },
+              { title: '熔炼执行-转运出炉', key: 'production.heat.transfer' },
+              { title: '熔炼执行-完成生产', key: 'production.heat.complete' },
+            ],
+          },
+        ],
+      },
+      {
         title: '工艺管理',
         key: 'process',
         children: [
@@ -285,6 +368,33 @@ export const permissionTree: DataNode[] = [
               { title: '熔炼配方-新增', key: 'model.recipe.create' },
               { title: '熔炼配方-编辑', key: 'model.recipe.edit' },
               { title: '熔炼配方-删除', key: 'model.recipe.delete' },
+              { title: '熔炼配方-复制', key: 'model.recipe.clone' },
+              { title: '熔炼配方-提交生效', key: 'model.recipe.activate' },
+              { title: '熔炼配方-停用', key: 'model.recipe.disable' },
+            ],
+          },
+          {
+            title: '铸造 BOM',
+            key: 'group.model.bom',
+            children: [
+              { title: '铸造 BOM-数据列表', key: 'model.bom.view' },
+              { title: '铸造 BOM-新增', key: 'model.bom.create' },
+              { title: '铸造 BOM-编辑', key: 'model.bom.edit' },
+              { title: '铸造 BOM-删除', key: 'model.bom.delete' },
+              { title: '铸造 BOM-克隆', key: 'model.bom.clone' },
+              { title: '铸造 BOM-提交生效', key: 'model.bom.activate' },
+              { title: '铸造 BOM-停用', key: 'model.bom.disable' },
+              { title: '铸造 BOM-创建新版本', key: 'model.bom.new_version' },
+            ],
+          },
+          {
+            title: '工序管理',
+            key: 'group.model.operation',
+            children: [
+              { title: '工序管理-数据列表', key: 'model.operation.view' },
+              { title: '工序管理-新增', key: 'model.operation.create' },
+              { title: '工序管理-编辑', key: 'model.operation.edit' },
+              { title: '工序管理-启用/禁用', key: 'model.operation.disable' },
             ],
           },
           {
@@ -295,6 +405,11 @@ export const permissionTree: DataNode[] = [
               { title: '工艺路线-新增', key: 'model.routing.create' },
               { title: '工艺路线-编辑', key: 'model.routing.edit' },
               { title: '工艺路线-删除', key: 'model.routing.delete' },
+              { title: '工艺路线-创建新版本', key: 'model.routing.version' },
+              { title: '工艺路线-克隆', key: 'model.routing.clone' },
+              { title: '工艺路线-发布', key: 'model.routing.activate' },
+              { title: '工艺路线-停用', key: 'model.routing.disable' },
+              { title: '工艺路线-设置默认', key: 'model.routing.default' },
             ],
           },
           {
@@ -312,6 +427,37 @@ export const permissionTree: DataNode[] = [
     ],
   },
 ]
+
+export const miniProgramPermissionTree: DataNode[] = [
+  {
+    title: '小程序端',
+    key: 'mini',
+    children: [
+      {
+        title: '生产执行',
+        key: 'mini.production',
+        children: [
+          {
+            title: '熔炼任务',
+            key: 'group.mini.production.heat',
+            children: [
+              { title: '熔炼任务-数据列表', key: 'mini.production.heat.view' },
+              { title: '熔炼任务-开始生产', key: 'mini.production.heat.start' },
+              { title: '熔炼任务-转运出炉', key: 'mini.production.heat.transfer' },
+              { title: '熔炼任务-完成生产', key: 'mini.production.heat.complete' },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+]
+
+export const permissionTree: DataNode[] = [...adminPermissionTree, ...miniProgramPermissionTree]
+
+export function permissionTreeForApp(app?: string) {
+  return app === '小程序端' || app === 'mini' ? miniProgramPermissionTree : adminPermissionTree
+}
 
 export const dataScopeLabels: Record<DataScope, string> = {
   self: '本人数据',
@@ -373,6 +519,8 @@ export const initialRoles: RoleRecord[] = [
       'mold.development.edit',
       'mold.development.delete',
       ...modelingPermissionKeys,
+      ...productionPermissionKeys,
+      ...miniProgramPermissionKeys,
     ],
     dataScope: 'organization',
     dataScopes: ['organization'],

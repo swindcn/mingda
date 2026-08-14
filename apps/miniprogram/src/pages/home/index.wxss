@@ -13,6 +13,10 @@
   background: linear-gradient(145deg, #3b82f6, #0f55ff);
 }
 
+.heat-feature-icon {
+  background: #e5481d;
+}
+
 .content {
   padding: 28rpx 32rpx;
 }

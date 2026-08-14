@@ -14,8 +14,19 @@ import { UserManagementPage } from './pages/basic/UserManagementPage'
 import { MoldDevelopmentDetailPage } from './pages/mold/MoldDevelopmentDetailPage'
 import { MoldDevelopmentPage } from './pages/mold/MoldDevelopmentPage'
 import { ShiftSchedulePage } from './pages/modeling/ShiftSchedulePage'
+import { RecipeManagementPage } from './pages/modeling/RecipeManagementPage'
+import { CastingBomManagementPage } from './pages/modeling/CastingBomManagementPage'
 import { WorkshopLinePage } from './pages/modeling/WorkshopLinePage'
+import { OperationManagementPage } from './pages/modeling/OperationManagementPage'
+import { ProcessRoutingListPage } from './pages/modeling/ProcessRoutingListPage'
+import { ProcessRoutingWorkbenchPage } from './pages/modeling/ProcessRoutingWorkbenchPage'
 import { createModelingPage, modelingPages } from './pages/modeling/modelingConfigs'
+import { ResourceParserPage } from './pages/resource/ResourceParserPage'
+import { HeatOrderDetailPage } from './pages/production/HeatOrderDetailPage'
+import { HeatOrderListPage } from './pages/production/HeatOrderListPage'
+import { MeltSchedulingPage } from './pages/production/MeltSchedulingPage'
+import { WorkOrderListPage } from './pages/production/WorkOrderListPage'
+import { WorkOrderWorkbenchPage } from './pages/production/WorkOrderWorkbenchPage'
 import { apiRequest } from './services/api'
 import { hasPermission } from './utils/roles'
 
@@ -117,14 +128,27 @@ export default function App() {
         <Route path="model/team" element={protectedPage('model.team.view', createModelingPage(modelingPages[2]))} />
         <Route path="model/equipment" element={protectedPage('model.equipment.view', createModelingPage(modelingPages[3]))} />
         <Route path="model/material" element={protectedPage('model.material.view', createModelingPage(modelingPages[5]))} />
-        <Route path="model/recipe" element={protectedPage('model.recipe.view', createModelingPage(modelingPages[6]))} />
+        <Route path="model/recipe" element={protectedPage('model.recipe.view', <RecipeManagementPage />)} />
+        <Route path="model/bom" element={protectedPage('model.bom.view', <CastingBomManagementPage />)} />
         <Route path="mold/model" element={protectedPage('mold.model.view', createModelingPage(modelingPages[7]))} />
         <Route path="mold/corebox" element={protectedPage('mold.corebox.view', createModelingPage(modelingPages[8]))} />
         <Route path="model/shift" element={protectedPage('model.calendar.view', createModelingPage(modelingPages[9]))} />
         <Route path="model/calendar" element={protectedPage('model.calendar.view', createModelingPage(modelingPages[10]))} />
-        <Route path="model/routing" element={protectedPage('model.routing.view', createModelingPage(modelingPages[11]))} />
-        <Route path="model/defect" element={protectedPage('model.defect.view', createModelingPage(modelingPages[12]))} />
+        <Route path="model/operation" element={protectedPage('model.operation.view', <OperationManagementPage />)} />
+        <Route path="model/routing" element={protectedPage('model.routing.view', <ProcessRoutingListPage />)} />
+        <Route path="model/routing/new" element={protectedPage('model.routing.create', <ProcessRoutingWorkbenchPage />)} />
+        <Route path="model/routing/:id" element={protectedPage('model.routing.view', <ProcessRoutingWorkbenchPage />)} />
+        <Route path="model/routing/:id/edit" element={protectedPage('model.routing.edit', <ProcessRoutingWorkbenchPage />)} />
+        <Route path="model/defect" element={protectedPage('model.defect.view', createModelingPage(modelingPages.find((page) => page.resource === 'defects')!))} />
         <Route path="model/schedule" element={protectedPage('model.schedule.view', <ShiftSchedulePage />)} />
+        <Route path="production/work-orders" element={protectedPage('production.work_order.view', <WorkOrderListPage />)} />
+        <Route path="production/work-orders/new" element={protectedPage('production.work_order.create', <WorkOrderWorkbenchPage />)} />
+        <Route path="production/work-orders/:id" element={protectedPage('production.work_order.view', <WorkOrderWorkbenchPage />)} />
+        <Route path="production/work-orders/:id/edit" element={protectedPage('production.work_order.edit', <WorkOrderWorkbenchPage />)} />
+        <Route path="production/melt-scheduling" element={protectedPage('production.schedule.view', <MeltSchedulingPage />)} />
+        <Route path="production/heat-orders" element={protectedPage('production.heat.view', <HeatOrderListPage />)} />
+        <Route path="production/heat-orders/:id" element={protectedPage('production.heat.view', <HeatOrderDetailPage />)} />
+        <Route path="resources/parser" element={<ResourceParserPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

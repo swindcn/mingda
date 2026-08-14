@@ -36,6 +36,10 @@
         <view class="feature-icon">⌘</view>
         <view class="feature-text">模具开发</view>
       </view>
+      <view wx:if="{{canViewHeats}}" class="feature-card" bindtap="goHeats">
+        <view class="feature-icon heat-feature-icon">火</view>
+        <view class="feature-text">熔炼任务</view>
+      </view>
     </view>
   </view>
 </view>

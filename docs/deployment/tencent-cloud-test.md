@@ -25,6 +25,8 @@ API systemd 服务：mingda-api.service
 nginx
 postgresql
 node v22
+python3
+markitdown
 ```
 
 当前已使用 PostgreSQL 持久化基础数据和模具开发数据。
@@ -42,6 +44,17 @@ cp apps/api/.env.test.example apps/api/.env
 ```text
 PORT=3000
 CORS_ORIGIN=http://服务器公网IP
+UPLOAD_DIR=/opt/mingda-casting/uploads
+MARKITDOWN_BIN=/opt/markitdown-venv/bin/markitdown
+```
+
+上传图片通过 `/api/uploads/...` 访问。测试服需要保证 `UPLOAD_DIR` 指向持久目录，并允许运行 API 的用户读写该目录。
+
+资源解析功能依赖 Microsoft MarkItDown。建议在服务器上使用独立 Python venv：
+
+```bash
+python3 -m venv /opt/markitdown-venv
+/opt/markitdown-venv/bin/pip install 'markitdown[pdf,docx,pptx,xlsx]'
 ```
 
 ## 构建
