@@ -10,6 +10,7 @@
     "test:material-grades": "node scripts/test-material-grades.mjs",
     "test:recipes": "node scripts/test-recipes.mjs",
     "test:casting-boms": "node scripts/test-casting-boms.mjs",
+    "test:mold-coreboxes": "node scripts/test-mold-coreboxes.mjs",
     "test:process-routings": "node scripts/test-process-routings.mjs",
     "test:production-calculations": "npm run build && node scripts/test-production-calculations.mjs",
     "test:production-execution": "node scripts/test-production-execution.mjs",

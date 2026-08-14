@@ -947,6 +947,7 @@ model CastingBomVersionCoreBox {
   coreBoxCode         String
   coreBoxNameSnapshot String
   moldCodeSnapshot    String
+  quantityPerProduct  Decimal           @default(1) @db.Decimal(12, 4)
   createdAt           DateTime          @default(now())
   bomVersion          CastingBomVersion @relation(fields: [bomVersionId], references: [id], onUpdate: Cascade, onDelete: Cascade)
   coreBox             CoreBoxMaster     @relation(fields: [coreBoxCode], references: [code], onUpdate: Cascade, onDelete: Restrict)

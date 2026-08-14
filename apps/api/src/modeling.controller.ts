@@ -416,18 +416,17 @@ export class ModelingController {
       return this.toDto(resource, record)
     }
 
-    const delegate = getDelegate(this.prisma, resource)
     const normalizedBody = await this.withDevelopmentReceiveImages(resource, body)
+    if (resource === 'molds') {
+      const record = await this.createMoldWithCoreBoxes(normalizedBody)
+      await upsertOwnership(this.prisma, request.adminUser, this.entityType(resource), record.code)
+      return this.toDto(resource, record)
+    }
+
+    const delegate = getDelegate(this.prisma, resource)
     const record = await delegate.create({ data: this.normalize(resource, normalizedBody), include: this.includeFor(resource) })
     await upsertOwnership(this.prisma, request.adminUser, this.entityType(resource), this.recordCode(resource, record))
     await this.syncMultiRelations(resource, this.recordCode(resource, record), normalizedBody)
-    await this.syncCoreBoxForMold(resource, this.recordCode(resource, record), normalizedBody)
-    if (resource === 'molds' && normalizedBody.sourceMoldDevelopmentCode) {
-      await this.prisma.moldDevelopment.updateMany({
-        where: { code: stringValue(normalizedBody.sourceMoldDevelopmentCode) },
-        data: { archivedMoldCode: this.recordCode(resource, record) },
-      })
-    }
     if (this.hasMultiRelations(resource)) {
       return this.detail(request, resource, this.recordCode(resource, record))
     }
@@ -457,6 +456,11 @@ export class ModelingController {
       return this.toDto(resource, record)
     }
 
+    if (resource === 'molds') {
+      const record = await this.updateMoldWithCoreBoxes(id, body)
+      return this.toDto(resource, record)
+    }
+
     const delegate = getDelegate(this.prisma, resource)
     const record = await delegate.update({
       where: this.whereById(resource, id),
@@ -464,7 +468,6 @@ export class ModelingController {
       include: this.includeFor(resource),
     })
     await this.syncMultiRelations(resource, this.recordCode(resource, record), body)
-    await this.syncCoreBoxForMold(resource, this.recordCode(resource, record), body)
     if (this.hasMultiRelations(resource)) {
       return this.detail(request, resource, this.recordCode(resource, record))
     }
@@ -1378,31 +1381,111 @@ export class ModelingController {
     }
   }
 
-  private async syncCoreBoxForMold(resource: ResourceName, moldCode: string, body: Record<string, unknown>) {
-    if (resource !== 'molds') return
-    const coreBoxCode = stringValue(body.coreBoxCode) || `${moldCode}-COREBOX`
+  private coreBoxesFromBody(body: Record<string, unknown>, moldCode: string, moldName: string) {
+    let source: Record<string, unknown>[] | null = null
+    if (Array.isArray(body.coreBoxes)) {
+      source = body.coreBoxes.map((item) => item as Record<string, unknown>)
+    } else if (body.hasCoreBox === true) {
+      source = [{
+        code: stringValue(body.coreBoxCode) || `${moldCode}-COREBOX`,
+        name: stringValue(body.coreBoxName) || `${moldName}芯盒`,
+        images: toJsonArray(body.coreBoxImages).length ? body.coreBoxImages : body.images,
+        maxLife: body.coreBoxMaxLife ?? body.maxLife,
+        usedLife: body.coreBoxUsedLife,
+        status: body.coreBoxStatus ?? body.status,
+        remark: body.coreBoxRemark ?? body.remark,
+      }]
+    } else if (body.hasCoreBox === false) {
+      source = []
+    }
+    if (source === null) return null
 
-    if (!body.hasCoreBox) {
-      await this.prisma.coreBoxMaster.deleteMany({ where: { moldCode } })
+    const codes = new Set<string>()
+    return source.map((item) => {
+      const code = stringValue(item.code)
+      if (!code) throw new BadRequestException('芯盒编码不能为空')
+      if (!codePattern.test(code)) throw new BadRequestException(`芯盒编码 ${code} 不能包含中文或空格`)
+      if (codes.has(code)) throw new BadRequestException(`芯盒编码 ${code} 在本次请求中重复`)
+      codes.add(code)
+      return {
+        code,
+        name: stringValue(item.name) || code,
+        images: toJsonArray(item.images),
+        maxLife: toInt(item.maxLife),
+        usedLife: toInt(item.usedLife) ?? 0,
+        status: stringValue(item.status) || '启用',
+        remark: stringValue(item.remark),
+      }
+    })
+  }
+
+  private async syncMoldCoreBoxes(
+    tx: Prisma.TransactionClient,
+    moldCode: string,
+    coreBoxes: ReturnType<ModelingController['coreBoxesFromBody']>,
+  ) {
+    if (coreBoxes === null) {
+      const enabledCount = await tx.coreBoxMaster.count({ where: { moldCode, status: '启用' } })
+      await tx.moldMaster.update({ where: { code: moldCode }, data: { hasCoreBox: enabledCount > 0 } })
       return
     }
 
-    const moldName = stringValue(body.name) || moldCode
-    const coreBoxName = stringValue(body.coreBoxName) || `${moldName}芯盒`
-    const payload = {
-      name: coreBoxName,
-      moldCode,
-      images: toJsonArray(body.coreBoxImages).length ? toJsonArray(body.coreBoxImages) : toJsonArray(body.images),
-      maxLife: toInt(body.coreBoxMaxLife) ?? toInt(body.maxLife),
-      usedLife: toInt(body.coreBoxUsedLife) ?? 0,
-      status: stringValue(body.status) || '启用',
-      remark: stringValue(body.coreBoxRemark) || stringValue(body.remark),
+    const requestedCodes = coreBoxes.map((item) => item.code)
+    if (requestedCodes.length) {
+      const conflicts = await tx.coreBoxMaster.findMany({
+        where: { code: { in: requestedCodes }, moldCode: { not: moldCode } },
+        select: { code: true, moldCode: true },
+      })
+      if (conflicts.length) {
+        const conflict = conflicts[0]
+        throw new BadRequestException(`芯盒编码 ${conflict.code} 已属于其他模具 ${conflict.moldCode}`)
+      }
     }
 
-    await this.prisma.coreBoxMaster.upsert({
-      where: { code: coreBoxCode },
-      update: payload,
-      create: { code: coreBoxCode, ...payload },
+    for (const coreBox of coreBoxes) {
+      const data = { ...coreBox, moldCode }
+      await tx.coreBoxMaster.upsert({
+        where: { code: coreBox.code },
+        create: data,
+        update: data,
+      })
+    }
+    await tx.coreBoxMaster.updateMany({
+      where: { moldCode, ...(requestedCodes.length ? { code: { notIn: requestedCodes } } : {}) },
+      data: { status: '停用' },
+    })
+    const enabledCount = await tx.coreBoxMaster.count({ where: { moldCode, status: '启用' } })
+    await tx.moldMaster.update({ where: { code: moldCode }, data: { hasCoreBox: enabledCount > 0 } })
+  }
+
+  private async createMoldWithCoreBoxes(body: Record<string, unknown>) {
+    return this.prisma.$transaction(async (tx) => {
+      const moldCode = stringValue(body.code) as string
+      const moldName = stringValue(body.name) || moldCode
+      const coreBoxes = this.coreBoxesFromBody(body, moldCode, moldName)
+      await tx.moldMaster.create({
+        data: { ...(this.normalize('molds', body) as Prisma.MoldMasterUncheckedCreateInput), hasCoreBox: false },
+      })
+      await this.syncMoldCoreBoxes(tx, moldCode, coreBoxes)
+      if (body.sourceMoldDevelopmentCode) {
+        await tx.moldDevelopment.updateMany({
+          where: { code: stringValue(body.sourceMoldDevelopmentCode) },
+          data: { archivedMoldCode: moldCode },
+        })
+      }
+      return tx.moldMaster.findUniqueOrThrow({ where: { code: moldCode }, include: { supplier: true, coreBoxes: true } })
+    })
+  }
+
+  private async updateMoldWithCoreBoxes(id: string, body: Record<string, unknown>) {
+    return this.prisma.$transaction(async (tx) => {
+      const record = await tx.moldMaster.update({
+        where: { code: id },
+        data: this.normalize('molds', body) as Prisma.MoldMasterUncheckedUpdateInput,
+      })
+      const coreBoxes = this.coreBoxesFromBody(body, record.code, record.name)
+      await this.syncMoldCoreBoxes(tx, record.code, coreBoxes)
+      return tx.moldMaster.findUniqueOrThrow({ where: { code: record.code }, include: { supplier: true, coreBoxes: true } })
     })
   }
 
