@@ -206,6 +206,14 @@ export class CoremakingService {
     }
   }
 
+  private assemblyCoreDemand(workOrderQuantity: number, quantityPerProduct: Prisma.Decimal) {
+    try {
+      return calculateCoreDemand(workOrderQuantity, Number(quantityPerProduct), 0)
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : '砂芯齐套需求量计算失败')
+    }
+  }
+
   private previewRow(workOrder: Awaited<ReturnType<CoremakingService['loadWorkOrder']>>, item: any, input?: CoreTaskInput) {
     const expectedScrapRate = this.expectedScrapRate(input?.expectedScrapRate)
     const quantities = this.calculatedQuantities(
@@ -729,8 +737,8 @@ export class CoremakingService {
       coreBoxCodeSnapshot: { in: coreBoxCodes },
       report: {
         task: {
-          bomVersionId: workOrder.bomVersionId,
-          workOrder: { productCode: workOrder.productCode, bomVersionId: workOrder.bomVersionId },
+          productCodeSnapshot: workOrder.productCode,
+          workOrder: { productCode: workOrder.productCode },
         },
       },
     }
@@ -747,7 +755,7 @@ export class CoremakingService {
     const rows = workOrder.bomVersion.coreBoxes.map((item) => {
       const groups = inventory.filter((group) => group.coreBoxCodeSnapshot === item.coreBoxCode)
       const usableGroups = groups.filter((group) => ['AVAILABLE', 'WARNING'].includes(group.status))
-      const requiredQuantity = Number((workOrder.plannedQuantity * Number(item.quantityPerProduct)).toFixed(4))
+      const requiredQuantity = this.assemblyCoreDemand(workOrder.plannedQuantity, item.quantityPerProduct)
       const availableQuantity = usableGroups.reduce((sum, group) => sum + Number(group._sum.currentQuantity || 0), 0)
       const undriedQuantity = groups
         .filter((group) => group.status === 'UNDRIED')
@@ -793,13 +801,11 @@ export class CoremakingService {
     return { id, name }
   }
 
-  private async consumptionContext(client: DatabaseClient, workOrderId: string, batchCode: string, quantity: number) {
+  private async consumptionContext(client: DatabaseClient, workOrderId: string, batchCode: string) {
     const [workOrder, batch] = await Promise.all([
       client.workOrder.findUnique({
         where: { id: workOrderId },
         select: {
-          id: true,
-          code: true,
           productCode: true,
           bomVersionId: true,
           bomVersion: { select: { coreBoxes: { select: { coreBoxCode: true } } } },
@@ -812,11 +818,9 @@ export class CoremakingService {
             include: {
               task: {
                 select: {
-                  workOrderId: true,
-                  bomVersionId: true,
                   coreBoxCode: true,
                   productCodeSnapshot: true,
-                  workOrder: { select: { productCode: true, bomVersionId: true } },
+                  workOrder: { select: { productCode: true } },
                 },
               },
             },
@@ -834,17 +838,12 @@ export class CoremakingService {
     ) {
       throw new BadRequestException('砂芯批次产品与目标工单不匹配')
     }
-    if (sourceTask.bomVersionId !== workOrder.bomVersionId || sourceTask.workOrder.bomVersionId !== workOrder.bomVersionId) {
-      throw new BadRequestException('砂芯批次 BOM 与目标工单锁定 BOM 不匹配')
-    }
     const allowedCoreBoxes = new Set(workOrder.bomVersion.coreBoxes.map((item) => item.coreBoxCode))
     if (batch.coreBoxCodeSnapshot !== sourceTask.coreBoxCode || !allowedCoreBoxes.has(sourceTask.coreBoxCode)) {
       throw new BadRequestException('砂芯批次芯盒不属于目标工单锁定 BOM')
     }
     const status = this.liveBatchStatus(batch, new Date())
-    if (!['AVAILABLE', 'WARNING'].includes(status)) throw new ConflictException('砂芯批次当前状态不可领用')
-    if (batch.currentQuantity < quantity) throw new ConflictException('砂芯批次库存不足')
-    return { workOrder, batch, status }
+    return { batch, status }
   }
 
   async validateCoreConsumption(
@@ -858,7 +857,9 @@ export class CoremakingService {
     const normalizedQuantity = requiredInteger(quantity, '领用数量', 1)
     if (operatorContext !== undefined) this.consumptionOperator(operatorContext)
     await this.refreshInventoryStatuses({ code: normalizedBatchCode })
-    const { batch, status } = await this.consumptionContext(this.prisma, normalizedWorkOrderId, normalizedBatchCode, normalizedQuantity)
+    const { batch, status } = await this.consumptionContext(this.prisma, normalizedWorkOrderId, normalizedBatchCode)
+    if (!['AVAILABLE', 'WARNING'].includes(status)) throw new ConflictException('砂芯批次当前状态不可领用')
+    if (batch.currentQuantity < normalizedQuantity) throw new ConflictException('砂芯批次库存不足')
     return {
       workOrderId: normalizedWorkOrderId,
       batchId: batch.id,
@@ -882,14 +883,16 @@ export class CoremakingService {
     const normalizedBatchCode = textValue(batchCode, '砂芯批次', true)
     const normalizedQuantity = requiredInteger(quantity, '领用数量', 1)
     const operator = this.consumptionOperator(operatorContext)
-    const batchId = await this.serializable(async (tx) => {
+    const consumption = await this.serializable(async (tx) => {
       const target = await tx.coreInventoryBatch.findUnique({ where: { code: normalizedBatchCode }, select: { id: true } })
       if (!target) throw new NotFoundException('砂芯批次不存在')
       await this.lockBatchRecord(tx, target.id)
-      const { batch, status } = await this.consumptionContext(tx, normalizedWorkOrderId, normalizedBatchCode, normalizedQuantity)
+      const { batch, status } = await this.consumptionContext(tx, normalizedWorkOrderId, normalizedBatchCode)
       if (status !== batch.status) {
         await tx.coreInventoryBatch.updateMany({ where: { id: batch.id, status: batch.status }, data: { status } })
       }
+      if (!['AVAILABLE', 'WARNING'].includes(status)) return { batchId: batch.id, consumed: false }
+      if (batch.currentQuantity < normalizedQuantity) throw new ConflictException('砂芯批次库存不足')
       const quantityAfter = batch.currentQuantity - normalizedQuantity
       const updated = await tx.coreInventoryBatch.updateMany({
         where: {
@@ -917,9 +920,10 @@ export class CoremakingService {
           operatorNameSnapshot: operator.name,
         },
       })
-      return batch.id
+      return { batchId: batch.id, consumed: true }
     })
-    return this.batchDto(await this.refreshBatchStatus(batchId))
+    if (!consumption.consumed) throw new ConflictException('砂芯批次当前状态不可领用')
+    return this.batchDto(await this.refreshBatchStatus(consumption.batchId))
   }
 
   private async validateStartResources(

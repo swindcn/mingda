@@ -279,6 +279,9 @@ try {
   await createBatch({ code: `${prefix}-A-SCRAPPED`, coreBox: coreA, status: 'SCRAPPED', quantity: 7 })
   await createBatch({ code: `${prefix}-A-CONSUMED`, coreBox: coreA, status: 'CONSUMED', quantity: 9 })
   await createBatch({ code: `${prefix}-B-AVAILABLE`, coreBox: coreB, status: 'AVAILABLE', quantity: 25 })
+  const legacyBomBatch = await createBatch({ code: `${prefix}-LEGACY-BOM`, sourceBomVersion: alternateBomVersion, coreBox: coreA, quantity: 2 })
+  const wrongProductBatch = await createBatch({ code: `${prefix}-WRONG-PRODUCT`, sourceProduct: foreignProduct, sourceBomVersion: foreignBomVersion, coreBox: foreignCore, quantity: 2 })
+  const wrongCoreBatch = await createBatch({ code: `${prefix}-WRONG-CORE`, sourceBomVersion: bomVersion, coreBox: coreC, quantity: 2 })
   await prisma.coreProductionTask.create({
     data: {
       code: `${prefix}-TARGET-TASK`, workOrderId: targetWorkOrder.id, bomVersionId: bomVersion.id,
@@ -313,16 +316,31 @@ try {
   if (!Array.isArray(readiness.rows) || readiness.rows.length !== 2) throw new Error('多芯盒齐套明细数量错误')
   const rowA = readiness.rows.find((row) => row.coreBoxCode === coreA.code)
   const rowB = readiness.rows.find((row) => row.coreBoxCode === coreB.code)
-  if (!rowA || rowA.requiredQuantity !== 10 || rowA.availableQuantity !== 7 || rowA.undriedQuantity !== 2 || rowA.shortageQuantity !== 3 || rowA.readinessStatus !== 'PARTIAL') {
+  if (!rowA || rowA.requiredQuantity !== 10 || rowA.availableQuantity !== 9 || rowA.undriedQuantity !== 2 || rowA.shortageQuantity !== 1 || rowA.readinessStatus !== 'PARTIAL') {
     throw new Error(`芯盒 A 齐套计算错误: ${JSON.stringify(rowA)}`)
   }
   if (rowA.minRemainingHours < 11.8 || rowA.minRemainingHours > 12) throw new Error(`临期批次最短剩余时间错误: ${rowA.minRemainingHours}`)
   if (!rowB || rowB.requiredQuantity !== 20 || rowB.availableQuantity !== 25 || rowB.undriedQuantity !== 0 || rowB.shortageQuantity !== 0 || rowB.readinessStatus !== 'READY') {
     throw new Error(`芯盒 B 齐套计算错误: ${JSON.stringify(rowB)}`)
   }
-  if (readiness.totalRequiredQuantity !== 30 || readiness.totalAvailableQuantity !== 32 || readiness.totalShortageQuantity !== 3 || readiness.readinessRate !== 90) {
+  if (readiness.totalRequiredQuantity !== 30 || readiness.totalAvailableQuantity !== 34 || readiness.totalShortageQuantity !== 1 || readiness.readinessRate !== 96.67) {
     throw new Error(`总齐套率或汇总错误: ${JSON.stringify(readiness)}`)
   }
+  await prisma.workOrder.update({ where: { id: targetWorkOrder.id }, data: { plannedQuantity: 1 } })
+  await prisma.castingBomVersionCoreBox.update({
+    where: { bomVersionId_coreBoxCode: { bomVersionId: bomVersion.id, coreBoxCode: coreA.code } },
+    data: { quantityPerProduct: 1.5 },
+  })
+  const fractionalReadiness = await request(baseUrl, `/admin/production/work-orders/${targetWorkOrder.id}/core-readiness`, { headers })
+  const fractionalRow = fractionalReadiness.rows.find((row) => row.coreBoxCode === coreA.code)
+  if (fractionalRow?.requiredQuantity !== 2) throw new Error(`齐套需求量未向上取整: ${JSON.stringify(fractionalRow)}`)
+  await prisma.workOrder.update({ where: { id: targetWorkOrder.id }, data: { plannedQuantity: 2_147_483_647 } })
+  await request(baseUrl, `/admin/production/work-orders/${targetWorkOrder.id}/core-readiness`, { headers }, 400)
+  await prisma.workOrder.update({ where: { id: targetWorkOrder.id }, data: { plannedQuantity: 10 } })
+  await prisma.castingBomVersionCoreBox.update({
+    where: { bomVersionId_coreBoxCode: { bomVersionId: bomVersion.id, coreBoxCode: coreA.code } },
+    data: { quantityPerProduct: 1 },
+  })
   const emptyReadiness = await request(baseUrl, `/admin/production/work-orders/${emptyWorkOrder.id}/core-readiness`, { headers })
   if (emptyReadiness.rows.length !== 0 || emptyReadiness.totalRequiredQuantity !== 0 || emptyReadiness.totalAvailableQuantity !== 0 || emptyReadiness.totalShortageQuantity !== 0 || emptyReadiness.readinessRate !== 100) {
     throw new Error(`无芯盒工单齐套结果错误: ${JSON.stringify(emptyReadiness)}`)
@@ -333,6 +351,10 @@ try {
   const coremakingModule = await import('../dist/production/coremaking.service.js')
   const CoremakingService = coremakingModule.CoremakingService || coremakingModule.default?.CoremakingService
   const service = new CoremakingService(prisma)
+  const legacyValidation = await service.validateCoreConsumption(targetWorkOrder.id, legacyBomBatch.code, 1)
+  if (legacyValidation.availableQuantity !== 2 || legacyValidation.coreBoxCode !== coreA.code) throw new Error('同产品旧 BOM 版本砂芯未被允许领用')
+  const legacyConsumed = await service.consumeCoreBatch(targetWorkOrder.id, legacyBomBatch.code, 1, { id: admin.id, name: admin.name })
+  if (legacyConsumed.currentQuantity !== 1 || legacyConsumed.status !== 'AVAILABLE') throw new Error('同产品旧 BOM 版本砂芯领用失败')
   const validation = await service.validateCoreConsumption(targetWorkOrder.id, warningBatch.code, 2)
   if (validation.status !== 'WARNING' || validation.availableQuantity !== 4 || validation.recommendationPriority !== 'FIRST') throw new Error('WARNING 批次未被允许或优先推荐')
   const consumedPartial = await service.consumeCoreBatch(targetWorkOrder.id, warningBatch.code, 2, { id: admin.id, name: admin.name })
@@ -348,10 +370,6 @@ try {
   const fullLedgers = await prisma.coreInventoryLedger.findMany({ where: { batchId: fullBatch.id, action: 'CONSUMED' } })
   if (fullLedgers.length !== 1 || fullLedgers[0].quantityAfter !== 0) throw new Error('耗尽领用流水不唯一或结余错误')
 
-  const wrongBomBatch = await createBatch({ code: `${prefix}-WRONG-BOM`, sourceBomVersion: alternateBomVersion, coreBox: coreA, quantity: 2 })
-  const wrongProductBatch = await createBatch({ code: `${prefix}-WRONG-PRODUCT`, sourceProduct: foreignProduct, sourceBomVersion: foreignBomVersion, coreBox: foreignCore, quantity: 2 })
-  const wrongCoreBatch = await createBatch({ code: `${prefix}-WRONG-CORE`, sourceBomVersion: bomVersion, coreBox: coreC, quantity: 2 })
-  await expectRejectedStatus(() => service.validateCoreConsumption(targetWorkOrder.id, wrongBomBatch.code, 1), [400], '错误 BOM 批次')
   await expectRejectedStatus(() => service.validateCoreConsumption(targetWorkOrder.id, wrongProductBatch.code, 1), [400], '错误产品批次')
   await expectRejectedStatus(() => service.validateCoreConsumption(targetWorkOrder.id, wrongCoreBatch.code, 1), [400], '错误芯盒批次')
   await expectRejectedStatus(() => service.validateCoreConsumption(targetWorkOrder.id, fullBatch.code, 1), [400, 409], '已耗尽批次')
@@ -361,6 +379,25 @@ try {
   }
   await expectRejectedStatus(() => service.validateCoreConsumption(targetWorkOrder.id, warningBatch.code, 3), [400, 409], '库存不足')
   await expectRejectedStatus(() => service.consumeCoreBatch(targetWorkOrder.id, warningBatch.code, 1, {}), [400], '缺少操作人')
+
+  const staleValidateBatch = await createBatch({ code: `${prefix}-STALE-VALIDATE`, status: 'AVAILABLE', quantity: 2, expiresAt: new Date(Date.now() - 3_600_000) })
+  await expectRejectedStatus(() => service.validateCoreConsumption(targetWorkOrder.id, staleValidateBatch.code, 1), [409], '校验实时过期批次')
+  const staleValidateAfter = await prisma.coreInventoryBatch.findUnique({ where: { id: staleValidateBatch.id }, select: { status: true } })
+  if (staleValidateAfter?.status !== 'EXPIRED') throw new Error('validate 拒绝过期批次后未持久化 EXPIRED')
+
+  const staleConsumeBatch = await createBatch({ code: `${prefix}-STALE-CONSUME`, status: 'AVAILABLE', quantity: 2, expiresAt: new Date(Date.now() - 3_600_000) })
+  await expectRejectedStatus(
+    () => service.consumeCoreBatch(targetWorkOrder.id, staleConsumeBatch.code, 1, { id: admin.id, name: admin.name }),
+    [409],
+    '领用实时过期批次',
+  )
+  const [staleConsumeAfter, staleConsumeLedgers] = await Promise.all([
+    prisma.coreInventoryBatch.findUnique({ where: { id: staleConsumeBatch.id }, select: { status: true, currentQuantity: true } }),
+    prisma.coreInventoryLedger.count({ where: { batchId: staleConsumeBatch.id, action: 'CONSUMED' } }),
+  ])
+  if (staleConsumeAfter?.status !== 'EXPIRED' || staleConsumeAfter.currentQuantity !== 2 || staleConsumeLedgers !== 0) {
+    throw new Error('consume 拒绝过期批次后未持久化 EXPIRED，或错误扣减库存/写入流水')
+  }
 
   for (const status of ['EXPIRED', 'UNDRIED', 'LOCKED', 'SCRAPPED']) {
     const blocked = await createBatch({ code: `${prefix}-BLOCKED-${status}`, status, quantity: 2, expiresAt: status === 'EXPIRED' ? new Date(Date.now() - 3_600_000) : new Date(Date.now() + 48 * 3_600_000) })
@@ -426,7 +463,7 @@ try {
   if (updateManyCalls.some((call) => !JSON.stringify(call.where).includes('status'))) throw new Error('定时状态刷新条件未限制实时状态集合')
   if (updateManyCalls.some((call) => /LOCKED|SCRAPPED|CONSUMED|UNDRIED/.test(JSON.stringify(call.where)))) throw new Error('定时状态刷新包含保护状态')
 
-  console.log(JSON.stringify({ ok: true, assertions: 32, readinessRate: readiness.readinessRate, raceLedgers: raceLedgers.length }))
+  console.log(JSON.stringify({ ok: true, assertions: 39, readinessRate: readiness.readinessRate, raceLedgers: raceLedgers.length }))
 } catch (error) {
   testError = error
 } finally {
