@@ -1,8 +1,19 @@
 import { getCoreTasks } from '../../../services/api'
 import { CoreTaskStatus, MobileCoreTaskSummary } from '../../../types/business'
-import { createLatestRequestGate } from '../../../utils/latest-request'
+import { createLatestRequestGate, type LatestRequestGate } from '../../../utils/latest-request'
 
-const latestRequest = createLatestRequestGate()
+interface ListPageRequestState {
+  latestRequest?: LatestRequestGate
+  unloaded?: boolean
+}
+
+function requestState(page: unknown) {
+  return page as ListPageRequestState
+}
+
+function isRequestCurrent(state: ListPageRequestState, gate: LatestRequestGate, requestId: number) {
+  return !state.unloaded && state.latestRequest === gate && gate.isCurrent(requestId)
+}
 
 const tabs: Array<{ key: CoreTaskStatus; label: string }> = [
   { key: 'WAITING', label: '待生产' },
@@ -31,29 +42,46 @@ function display(records: MobileCoreTaskSummary[]) {
 
 Page({
   data: { tabs, activeTab: 'WAITING' as CoreTaskStatus, records: [] as MobileCoreTaskSummary[], loading: false },
+  onLoad() {
+    const state = requestState(this)
+    state.latestRequest = createLatestRequestGate()
+    state.unloaded = false
+  },
   onShow() { void this.loadRecords() },
-  onUnload() { latestRequest.invalidate() },
-  onPullDownRefresh() { void this.loadRecords().finally(() => wx.stopPullDownRefresh()) },
+  onUnload() {
+    const state = requestState(this)
+    state.unloaded = true
+    state.latestRequest?.invalidate()
+  },
+  onPullDownRefresh() {
+    const state = requestState(this)
+    void this.loadRecords().finally(() => { if (!state.unloaded) wx.stopPullDownRefresh() })
+  },
   async loadRecords() {
-    const requestId = latestRequest.next()
+    const state = requestState(this)
+    const gate = state.latestRequest
+    if (state.unloaded || !gate) return
+    const requestId = gate.next()
     const status = this.data.activeTab
     this.setData({ loading: true })
     try {
       const records = await getCoreTasks(status)
-      if (!latestRequest.isCurrent(requestId)) return
+      if (!isRequestCurrent(state, gate, requestId)) return
       this.setData({ records: display(records) })
     } catch (error) {
-      if (!latestRequest.isCurrent(requestId)) return
+      if (!isRequestCurrent(state, gate, requestId)) return
       wx.showToast({ title: error instanceof Error ? error.message : '制芯任务加载失败', icon: 'none' })
     } finally {
-      if (latestRequest.isCurrent(requestId)) this.setData({ loading: false })
+      if (isRequestCurrent(state, gate, requestId)) this.setData({ loading: false })
     }
   },
   changeTab(event: WechatMiniprogram.TouchEvent) {
+    if (requestState(this).unloaded) return
     this.setData({ activeTab: event.currentTarget.dataset.key as CoreTaskStatus, records: [] })
     void this.loadRecords()
   },
   openDetail(event: WechatMiniprogram.TouchEvent) {
+    if (requestState(this).unloaded) return
     wx.navigateTo({ url: `/pages/core/detail/index?id=${event.currentTarget.dataset.id}` })
   },
 })

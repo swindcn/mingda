@@ -1,10 +1,21 @@
 import { getCoreExecutionOptions, getCoreTaskDetail, reportCoreTask } from '../../../services/api'
 import { CoreExecutionOptions, MobileCoreTaskDetail } from '../../../types/business'
-import { createLatestRequestGate } from '../../../utils/latest-request'
+import { createLatestRequestGate, type LatestRequestGate } from '../../../utils/latest-request'
 import { isConflict } from '../../../utils/request'
 import { extractScannedCode } from '../../../utils/scan-code'
 
-const latestRequest = createLatestRequestGate()
+interface ReportPageRequestState {
+  latestRequest?: LatestRequestGate
+  unloaded?: boolean
+}
+
+function requestState(page: unknown) {
+  return page as ReportPageRequestState
+}
+
+function isRequestCurrent(state: ReportPageRequestState, gate: LatestRequestGate, requestId: number) {
+  return !state.unloaded && state.latestRequest === gate && gate.isCurrent(requestId)
+}
 
 Page({
   data: {
@@ -13,6 +24,9 @@ Page({
     shiftIndex: -1, shiftCode: '', sandBatchCode: '', dryingRequired: true, loading: false, submitting: false,
   },
   onLoad(query: Record<string, string>) {
+    const state = requestState(this)
+    state.latestRequest = createLatestRequestGate()
+    state.unloaded = false
     this.setData({
       id: query.id || '',
       versionNo: Number(query.versionNo || 0),
@@ -20,22 +34,31 @@ Page({
     })
     void this.loadData()
   },
-  onUnload() { latestRequest.invalidate() },
-  onPullDownRefresh() { void this.loadData().finally(() => wx.stopPullDownRefresh()) },
+  onUnload() {
+    const state = requestState(this)
+    state.unloaded = true
+    state.latestRequest?.invalidate()
+  },
+  onPullDownRefresh() {
+    const state = requestState(this)
+    void this.loadData().finally(() => { if (!state.unloaded) wx.stopPullDownRefresh() })
+  },
   async loadData() {
-    if (!this.data.id) return
-    const requestId = latestRequest.next()
+    const state = requestState(this)
+    const gate = state.latestRequest
+    if (state.unloaded || !gate || !this.data.id) return
+    const requestId = gate.next()
     this.setData({ loading: true })
     try {
       const [task, options] = await Promise.all([getCoreTaskDetail(this.data.id), getCoreExecutionOptions(this.data.id)])
-      if (!latestRequest.isCurrent(requestId)) return
+      if (!isRequestCurrent(state, gate, requestId)) return
       const shiftIndex = options.shifts.findIndex((item) => item.code === this.data.shiftCode)
       this.setData({ task, options, versionNo: task.versionNo, shiftIndex, shiftCode: shiftIndex >= 0 ? this.data.shiftCode : '' })
     } catch (error) {
-      if (!latestRequest.isCurrent(requestId)) return
+      if (!isRequestCurrent(state, gate, requestId)) return
       wx.showToast({ title: error instanceof Error ? error.message : '报工数据加载失败', icon: 'none' })
     } finally {
-      if (latestRequest.isCurrent(requestId)) this.setData({ loading: false })
+      if (isRequestCurrent(state, gate, requestId)) this.setData({ loading: false })
     }
   },
   inputQualified(event: WechatMiniprogram.Input) { this.setData({ qualifiedQuantity: event.detail.value }) },
@@ -48,15 +71,18 @@ Page({
     this.setData({ shiftIndex, shiftCode: this.data.options?.shifts[shiftIndex]?.code || '' })
   },
   scanSandBatch() {
+    const state = requestState(this)
+    if (state.unloaded) return
     wx.scanCode({
       scanType: ['qrCode', 'barCode'],
-      success: (result) => this.setData({ sandBatchCode: extractScannedCode(result.result) }),
-      fail: (error) => { if (!error.errMsg.includes('cancel')) wx.showToast({ title: '扫码失败，请手工输入', icon: 'none' }) },
+      success: (result) => { if (!state.unloaded) this.setData({ sandBatchCode: extractScannedCode(result.result) }) },
+      fail: (error) => { if (!state.unloaded && !error.errMsg.includes('cancel')) wx.showToast({ title: '扫码失败，请手工输入', icon: 'none' }) },
     })
   },
   toggleDrying(event: WechatMiniprogram.SwitchChange) { this.setData({ dryingRequired: event.detail.value }) },
   async submit() {
-    if (this.data.submitting) return
+    const state = requestState(this)
+    if (state.unloaded || this.data.submitting) return
     const qualifiedQuantity = Number(this.data.qualifiedQuantity)
     const scrapQuantity = Number(this.data.scrapQuantity)
     if (!Number.isInteger(qualifiedQuantity) || qualifiedQuantity < 1) { wx.showToast({ title: '合格数须为正整数', icon: 'none' }); return }
@@ -70,13 +96,18 @@ Page({
         sandBatchCode: this.data.sandBatchCode.trim(), dryingRequired: this.data.dryingRequired,
         defectReason: this.data.defectReason.trim(), remark: this.data.remark.trim(),
       })
+      if (state.unloaded) return
       wx.showToast({ title: '报工成功', icon: 'success' })
-      setTimeout(() => wx.navigateBack(), 600)
+      setTimeout(() => { if (!state.unloaded) wx.navigateBack() }, 600)
     } catch (error) {
-      if (isConflict(error)) await this.loadData()
+      if (state.unloaded) return
+      if (isConflict(error)) {
+        await this.loadData()
+        if (state.unloaded) return
+      }
       wx.showToast({ title: error instanceof Error ? error.message : '报工失败，请刷新重试', icon: 'none' })
     } finally {
-      this.setData({ submitting: false })
+      if (!state.unloaded) this.setData({ submitting: false })
     }
   },
 })

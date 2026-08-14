@@ -14,3 +14,5 @@ export function createLatestRequestGate() {
     },
   }
 }
+
+export type LatestRequestGate = ReturnType<typeof createLatestRequestGate>

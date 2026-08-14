@@ -14,6 +14,30 @@ function readSource(file) {
   return fs.readFileSync(path.join(src, file), 'utf8')
 }
 
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function pageInstance(definition) {
+  const instance = {
+    ...definition,
+    data: structuredClone(definition.data),
+    postUnloadSetData: 0,
+    afterUnload: false,
+    setData(values) {
+      if (this.afterUnload) this.postUnloadSetData += 1
+      Object.assign(this.data, values)
+    },
+  }
+  return instance
+}
+
 test('registers all coremaking pages with pull-down refresh where data is loaded', () => {
   const app = JSON.parse(read('app.json'))
   for (const page of ['list', 'detail', 'report', 'dry', 'label']) {
@@ -98,12 +122,90 @@ test('latest request gate prevents delayed responses from replacing records or l
   gate.invalidate()
   assert.equal(gate.isCurrent(unloading), false)
 
-  for (const page of ['list', 'detail', 'report', 'dry']) {
+  for (const page of ['list', 'detail', 'report', 'dry', 'label']) {
     const logic = read(`pages/core/${page}/index.js`)
     assert.match(logic, /createLatestRequestGate/)
     assert.match(logic, /isCurrent\(requestId\)/)
     assert.match(logic, /onUnload/)
     assert.match(logic, /invalidate/)
+    assert.doesNotMatch(logic, /const latestRequest = .*createLatestRequestGate/)
+    assert.match(logic, /onLoad[\s\S]*?createLatestRequestGate/)
+  }
+})
+
+test('an unloaded action conflict cannot invalidate a new page instance load', async () => {
+  const apiPath = require.resolve(path.join(dist, 'services/api.js'))
+  const detailPath = require.resolve(path.join(dist, 'pages/core/detail/index.js'))
+  const requestPath = require.resolve(path.join(dist, 'utils/request.js'))
+  const originalApiCache = require.cache[apiPath]
+  const originalPage = global.Page
+  const originalWx = global.wx
+  const oldAction = deferred()
+  const actionStarted = deferred()
+  const newLoad = deferred()
+  const detailCalls = []
+  const toasts = []
+  let definition
+
+  require.cache[apiPath] = {
+    id: apiPath,
+    filename: apiPath,
+    loaded: true,
+    exports: {
+      startCoreTask() {
+        actionStarted.resolve()
+        return oldAction.promise
+      },
+      getCoreTaskDetail(id) {
+        detailCalls.push(id)
+        if (id === 'new-task') return newLoad.promise
+        throw new Error(`unexpected detail reload for ${id}`)
+      },
+    },
+    children: [],
+    paths: [],
+  }
+  global.Page = (value) => { definition = value }
+  global.wx = {
+    showModal: async () => ({ confirm: true, cancel: false }),
+    showToast: (value) => { toasts.push(value) },
+    stopPullDownRefresh() {},
+    navigateTo() {},
+  }
+
+  try {
+    delete require.cache[detailPath]
+    require(detailPath)
+    const oldPage = pageInstance(definition)
+    oldPage.onLoad({ id: 'old-task' })
+    oldPage.data.record = { id: 'old-task', code: 'CORE-OLD', canStart: true, versionNo: 1 }
+    const actionPromise = oldPage.startTask()
+    await actionStarted.promise
+    oldPage.onUnload()
+    oldPage.afterUnload = true
+
+    const newPage = pageInstance(definition)
+    newPage.onLoad({ id: 'new-task' })
+    newPage.onShow()
+    oldAction.reject(new (require(requestPath).RequestError)('版本冲突', 409))
+    await actionPromise
+    newLoad.resolve({
+      id: 'new-task', code: 'CORE-NEW', status: 'WAITING', plannedStartAt: '', createdAt: '',
+      reports: [], batches: [], canStart: true, canReport: false, canDry: false, versionNo: 2,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    assert.deepEqual(detailCalls, ['new-task'])
+    assert.equal(oldPage.postUnloadSetData, 0)
+    assert.deepEqual(toasts, [])
+    assert.equal(newPage.data.record.id, 'new-task')
+    assert.equal(newPage.data.loading, false)
+  } finally {
+    delete require.cache[detailPath]
+    if (originalApiCache) require.cache[apiPath] = originalApiCache
+    else delete require.cache[apiPath]
+    global.Page = originalPage
+    global.wx = originalWx
   }
 })
 
@@ -153,8 +255,9 @@ test('preserves request status for unified conflict handling and refreshes in pl
     assert.match(source, /await this\.load(?:Detail|Data)\(\)/)
     const catches = [...source.matchAll(/catch \(error\) \{([\s\S]*?)\n    \} finally/g)]
     const actionCatch = catches.at(-1)?.[1] || ''
-    assert.match(actionCatch, /if \(isConflict\(error\)\) await this\.load(?:Detail|Data)\(\)[\s\S]*wx\.showToast/)
+    assert.match(actionCatch, /if \(state\.unloaded\) return[\s\S]*if \(isConflict\(error\)\) \{[\s\S]*await this\.load(?:Detail|Data)\(\)[\s\S]*if \(state\.unloaded\) return[\s\S]*wx\.showToast/)
     assert.doesNotMatch(actionCatch, /navigateBack|navigateTo|redirectTo/)
+    assert.match(source, /finally \{\s*if \(!state\.unloaded\) this\.setData\(\{ (?:starting|submitting): false \}\)/)
   }
 })
 
