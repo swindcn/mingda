@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -368,21 +369,27 @@ export class CastingBomController {
     if (!existing) throw new NotFoundException('BOM 版本不存在')
     if (existing.status !== 'DRAFT') throw new BadRequestException('仅草稿 BOM 可以编辑')
     const input = await this.normalize({ ...body, productCode: existing.bom.productCode })
-    const record = await this.prisma.castingBomVersion.update({
-      where: { id },
-      data: {
-        materialGradeCode: input.materialGradeCode,
-        productNameSnapshot: input.product.name,
-        netWeightKg: input.netWeightKg,
-        grossWeightKg: input.grossWeightKg,
-        yieldRate: input.yieldRate,
-        returnWeightKg: input.returnWeightKg,
-        remark: input.remark,
-        items: { deleteMany: {}, create: input.items },
-        molds: { deleteMany: {}, create: input.molds },
-        coreBoxes: { deleteMany: {}, create: input.coreBoxes },
-      },
-      include: this.include(),
+    const record = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`casting-bom:${existing.bomId}`}))`
+      const current = await tx.castingBomVersion.findUnique({ where: { id }, select: { status: true } })
+      if (!current) throw new NotFoundException('BOM 版本不存在')
+      if (current.status !== 'DRAFT') throw new ConflictException('BOM 版本状态已变更，请刷新后重试')
+      return tx.castingBomVersion.update({
+        where: { id },
+        data: {
+          materialGradeCode: input.materialGradeCode,
+          productNameSnapshot: input.product.name,
+          netWeightKg: input.netWeightKg,
+          grossWeightKg: input.grossWeightKg,
+          yieldRate: input.yieldRate,
+          returnWeightKg: input.returnWeightKg,
+          remark: input.remark,
+          items: { deleteMany: {}, create: input.items },
+          molds: { deleteMany: {}, create: input.molds },
+          coreBoxes: { deleteMany: {}, create: input.coreBoxes },
+        },
+        include: this.include(),
+      })
     })
     return this.dto(record)
   }
@@ -395,12 +402,18 @@ export class CastingBomController {
       select: { status: true, bomId: true, _count: { select: { derivedVersions: true } } },
     })
     if (!existing) throw new NotFoundException('BOM 版本不存在')
-    if (existing.status !== 'DRAFT') throw new BadRequestException('仅草稿 BOM 可以删除')
-    if (existing._count.derivedVersions) throw new BadRequestException('该草稿已生成派生版本，不能删除')
     await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`casting-bom:${existing.bomId}`}))`
+      const current = await tx.castingBomVersion.findUnique({
+        where: { id },
+        select: { status: true, bomId: true, _count: { select: { derivedVersions: true } } },
+      })
+      if (!current) throw new NotFoundException('BOM 版本不存在')
+      if (current.status !== 'DRAFT') throw new ConflictException('BOM 版本状态已变更，请刷新后重试')
+      if (current._count.derivedVersions) throw new BadRequestException('该草稿已生成派生版本，不能删除')
       await tx.castingBomVersion.delete({ where: { id } })
-      const count = await tx.castingBomVersion.count({ where: { bomId: existing.bomId } })
-      if (!count) await tx.castingBom.delete({ where: { id: existing.bomId } })
+      const count = await tx.castingBomVersion.count({ where: { bomId: current.bomId } })
+      if (!count) await tx.castingBom.delete({ where: { id: current.bomId } })
     })
     return { id }
   }
@@ -425,10 +438,16 @@ export class CastingBomController {
   @Post(':id/disable')
   async disable(@Req() request: RequestWithAdmin, @Param('id') id: string) {
     await this.assertVisible(request, id)
-    const existing = await this.prisma.castingBomVersion.findUnique({ where: { id }, select: { status: true } })
+    const existing = await this.prisma.castingBomVersion.findUnique({ where: { id }, select: { status: true, bomId: true } })
     if (!existing) throw new NotFoundException('BOM 版本不存在')
     if (existing.status !== 'ACTIVE') throw new BadRequestException('仅已生效 BOM 可以停用')
-    await this.prisma.castingBomVersion.update({ where: { id }, data: { status: 'DISABLED' } })
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`casting-bom:${existing.bomId}`}))`
+      const current = await tx.castingBomVersion.findUnique({ where: { id }, select: { status: true } })
+      if (!current) throw new NotFoundException('BOM 版本不存在')
+      if (current.status !== 'ACTIVE') throw new ConflictException('BOM 版本状态已变更，请刷新后重试')
+      await tx.castingBomVersion.update({ where: { id }, data: { status: 'DISABLED' } })
+    })
     return this.detail(request, id)
   }
 

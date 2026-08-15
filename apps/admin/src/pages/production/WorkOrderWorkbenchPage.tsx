@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import { SubPageHeader } from '../../components/SubPageHeader'
 import { resolveCoreTaskEntry } from '../../utils/coremaking'
-import { createWorkOrder, fetchWorkOrder, fetchWorkOrderOptions, fetchWorkOrderPreview, updateWorkOrder, type WorkOrderPayload, type WorkOrderPreview, type WorkOrderRecord } from '../../utils/production'
+import { createWorkOrder, fetchWorkOrder, fetchWorkOrderOptions, fetchWorkOrderPreview, updateWorkOrder, workOrderRecordToPreview, type WorkOrderPayload, type WorkOrderPreview, type WorkOrderRecord } from '../../utils/production'
 import { hasPermission } from '../../utils/roles'
 import { CoreReadinessPanel } from './CoreReadinessPanel'
 import { CoreTaskGenerationModal } from './CoreTaskGenerationModal'
@@ -36,8 +36,7 @@ export function WorkOrderWorkbenchPage() {
         if (id) {
           const detail = await fetchWorkOrder(id)
           setRecord(detail)
-          const nextPreview = await fetchWorkOrderPreview(detail.productCode)
-          setPreview(nextPreview)
+          setPreview(workOrderRecordToPreview(detail))
           form.setFieldsValue({
             productCode: detail.productCode,
             bomVersionId: detail.bomVersionId,
@@ -104,7 +103,9 @@ export function WorkOrderWorkbenchPage() {
     if (!id) return
     setLoading(true)
     try {
-      setRecord(await fetchWorkOrder(id))
+      const detail = await fetchWorkOrder(id)
+      setRecord(detail)
+      setPreview(workOrderRecordToPreview(detail))
     } catch (error) {
       message.error(error instanceof Error ? error.message : '工单信息刷新失败')
     } finally {
@@ -131,7 +132,7 @@ export function WorkOrderWorkbenchPage() {
               <Select showSearch optionFilterProp="label" placeholder="请选择产品" options={options.map((item) => ({ label: `${item.name}（${item.code}）`, value: item.code }))} onChange={(value) => void selectProduct(value)} />
             </Form.Item>
             <Form.Item label="材质牌号"><Input value={preview ? `${preview.materialGradeName}（${preview.materialGradeCode}）` : ''} readOnly /></Form.Item>
-            <Form.Item label="BOM 版本"><Input value={preview ? `${preview.bomCode} / ${preview.bomVersion}` : ''} readOnly /></Form.Item>
+            <Form.Item label={id ? 'BOM 版本（工单锁定）' : 'BOM 版本（已生效）'}><Input value={preview ? `${preview.bomCode} / ${preview.bomVersion}` : ''} readOnly /></Form.Item>
             <Form.Item label="工艺路线"><Input value={preview ? `${preview.routingName} / ${preview.routingVersion}` : ''} readOnly /></Form.Item>
             <Form.Item name="plannedQuantity" label="计划生产件数" rules={[{ required: true, message: '请输入计划生产件数' }]}><InputNumber min={1} precision={0} addonAfter="件" style={{ width: '100%' }} /></Form.Item>
             <Form.Item name="plannedStartDate" label="计划开工日期"><DatePicker style={{ width: '100%' }} /></Form.Item>

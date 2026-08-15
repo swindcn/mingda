@@ -24,6 +24,24 @@ import type { AdjustHeatScheduleBody, CompleteHeatOrderBody, HeatConflictBody, H
 const enabledProductTypes = ['成品', '半成品']
 type ProductionDatabaseClient = PrismaService | Prisma.TransactionClient
 
+type WorkOrderMasterSnapshot = {
+  productCode: string
+  productName: string
+  bomVersionId: string
+  bomCode: string
+  bomVersion: string
+  routingVersionId: string
+  routingCode: string
+  routingName: string
+  routingVersion: string
+  materialGradeCode: string
+  materialGradeName: string
+  unitNetWeightKg: number
+  unitGrossWeightKg: number
+  yieldRate: number
+  unitReturnWeightKg: number
+}
+
 type MeltPoolFurnaceOption = {
   code: string
   name: string
@@ -417,40 +435,56 @@ export class ProductionService {
 
   private async preparedWorkOrder(body: WorkOrderBody, client: ProductionDatabaseClient = this.prisma) {
     const productCode = String(body.productCode || '').trim()
+    const preview = await this.productPreview(productCode, String(body.bomVersionId || ''), String(body.routingVersionId || ''), client)
+    return { preview, data: this.workOrderData(body, preview) }
+  }
+
+  private workOrderData(body: WorkOrderBody, preview: WorkOrderMasterSnapshot) {
     const plannedQuantity = Number(body.plannedQuantity)
     if (!Number.isInteger(plannedQuantity) || plannedQuantity <= 0) throw new BadRequestException('计划件数必须为大于 0 的整数')
-    const preview = await this.productPreview(productCode, String(body.bomVersionId || ''), String(body.routingVersionId || ''), client)
     const plannedStartDate = dateOnly(body.plannedStartDate, false)
     const plannedDeliveryDate = dateOnly(body.plannedDeliveryDate, true)!
     return {
-      preview,
-      data: {
-        productCode,
-        productCodeSnapshot: preview.productCode,
-        productNameSnapshot: preview.productName,
-        bomVersionId: preview.bomVersionId,
-        bomCodeSnapshot: preview.bomCode,
-        bomVersionSnapshot: preview.bomVersion,
-        routingVersionId: preview.routingVersionId,
-        routingCodeSnapshot: preview.routingCode,
-        routingNameSnapshot: preview.routingName,
-        routingVersionSnapshot: preview.routingVersion,
-        materialGradeCode: preview.materialGradeCode,
-        materialGradeNameSnapshot: preview.materialGradeName,
-        plannedQuantity,
-        plannedStartDate,
-        plannedDeliveryDate,
-        priority: String(body.priority || 'NORMAL').trim() || 'NORMAL',
-        unitNetWeightKg: preview.unitNetWeightKg,
-        unitGrossWeightKg: preview.unitGrossWeightKg,
-        yieldRate: preview.yieldRate,
-        unitReturnWeightKg: preview.unitReturnWeightKg,
-        totalNetWeightKg: roundWeight(plannedQuantity * preview.unitNetWeightKg),
-        totalMeltWeightKg: roundWeight(plannedQuantity * preview.unitGrossWeightKg),
-        expectedReturnWeightKg: roundWeight(plannedQuantity * preview.unitReturnWeightKg),
-        remark: String(body.remark || '').trim() || null,
-      },
+      productCode: preview.productCode,
+      productCodeSnapshot: preview.productCode,
+      productNameSnapshot: preview.productName,
+      bomVersionId: preview.bomVersionId,
+      bomCodeSnapshot: preview.bomCode,
+      bomVersionSnapshot: preview.bomVersion,
+      routingVersionId: preview.routingVersionId,
+      routingCodeSnapshot: preview.routingCode,
+      routingNameSnapshot: preview.routingName,
+      routingVersionSnapshot: preview.routingVersion,
+      materialGradeCode: preview.materialGradeCode,
+      materialGradeNameSnapshot: preview.materialGradeName,
+      plannedQuantity,
+      plannedStartDate,
+      plannedDeliveryDate,
+      priority: String(body.priority || 'NORMAL').trim() || 'NORMAL',
+      unitNetWeightKg: preview.unitNetWeightKg,
+      unitGrossWeightKg: preview.unitGrossWeightKg,
+      yieldRate: preview.yieldRate,
+      unitReturnWeightKg: preview.unitReturnWeightKg,
+      totalNetWeightKg: roundWeight(plannedQuantity * preview.unitNetWeightKg),
+      totalMeltWeightKg: roundWeight(plannedQuantity * preview.unitGrossWeightKg),
+      expectedReturnWeightKg: roundWeight(plannedQuantity * preview.unitReturnWeightKg),
+      remark: String(body.remark || '').trim() || null,
     }
+  }
+
+  private async lockRequestedBom(tx: Prisma.TransactionClient, body: WorkOrderBody) {
+    const requestedBomVersionId = String(body.bomVersionId || '').trim()
+    const productCode = String(body.productCode || '').trim()
+    const identity = requestedBomVersionId
+      ? await tx.castingBomVersion.findUnique({ where: { id: requestedBomVersionId }, select: { id: true, bomId: true } })
+      : await tx.castingBomVersion.findFirst({
+          where: { status: 'ACTIVE', bom: { productCode } },
+          select: { id: true, bomId: true },
+          orderBy: { updatedAt: 'desc' },
+        })
+    if (!identity) return null
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`casting-bom:${identity.bomId}`}))`
+    return identity.id
   }
 
   private async nextCode(tx: Prisma.TransactionClient, type: 'WORK_ORDER' | 'HEAT_ORDER') {
@@ -479,8 +513,9 @@ export class ProductionService {
 
   async createWorkOrder(request: RequestWithAdmin, body: WorkOrderBody) {
     const user = getAdminContext(request)
-    const prepared = await this.preparedWorkOrder(body)
     const id = await this.prisma.$transaction(async (tx) => {
+      const lockedBomVersionId = await this.lockRequestedBom(tx, body)
+      const prepared = await this.preparedWorkOrder({ ...body, bomVersionId: String(body.bomVersionId || '').trim() || lockedBomVersionId || undefined }, tx)
       const code = await this.nextCode(tx, 'WORK_ORDER')
       const record = await tx.workOrder.create({ data: { code, ...prepared.data, createdByUserId: user.id } })
       await tx.businessDataOwnership.create({
@@ -524,12 +559,56 @@ export class ProductionService {
     if (!Number.isInteger(versionNo)) throw new BadRequestException('缺少有效的数据版本，请刷新后重试')
     await this.prisma.$transaction(async (tx) => {
       await this.lockWorkOrder(tx, id)
-      const prepared = await this.preparedWorkOrder(body, tx)
       const current = await tx.workOrder.findUnique({
         where: { id },
-        select: { productCode: true, bomVersionId: true, routingVersionId: true, plannedQuantity: true, _count: { select: { coreTasks: true } } },
+        select: {
+          productCode: true,
+          productNameSnapshot: true,
+          bomVersionId: true,
+          bomCodeSnapshot: true,
+          bomVersionSnapshot: true,
+          routingVersionId: true,
+          routingCodeSnapshot: true,
+          routingNameSnapshot: true,
+          routingVersionSnapshot: true,
+          materialGradeCode: true,
+          materialGradeNameSnapshot: true,
+          unitNetWeightKg: true,
+          unitGrossWeightKg: true,
+          yieldRate: true,
+          unitReturnWeightKg: true,
+          plannedQuantity: true,
+          _count: { select: { coreTasks: true } },
+        },
       })
       if (!current) throw new NotFoundException('生产工单不存在')
+      const keepsLockedMasterData = String(body.productCode || '').trim() === current.productCode
+        && String(body.bomVersionId || '').trim() === current.bomVersionId
+        && String(body.routingVersionId || '').trim() === current.routingVersionId
+      const prepared = keepsLockedMasterData
+        ? {
+            data: this.workOrderData(body, {
+              productCode: current.productCode,
+              productName: current.productNameSnapshot,
+              bomVersionId: current.bomVersionId,
+              bomCode: current.bomCodeSnapshot,
+              bomVersion: current.bomVersionSnapshot,
+              routingVersionId: current.routingVersionId,
+              routingCode: current.routingCodeSnapshot,
+              routingName: current.routingNameSnapshot,
+              routingVersion: current.routingVersionSnapshot,
+              materialGradeCode: current.materialGradeCode,
+              materialGradeName: current.materialGradeNameSnapshot,
+              unitNetWeightKg: decimal(current.unitNetWeightKg),
+              unitGrossWeightKg: decimal(current.unitGrossWeightKg),
+              yieldRate: decimal(current.yieldRate),
+              unitReturnWeightKg: decimal(current.unitReturnWeightKg),
+            }),
+          }
+        : await (async () => {
+            const lockedBomVersionId = await this.lockRequestedBom(tx, body)
+            return this.preparedWorkOrder({ ...body, bomVersionId: String(body.bomVersionId || '').trim() || lockedBomVersionId || undefined }, tx)
+          })()
       const activeAllocations = await tx.heatOrderAllocation.count({
         where: { workOrderId: id, heatOrder: { status: { not: 'CANCELED' } } },
       })

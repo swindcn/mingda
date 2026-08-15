@@ -300,13 +300,38 @@ try {
   if (previewB.plannedQuantity !== 110 || previewB.plannedPressCount !== 37) throw new Error('小数芯件比计算错误')
   if (previewA.cavityCount !== 4 || previewA.shelfLifeHours !== 8.5) throw new Error('芯盒快照预览不完整')
 
-  const noEquipmentPreview = await request(baseUrl, `/admin/production/work-orders/${validationWorkOrders[0].id}/core-tasks/preview`, {
-    method: 'POST', headers,
-    body: JSON.stringify({ rows: [{ coreBoxCode: coreBoxes[0].code, routingNodeId: noEquipmentCoreNode.id }] }),
-  }, 400)
-  if (!String(noEquipmentPreview.message).includes('未绑定启用设备')) throw new Error(`无可用设备节点预览错误不明确: ${noEquipmentPreview.message}`)
-
   const plannedStartAt = '2026-08-20T00:00:00.000Z'
+  const noEquipmentPreview = await request(baseUrl, `/admin/production/work-orders/${validationWorkOrders[0].id}/core-tasks/preview`, {
+    method: 'POST', headers, body: '{}',
+  })
+  const fallbackNode = noEquipmentPreview.routingNodes.find((item) => item.id === noEquipmentCoreNode.id)
+  if (!fallbackNode?.equipment.some((item) => item.code === unboundEquipment.code)) {
+    throw new Error('未绑定设备的制芯节点没有回退到设备档案中的启用射芯设备')
+  }
+  await prisma.workshop.update({ where: { code: unboundEquipment.workshopCode }, data: { status: '停用' } })
+  const disabledWorkshopPreview = await request(baseUrl, `/admin/production/work-orders/${validationWorkOrders[0].id}/core-tasks/preview`, {
+    method: 'POST', headers, body: '{}',
+  })
+  const disabledWorkshopNode = disabledWorkshopPreview.routingNodes.find((item) => item.id === noEquipmentCoreNode.id)
+  if (disabledWorkshopNode?.equipment.some((item) => item.code === unboundEquipment.code)) {
+    throw new Error('所属车间已停用的制芯设备仍出现在任务预览中')
+  }
+  await prisma.workshop.update({ where: { code: unboundEquipment.workshopCode }, data: { status: '启用' } })
+  const [fallbackTask] = await request(baseUrl, `/admin/production/work-orders/${validationWorkOrders[0].id}/core-tasks`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ rows: [{
+      coreBoxCode: coreBoxes[0].code,
+      routingNodeId: noEquipmentCoreNode.id,
+      equipmentCode: unboundEquipment.code,
+      teamCode: team.code,
+      plannedStartAt,
+    }] }),
+  })
+  const fallbackStarted = await request(baseUrl, `/admin/production/core-tasks/${fallbackTask.id}/start`, {
+    method: 'POST', headers, body: JSON.stringify({ versionNo: fallbackTask.versionNo }),
+  })
+  if (fallbackStarted.status !== 'IN_PROGRESS') throw new Error('设备档案回退生成的制芯任务无法正常开始')
+
   const created = await request(baseUrl, `/admin/production/work-orders/${mainWorkOrder.id}/core-tasks`, {
     method: 'POST', headers,
     body: JSON.stringify({ rows: [
@@ -509,7 +534,6 @@ try {
     }, 400)
     if (!String(result.message).includes(expectedText)) throw new Error(`期望错误包含“${expectedText}”，实际: ${result.message}`)
   }
-  await expectCreateFailure(validationWorkOrders[0], { routingNodeId: noEquipmentCoreNode.id }, '未绑定启用设备')
   await expectCreateFailure(validationWorkOrders[1], { routingNodeId: nonCoreNode.id }, '制芯')
   await expectCreateFailure(validationWorkOrders[2], { routingNodeId: coreNode.id, equipmentCode: unboundEquipment.code, teamCode: team.code, plannedStartAt }, '未绑定当前制芯工序节点')
   await expectCreateFailure(validationWorkOrders[3], { routingNodeId: coreNode.id, equipmentCode: disabledEquipment.code, teamCode: team.code, plannedStartAt }, '停用')

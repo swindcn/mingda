@@ -452,9 +452,14 @@ try {
   await prisma.workshop.update({ where: { code: workshop.code }, data: { status: '停用' } })
   await request(baseUrl, `/admin/production/core-tasks/${resourceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: resourceTask.versionNo }) }, 400)
   await prisma.workshop.update({ where: { code: workshop.code }, data: { status: '启用' } })
+  const alternativeEquipment = await prisma.furnace.create({
+    data: { code: `${prefix}-SHOOT-ALT`, name: '二号射芯机', equipmentType: '射芯机', workshopCode: workshop.code, status: '启用' },
+  })
+  await prisma.routingNodeEquipment.create({ data: { routingNodeId: node.id, equipmentCode: alternativeEquipment.code } })
   await prisma.routingNodeEquipment.delete({ where: { routingNodeId_equipmentCode: { routingNodeId: node.id, equipmentCode: equipment.code } } })
   await request(baseUrl, `/admin/production/core-tasks/${resourceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: resourceTask.versionNo }) }, 400)
   await prisma.routingNodeEquipment.create({ data: { routingNodeId: node.id, equipmentCode: equipment.code } })
+  await prisma.routingNodeEquipment.delete({ where: { routingNodeId_equipmentCode: { routingNodeId: node.id, equipmentCode: alternativeEquipment.code } } })
   const resourceStarted = await request(baseUrl, `/admin/production/core-tasks/${resourceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: resourceTask.versionNo }) })
   if (resourceStarted.status !== 'IN_PROGRESS') throw new Error('资源恢复后制芯任务仍无法开始')
 

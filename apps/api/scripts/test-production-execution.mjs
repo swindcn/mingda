@@ -276,6 +276,20 @@ try {
       createdByUserId: admin.id,
     },
   })
+  const draftBomVersion = await prisma.castingBomVersion.create({
+    data: {
+      bomId: bom.id,
+      version: 'V2.0',
+      materialGradeCode: grade.code,
+      productNameSnapshot: '测试泵体毛坯',
+      netWeightKg: 46,
+      grossWeightKg: 66,
+      yieldRate: 69.697,
+      returnWeightKg: 20,
+      status: 'DRAFT',
+      createdByUserId: admin.id,
+    },
+  })
   const routing = await prisma.processRouting.create({ data: { code: routingCode, name: '测试泵体标准路线' } })
   const routingVersion = await prisma.processRoutingVersion.create({
     data: {
@@ -341,6 +355,18 @@ try {
 
   const preview = await request(`/admin/production/work-orders/product-preview/${productCode}`, { headers })
   if (preview.bomVersionId !== bomVersion.id || preview.routingVersionId !== routingVersion.id) throw new Error('未带入生效 BOM 或默认路线')
+  await request(`/admin/production/work-orders/product-preview/${productCode}?bomVersionId=${draftBomVersion.id}`, { headers }, 400)
+  await request('/admin/production/work-orders', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      productCode,
+      bomVersionId: draftBomVersion.id,
+      routingVersionId: routingVersion.id,
+      plannedQuantity: 10,
+      plannedDeliveryDate: '2026-08-30',
+    }),
+  }, 400)
 
   const order = await request('/admin/production/work-orders', {
     method: 'POST',
@@ -387,6 +413,32 @@ try {
   if (edited.plannedQuantity !== 80 || edited.totalMeltWeightKg !== 5200 || edited.versionNo !== order.versionNo + 1) {
     throw new Error('未排产工单编辑失败')
   }
+
+  await prisma.$transaction([
+    prisma.castingBomVersion.update({ where: { id: bomVersion.id }, data: { status: 'DISABLED' } }),
+    prisma.castingBomVersion.update({ where: { id: draftBomVersion.id }, data: { status: 'ACTIVE' } }),
+  ])
+  const editedLockedVersion = await request(`/admin/production/work-orders/${order.id}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({
+      productCode,
+      bomVersionId: bomVersion.id,
+      routingVersionId: routingVersion.id,
+      plannedQuantity: 80,
+      plannedDeliveryDate: '2026-09-02',
+      priority: 'NORMAL',
+      remark: '历史工单继续使用锁定 BOM',
+      versionNo: edited.versionNo,
+    }),
+  })
+  if (editedLockedVersion.bomVersionId !== bomVersion.id || editedLockedVersion.bomVersion !== 'V1.0' || editedLockedVersion.totalMeltWeightKg !== 5200) {
+    throw new Error('已停用的工单锁定 BOM 未在编辑时正确保留')
+  }
+  await prisma.$transaction([
+    prisma.castingBomVersion.update({ where: { id: draftBomVersion.id }, data: { status: 'DRAFT' } }),
+    prisma.castingBomVersion.update({ where: { id: bomVersion.id }, data: { status: 'ACTIVE' } }),
+  ])
 
   const orderB = await request('/admin/production/work-orders', {
     method: 'POST',

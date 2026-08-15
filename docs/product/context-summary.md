@@ -450,7 +450,7 @@ npm run build:miniprogram
 - 工单提交时只锁定已生效 BOM、默认路线和快照，不自动生成制芯任务。`apps/api/src/production/production.service.ts` 只在锁定路线存在 `operation.section === '制芯'` 的节点时返回 `requiresCoremaking=true`；`apps/admin/src/pages/production/WorkOrderWorkbenchPage.tsx` 才显示手动“生成制芯任务”入口。无制芯节点显示“该工单无需制芯”，全部 BOM 芯盒已有任务后只保留查看入口。
 - 任务按 `生产工单 + 芯盒编码` 拆分，数据库约束为 `CoreProductionTask.@@unique([workOrderId, coreBoxCode])`。一个 BOM 有多套芯盒时生成多条任务；同一工单、同一芯盒不能重复生成。
 - 每套芯盒的计划量为 `ceil(工单计划数量 × quantityPerProduct × (1 + expectedScrapRate))`，计划压盒次数为 `ceil(计划量 ÷ CoreBoxMaster.cavityCount)`。`apps/api/src/production/coremaking.calculations.ts` 使用 `Prisma.Decimal` 缩放和整数运算避免浮点边界误差，任务保存芯件比、穴数、保质期、BOM、路线和工序快照。
-- 生成时必须选工单锁定路线中的制芯节点；设备必须是该节点绑定的启用设备，班组必须启用且与设备同车间。设备、班组、计划开始时间齐全时进入 `WAITING`，否则为 `PENDING_DISPATCH`，可在无报工时补派或调整。
+- 生成时必须选工单锁定路线中的制芯节点；节点存在启用绑定设备时只允许选择绑定设备，节点没有启用绑定设备时回退到设备档案中的射芯/制芯/造芯设备。设备、班组及各自所属车间都必须启用，班组还必须与设备同车间；预览、生成/派工、任务选项和开工统一该规则。设备、班组、计划开始时间齐全时进入 `WAITING`，否则为 `PENDING_DISPATCH`，可在无报工时补派或调整。
 - 任务状态为 `PENDING_DISPATCH -> WAITING -> IN_PROGRESS -> COMPLETED`，未报工且未完成时可进入 `CANCELED`。任务允许多次报工；每次报工在同一可串行化事务中累计任务数量，新增一条 `CoreProductionReport`、一条 `reportId` 唯一的 `CoreInventoryBatch` 和一条 `PRODUCED` 流水。累计合格数达到计划量即完成，允许保留超产数量。
 
 库存与保质期：

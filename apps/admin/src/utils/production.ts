@@ -99,6 +99,27 @@ export interface WorkOrderPayload {
   versionNo?: number
 }
 
+export function workOrderRecordToPreview(record: WorkOrderRecord): WorkOrderPreview {
+  return {
+    productCode: record.productCode,
+    productName: record.productName,
+    bomVersionId: record.bomVersionId,
+    bomCode: record.bomCode,
+    bomVersion: record.bomVersion,
+    routingVersionId: record.routingVersionId,
+    routingCode: record.routingCode,
+    routingName: record.routingName,
+    routingVersion: record.routingVersion,
+    materialGradeCode: record.materialGradeCode,
+    materialGradeName: record.materialGradeName,
+    unitNetWeightKg: record.unitNetWeightKg,
+    unitGrossWeightKg: record.unitGrossWeightKg,
+    yieldRate: record.yieldRate,
+    unitReturnWeightKg: record.unitReturnWeightKg,
+    routingNodes: record.routingNodes,
+  }
+}
+
 export interface HeatOrderRecord {
   id: string
   code: string

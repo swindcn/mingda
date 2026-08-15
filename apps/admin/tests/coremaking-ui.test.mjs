@@ -226,6 +226,8 @@ test('generation workbench and work-order detail expose the complete coremaking 
   assert.match(modal, /createLatestRequestGate/)
 
   const workOrder = read('apps/admin/src/pages/production/WorkOrderWorkbenchPage.tsx')
+  assert.match(workOrder, /workOrderRecordToPreview/)
+  assert.doesNotMatch(workOrder, /fetchWorkOrderPreview\(detail\.productCode\)/)
   assert.match(workOrder, /resolveCoreTaskEntry/)
   assert.match(workOrder, /production\.core_task\.create/)
   assert.match(workOrder, /production\.core_task\.view/)

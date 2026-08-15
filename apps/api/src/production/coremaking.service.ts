@@ -100,6 +100,10 @@ function isDryingEquipmentType(value: unknown) {
   return /(烘干|干燥)/.test(String(value || ''))
 }
 
+function isCoremakingEquipment(value: { name?: string | null; equipmentType?: string | null }) {
+  return /(射芯|制芯|造芯)/.test(`${value.name || ''} ${value.equipmentType || ''}`)
+}
+
 function taskRows(value: unknown, required: boolean) {
   const body = requestBody(value)
   if (body.rows !== undefined && !Array.isArray(body.rows)) throw new BadRequestException('rows 必须为数组')
@@ -218,6 +222,19 @@ export class CoremakingService {
     return workOrder.routingVersion.nodes.filter((node) => node.operation.section === '制芯')
   }
 
+  private async availableCoreEquipment(client: DatabaseClient, node: { equipmentLinks: Array<{ equipment: any }> }) {
+    const linked = node.equipmentLinks
+      .map((item) => item.equipment)
+      .filter((item, index, records) => item.status === '启用' && item.workshop?.status === '启用' && records.findIndex((record) => record.code === item.code) === index)
+    if (linked.length) return linked
+    const equipment = await client.furnace.findMany({
+      where: { status: '启用' },
+      include: { workshop: true },
+      orderBy: { code: 'asc' },
+    })
+    return equipment.filter((item) => item.workshop?.status === '启用' && isCoremakingEquipment(item))
+  }
+
   private expectedScrapRate(value: unknown) {
     const rate = value === null || value === undefined || value === '' ? 0 : Number(value)
     if (!Number.isFinite(rate) || rate < 0) throw new BadRequestException('预计废品率不能小于 0')
@@ -283,9 +300,10 @@ export class CoremakingService {
     const rows = workOrder.bomVersion.coreBoxes
       .filter((item) => !existingCodes.has(item.coreBoxCode))
       .map((item) => this.previewRow(workOrder, item, inputByCode.get(item.coreBoxCode)))
-    const workshopCodes = Array.from(new Set(nodes.flatMap((node) => node.equipmentLinks
-      .filter((link) => link.equipment.status === '启用' && link.equipment.workshopCode)
-      .map((link) => link.equipment.workshopCode as string))))
+    const nodeOptions = await Promise.all(nodes.map(async (node) => ({ node, equipment: await this.availableCoreEquipment(this.prisma, node) })))
+    const workshopCodes = Array.from(new Set(nodeOptions.flatMap((item) => item.equipment
+      .map((equipment) => equipment.workshopCode)
+      .filter((code): code is string => Boolean(code)))))
     const teams = workshopCodes.length ? await this.prisma.team.findMany({
       where: { status: '启用', workshopCode: { in: workshopCodes } },
       include: { workshop: true },
@@ -297,17 +315,17 @@ export class CoremakingService {
       requiresCoremaking: true,
       canGenerateCoreTasks: rows.length > 0,
       rows,
-      routingNodes: nodes.map((node) => ({
+      routingNodes: nodeOptions.map(({ node, equipment }) => ({
         id: node.id,
         seqNo: node.seqNo,
         operationCode: node.operationCode,
         operationName: node.operation.name,
-        equipment: node.equipmentLinks.map((link) => ({
-          code: link.equipment.code,
-          name: link.equipment.name,
-          status: link.equipment.status,
-          workshopCode: link.equipment.workshopCode || '',
-          workshopName: link.equipment.workshop?.name || '',
+        equipment: equipment.map((item) => ({
+          code: item.code,
+          name: item.name,
+          status: item.status,
+          workshopCode: item.workshopCode || '',
+          workshopName: item.workshop?.name || '',
         })),
       })),
       teams: teams.map((team) => ({
@@ -325,9 +343,8 @@ export class CoremakingService {
     if (!routingNodeId) throw new BadRequestException('请选择制芯工序节点')
     const node = workOrder.routingVersion.nodes.find((item) => item.id === routingNodeId)
     if (!node || node.operation.section !== '制芯') throw new BadRequestException('所选节点不属于工单锁定路线的制芯工序')
-    if (!node.equipmentLinks.some((item) => item.equipment.status === '启用')) {
-      throw new BadRequestException('所选制芯工序节点未绑定启用设备')
-    }
+    const equipmentOptions = await this.availableCoreEquipment(client, node)
+    if (!equipmentOptions.length) throw new BadRequestException('当前没有可用的射芯或制芯设备，请先维护设备档案或工艺路线')
 
     const equipmentCode = String(input.equipmentCode || '').trim() || null
     const teamCode = String(input.teamCode || '').trim() || null
@@ -337,14 +354,20 @@ export class CoremakingService {
 
     if (equipmentCode) {
       const link = node.equipmentLinks.find((item) => item.equipmentCode === equipmentCode)
-      if (!link) throw new BadRequestException('所选设备未绑定当前制芯工序节点')
-      equipment = link.equipment
-      if (equipment.status !== '启用') throw new BadRequestException('所选制芯设备已停用')
+      if (link?.equipment.status !== undefined && link.equipment.status !== '启用') throw new BadRequestException('所选制芯设备已停用')
+      equipment = equipmentOptions.find((item) => item.code === equipmentCode)
+      if (!equipment) {
+        if (node.equipmentLinks.some((item) => item.equipment.status === '启用')) {
+          throw new BadRequestException('所选设备未绑定当前制芯工序节点')
+        }
+        throw new BadRequestException('所选设备不是启用的射芯或制芯设备')
+      }
     }
     if (teamCode) {
       if (!equipment) throw new BadRequestException('选择班组前请先选择制芯设备')
       team = await client.team.findUnique({ where: { code: teamCode }, include: { workshop: true } })
       if (!team || team.status !== '启用') throw new BadRequestException('所选班组不存在或已停用')
+      if (team.workshop.status !== '启用') throw new BadRequestException('所选班组所属车间已停用')
       if (!equipment.workshopCode || team.workshopCode !== equipment.workshopCode) {
         throw new BadRequestException('所选班组与制芯设备不属于同一车间')
       }
@@ -616,9 +639,7 @@ export class CoremakingService {
   async getCoreTaskOptions(request: RequestWithAdmin, id: string, mobile = false) {
     await this.assertTaskAccess(request, id, mobile)
     const task = await this.findTask(id)
-    const equipment = task.routingNode.equipmentLinks
-      .map((link) => link.equipment)
-      .filter((item, index, records) => item.status === '启用' && records.findIndex((record) => record.code === item.code) === index)
+    const equipment = await this.availableCoreEquipment(this.prisma, task.routingNode)
     const workshopCodes = Array.from(new Set(equipment.map((item) => item.workshopCode).filter((code): code is string => Boolean(code))))
     const [teams, shifts, dryingEquipment] = await Promise.all([
       workshopCodes.length ? this.prisma.team.findMany({
@@ -1090,16 +1111,16 @@ export class CoremakingService {
     task: { routingNodeId: string; equipmentCode: string | null; teamCode: string | null },
   ) {
     if (!task.equipmentCode || !task.teamCode) throw new BadRequestException('制芯任务缺少完整派工信息')
-    const [equipmentLink, team] = await Promise.all([
-      tx.routingNodeEquipment.findUnique({
-        where: { routingNodeId_equipmentCode: { routingNodeId: task.routingNodeId, equipmentCode: task.equipmentCode } },
-        include: { equipment: { include: { workshop: true } } },
+    const [node, team] = await Promise.all([
+      tx.processRoutingNode.findUnique({
+        where: { id: task.routingNodeId },
+        include: { equipmentLinks: { include: { equipment: { include: { workshop: true } } } } },
       }),
       tx.team.findUnique({ where: { code: task.teamCode }, include: { workshop: true } }),
     ])
-    if (!equipmentLink) throw new BadRequestException('派工设备已解除当前制芯工序绑定，不能开始任务')
-    const equipment = equipmentLink.equipment
-    if (equipment.status !== '启用') throw new BadRequestException('派工设备已停用，不能开始任务')
+    if (!node) throw new BadRequestException('制芯工序节点不存在，不能开始任务')
+    const equipment = (await this.availableCoreEquipment(tx, node)).find((item) => item.code === task.equipmentCode)
+    if (!equipment) throw new BadRequestException('派工设备不再属于当前制芯工序的可用设备，不能开始任务')
     if (!equipment.workshop || equipment.workshop.status !== '启用') throw new BadRequestException('派工设备所属车间不存在或已停用')
     if (!team || team.status !== '启用') throw new BadRequestException('派工班组不存在或已停用，不能开始任务')
     if (team.workshop.status !== '启用') throw new BadRequestException('派工班组所属车间已停用')

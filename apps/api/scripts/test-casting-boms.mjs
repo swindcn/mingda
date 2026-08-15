@@ -6,6 +6,7 @@ const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } })
 const stamp = Date.now()
 const productA = `TEST-BOM-P-${stamp}`
 const productB = `TEST-BOM-Q-${stamp}`
+const productC = `TEST-BOM-D-${stamp}`
 const coreItem = `TEST-BOM-C-${stamp}`
 const auxiliaryItem = `TEST-BOM-A-${stamp}`
 const invalidItem = `TEST-BOM-R-${stamp}`
@@ -31,6 +32,28 @@ async function request(path, options = {}, expectedFailure = false) {
   return payload.data
 }
 
+async function assertWaitsForBomLock(bomId, operation, label) {
+  let releaseLock
+  let lockReady
+  const releasePromise = new Promise((resolve) => { releaseLock = resolve })
+  const readyPromise = new Promise((resolve) => { lockReady = resolve })
+  const holder = prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `casting-bom:${bomId}`)
+    lockReady()
+    await releasePromise
+  })
+  await readyPromise
+  let settled = false
+  const pending = operation().finally(() => { settled = true })
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  const settledBeforeRelease = settled
+  releaseLock()
+  await holder
+  const result = await pending
+  if (settledBeforeRelease) throw new Error(`${label}未使用 BOM advisory lock`)
+  return result
+}
+
 try {
   const grade = await prisma.materialGrade.findFirst({ where: { status: '启用' }, orderBy: { code: 'asc' } })
   if (!grade) throw new Error('缺少启用材质牌号')
@@ -38,6 +61,7 @@ try {
     data: [
       { code: productA, name: '测试泵体毛坯A', type: '半成品', unit: '件', materialGradeCode: grade.code },
       { code: productB, name: '测试泵体毛坯B', type: '半成品', unit: '件', materialGradeCode: grade.code },
+      { code: productC, name: '测试泵体毛坯C', type: '半成品', unit: '件', materialGradeCode: grade.code },
       { code: coreItem, name: '测试水道砂芯', type: '半成品/砂芯', unit: '个' },
       { code: auxiliaryItem, name: '测试冒口套', type: '铸造辅材', unit: '个' },
       { code: invalidItem, name: '测试生铁', type: '原材料', unit: 'kg' },
@@ -172,6 +196,9 @@ try {
   if (v2.moldCodes?.[0] !== moldA || v2.coreBoxes?.length !== 2) throw new Error('新版本未复制工装关系')
   if (v2.coreBoxes.find((item) => item.code === coreBoxB)?.quantityPerProduct !== 4) throw new Error('新版本未复制芯件比')
   if (v2.coreBoxes.find((item) => item.code === coreBoxB)?.shelfLifeHours !== 24) throw new Error('新版本未复制保质期')
+  await assertWaitsForBomLock(v2.bomId, () => request(`/admin/modeling/boms/${v2.id}`, {
+    method: 'PUT', headers, body: JSON.stringify({ ...payload, remark: '锁内更新' }),
+  }), '草稿编辑')
   await request(`/admin/modeling/boms/${v2.id}/new-version`, { method: 'POST', headers }, true)
   const cloned = await request(`/admin/modeling/boms/${v2.id}/clone`, {
     method: 'POST',
@@ -181,6 +208,13 @@ try {
   createdVersionIds.push(cloned.id)
   if (cloned.productCode !== productB || cloned.version !== 'V1.0' || cloned.status !== 'DRAFT') throw new Error('跨产品克隆失败')
   if (cloned.moldCodes?.length || cloned.coreBoxCodes?.length) throw new Error('跨产品克隆错误沿用了来源产品工装')
+  const deletableClone = await request(`/admin/modeling/boms/${v2.id}/clone`, {
+    method: 'POST', headers, body: JSON.stringify({ targetProductCode: productC }),
+  })
+  createdVersionIds.push(deletableClone.id)
+  await assertWaitsForBomLock(deletableClone.bomId, () => request(`/admin/modeling/boms/${deletableClone.id}`, {
+    method: 'DELETE', headers,
+  }), '草稿删除')
   await request(`/admin/modeling/boms/${v2.id}`, { method: 'DELETE', headers }, true)
   await request(`/admin/modeling/boms/${v2.id}/activate`, { method: 'POST', headers })
   const v1After = await request(`/admin/modeling/boms/${v1.id}`, { headers })
@@ -218,9 +252,9 @@ try {
     await prisma.businessDataOwnership.deleteMany({ where: { entityType: 'modeling:boms', entityId: { in: createdVersionIds } } }).catch(() => null)
   }
   if (createdVersionIds.length) await prisma.castingBomVersion?.deleteMany({ where: { id: { in: createdVersionIds } } }).catch(() => null)
-  await prisma.castingBom?.deleteMany({ where: { productCode: { in: [productA, productB] } } }).catch(() => null)
+  await prisma.castingBom?.deleteMany({ where: { productCode: { in: [productA, productB, productC] } } }).catch(() => null)
   await prisma.coreBoxMaster.deleteMany({ where: { code: { in: [coreBoxA, coreBoxB] } } }).catch(() => null)
   await prisma.moldMaster.deleteMany({ where: { code: { in: [moldA, moldB, disabledMold] } } }).catch(() => null)
-  await prisma.product.deleteMany({ where: { code: { in: [productA, productB, coreItem, auxiliaryItem, invalidItem] } } })
+  await prisma.product.deleteMany({ where: { code: { in: [productA, productB, productC, coreItem, auxiliaryItem, invalidItem] } } })
   await prisma.$disconnect()
 }
