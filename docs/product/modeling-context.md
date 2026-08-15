@@ -324,6 +324,8 @@ WorkOrder（锁定 BOM / 路线）
 
 - 派工、取消、开始、报工、烘干、冻结、解冻、报废都提交最新 `versionNo`。旧版本或重复动作返回 `409`，管理端和小程序在当前页面刷新最新详情后提示重试。
 - 管理端 `apps/admin/src/utils/latestRequest.ts` 与小程序 `apps/miniprogram/src/utils/latest-request.ts` 隔离列表、详情、标签和动作请求；后返回的旧响应、已卸载页面和旧筛选结果不能覆盖当前页面。
+- 管理端制芯任务列表和工单砂芯齐套面板也必须使用 latest-request gate；连续查询或切换工单时，只允许最后一次请求写入页面状态。
+- 报工存在报废数量时必须填写缺陷原因，规则由 API 强制执行。烘干设备仅接受启用且类型包含“烘干”或“干燥”的设备，不能用“射芯/制芯”关键字做宽泛匹配。
 - 生成任务锁 `WorkOrder`，开始/报工锁 `CoreProductionTask`，烘干及库存消费锁 `CoreInventoryBatch`；任务编码和批次编码使用 `DocumentSequence` 事务序列。任何报工失败必须同时回滚任务累计、报工、批次和流水。
 - `apps/api/src/production/production-permission.guard.ts` 在权限匹配前统一移除请求尾斜杠，`/report` 与 `/report/`、`/dry` 与 `/dry/` 使用同一最小权限，不能通过尾斜杠退化为查看权限。
 - 现有图片上传/预览、编码校验、详情标签页、`ResizableTable`、固定操作列和 `TableActions` 标准继续适用，制芯页面不得另建冲突规则。

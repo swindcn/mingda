@@ -520,6 +520,8 @@ try {
     body: JSON.stringify({ rows: [{ coreBoxCode: coreBoxes[0].code, routingNodeId: coreNode.id }] }),
   })
   await prisma.workOrder.update({ where: { id: closedDispatchWorkOrder.id }, data: { productionStatus: 'CLOSED' } })
+  const closedParentDetail = await request(baseUrl, `/admin/production/work-orders/${closedDispatchWorkOrder.id}`, { headers })
+  if (closedParentDetail.canGenerateCoreTasks) throw new Error('已关闭父工单仍错误开放生成制芯任务入口')
   const closedParentDispatch = await request(baseUrl, `/admin/production/core-tasks/${closedParentTask.id}/dispatch`, {
     method: 'PUT', headers,
     body: JSON.stringify({ versionNo: closedParentTask.versionNo, equipmentCode: equipment.code, teamCode: team.code, plannedStartAt }),
@@ -528,6 +530,8 @@ try {
     throw new Error(`关闭父工单派工错误不明确: ${closedParentDispatch.message}`)
   }
   await prisma.workOrder.update({ where: { id: closedDispatchWorkOrder.id }, data: { productionStatus: 'COMPLETED' } })
+  const completedParentDetail = await request(baseUrl, `/admin/production/work-orders/${closedDispatchWorkOrder.id}`, { headers })
+  if (completedParentDetail.canGenerateCoreTasks) throw new Error('已完成父工单仍错误开放生成制芯任务入口')
   const completedParentDispatch = await request(baseUrl, `/admin/production/core-tasks/${closedParentTask.id}/dispatch`, {
     method: 'PUT', headers,
     body: JSON.stringify({ versionNo: closedParentTask.versionNo, equipmentCode: equipment.code, teamCode: team.code, plannedStartAt }),

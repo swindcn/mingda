@@ -199,6 +199,8 @@ test('coremaking pages use the shared industrial table and operation patterns', 
   assert.match(taskList, /production\.core_task\.start/)
   assert.match(taskList, /production\.core_task\.report/)
   assert.match(taskList, /message\.error/, 'task-list action launch failures should be visible')
+  assert.match(taskList, /createLatestRequestGate/)
+  assert.match(taskList, /requestGate\.invalidate\(\)/)
   assert.match(inventory, /production\.core_inventory\.view/)
   assert.match(inventory, /production\.core_inventory\.dry/)
   assert.match(inventory, /production\.core_inventory\.lock/)
@@ -229,6 +231,9 @@ test('generation workbench and work-order detail expose the complete coremaking 
   assert.match(workOrder, /production\.core_task\.view/)
   assert.match(workOrder, /该工单无需制芯/)
   assert.match(workOrder, /<CoreReadinessPanel/)
+  const readiness = read('apps/admin/src/pages/production/CoreReadinessPanel.tsx')
+  assert.match(readiness, /createLatestRequestGate/)
+  assert.match(readiness, /requestGate\.invalidate\(\)/)
 })
 
 test('task detail includes dispatch, reporting and batch actions guarded by capability and permission', () => {

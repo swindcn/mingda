@@ -396,6 +396,9 @@ try {
   if (!miniOptions.shifts.some((item) => item.code === miniShift.code) || !miniOptions.dryingEquipment.some((item) => item.code === dryer.code)) {
     throw new Error('mini 制芯执行选项未返回真实班次或烘干设备')
   }
+  if (miniOptions.dryingEquipment.some((item) => item.code === equipment.code)) {
+    throw new Error('mini 制芯执行选项错误地把射芯机作为烘干设备')
+  }
   const miniStarted = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}/start`, {
     method: 'POST', headers: miniMemberHeaders, body: JSON.stringify({ versionNo: miniTask.versionNo }),
   })
@@ -430,6 +433,14 @@ try {
   }, 409)
   const detailAfterDry = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}`, { headers: miniMemberHeaders })
   if (detailAfterDry.canDry) throw new Error('批次烘干后 mini 制芯详情仍错误开放烘干动作')
+  await prisma.coreInventoryBatch.update({
+    where: { id: miniReported.batch.id },
+    data: { status: 'AVAILABLE', expiresAt: new Date(Date.now() - 60_000) },
+  })
+  const expiredDetail = await request(baseUrl, `/mini/production/core-tasks/${miniTask.id}`, { headers: miniMemberHeaders })
+  if (expiredDetail.batches[0].status !== 'EXPIRED') throw new Error('mini 制芯详情未实时刷新已过期砂芯批次')
+  const expiredAdminDetail = await request(baseUrl, `/admin/production/core-tasks/${miniTask.id}`, { headers })
+  if (expiredAdminDetail.reports[0]?.batch?.status !== 'EXPIRED') throw new Error('管理端制芯详情未返回实时过期的砂芯批次')
 
   const { task: resourceTask } = await createTask()
   await prisma.furnace.update({ where: { code: equipment.code }, data: { status: '停用' } })
@@ -450,14 +461,21 @@ try {
   const { task: mainTask } = await createTask()
   const taskOptions = await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/options`, { headers: taskDryHeaders })
   if (!taskOptions.dryingEquipment.some((item) => item.code === dryer.code)) throw new Error('任务选项未返回真实烘干设备')
+  if (taskOptions.dryingEquipment.some((item) => item.code === equipment.code)) throw new Error('任务选项错误地把射芯机作为烘干设备')
   await request(baseUrl, '/admin/production/core-inventory?page=1&pageSize=20', { headers: taskDryHeaders }, 403)
   const started = await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: mainTask.versionNo }) })
   if (started.status !== 'IN_PROGRESS' || started.versionNo !== 2 || !started.startedAt) throw new Error('开始任务未正确更新状态、版本和时间')
   await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: mainTask.versionNo }) }, 409)
 
+  const missingDefectReason = await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/report`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ versionNo: started.versionNo, qualifiedQuantity: 1, scrapQuantity: 1, shiftCode: shift.code, dryingRequired: true }),
+  }, 400)
+  if (!String(missingDefectReason.message).includes('缺陷原因')) throw new Error('报废数大于零时后端未明确要求缺陷原因')
+
   const firstReport = await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/report`, {
     method: 'POST', headers,
-    body: JSON.stringify({ versionNo: started.versionNo, qualifiedQuantity: 6, scrapQuantity: 1, shiftCode: shift.code, dryingRequired: true, sandBatchCode: 'SAND-001' }),
+    body: JSON.stringify({ versionNo: started.versionNo, qualifiedQuantity: 6, scrapQuantity: 1, defectReason: '缺角', shiftCode: shift.code, dryingRequired: true, sandBatchCode: 'SAND-001' }),
   })
   if (firstReport.task.qualifiedQuantity !== 6 || firstReport.task.scrapQuantity !== 1 || firstReport.task.status !== 'IN_PROGRESS') throw new Error('首次报工累计错误')
   if (firstReport.batch.status !== 'UNDRIED' || firstReport.batch.currentQuantity !== 6) throw new Error('需烘干批次初始状态或数量错误')
@@ -469,10 +487,15 @@ try {
     where: { documentType_businessDate: { documentType: batchSequence.documentType, businessDate: batchSequence.businessDate } },
     data: { currentValue: 0 },
   })
+  const wrongDryingEquipment = await request(baseUrl, `/admin/production/core-batches/${firstReport.batch.id}/dry`, {
+    method: 'POST', headers: taskDryHeaders,
+    body: JSON.stringify({ versionNo: firstReport.batch.versionNo, equipmentCode: equipment.code }),
+  }, 400)
+  if (!String(wrongDryingEquipment.message).includes('烘干')) throw new Error('使用射芯机确认烘干时错误不明确')
 
   const secondReport = await request(baseUrl, `/admin/production/core-tasks/${mainTask.id}/report`, {
     method: 'POST', headers,
-    body: JSON.stringify({ versionNo: firstReport.task.versionNo, qualifiedQuantity: 4, scrapQuantity: 2, shiftCode: shift.code, dryingRequired: true }),
+    body: JSON.stringify({ versionNo: firstReport.task.versionNo, qualifiedQuantity: 4, scrapQuantity: 2, defectReason: '尺寸超差', shiftCode: shift.code, dryingRequired: true }),
   })
   if (secondReport.task.qualifiedQuantity !== 10 || secondReport.task.scrapQuantity !== 3 || secondReport.task.status !== 'COMPLETED') throw new Error('多次报工累计或完工状态错误')
   if (firstReport.batch.code === secondReport.batch.code) throw new Error('多次报工生成了重复批次编码')
@@ -539,7 +562,7 @@ try {
 
   const { task: raceTask } = await createTask({ plannedQuantity: 20 })
   const raceStarted = await request(baseUrl, `/admin/production/core-tasks/${raceTask.id}/start`, { method: 'POST', headers, body: JSON.stringify({ versionNo: raceTask.versionNo }) })
-  const raceBody = JSON.stringify({ versionNo: raceStarted.versionNo, qualifiedQuantity: 5, scrapQuantity: 1, shiftCode: shift.code, dryingRequired: false })
+  const raceBody = JSON.stringify({ versionNo: raceStarted.versionNo, qualifiedQuantity: 5, scrapQuantity: 1, defectReason: '并发报废', shiftCode: shift.code, dryingRequired: false })
   const raceResults = await Promise.all([
     request(baseUrl, `/admin/production/core-tasks/${raceTask.id}/report`, { method: 'POST', headers, body: raceBody }, [201, 409]),
     request(baseUrl, `/admin/production/core-tasks/${raceTask.id}/report`, { method: 'POST', headers, body: raceBody }, [201, 409]),

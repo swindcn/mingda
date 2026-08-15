@@ -96,6 +96,10 @@ function requestBody(value: unknown) {
   return value as Record<string, unknown>
 }
 
+function isDryingEquipmentType(value: unknown) {
+  return /(烘干|干燥)/.test(String(value || ''))
+}
+
 function taskRows(value: unknown, required: boolean) {
   const body = requestBody(value)
   if (body.rows !== undefined && !Array.isArray(body.rows)) throw new BadRequestException('rows 必须为数组')
@@ -590,6 +594,7 @@ export class CoremakingService {
 
   async getTask(request: RequestWithAdmin, id: string, mobile = false) {
     await this.assertTaskAccess(request, id, mobile)
+    await this.refreshInventoryStatuses({ report: { taskId: id } })
     const record = await this.findTask(id, true)
     const user = getAdminContext(request)
     const batches = mobile ? await this.prisma.coreInventoryBatch.findMany({
@@ -646,7 +651,7 @@ export class CoremakingService {
       })),
       shifts: shifts.map((item) => ({ code: item.code, name: item.name, status: item.status })),
       dryingEquipment: dryingEquipment
-        .filter((item) => /(芯|烘干)/.test(item.equipmentType))
+        .filter((item) => isDryingEquipmentType(item.equipmentType))
         .map((item) => ({
           code: item.code,
           name: item.name,
@@ -671,7 +676,7 @@ export class CoremakingService {
     return {
       shifts: shifts.map((item) => ({ code: item.code, name: item.name, status: item.status })),
       dryingEquipment: dryingEquipment
-        .filter((item) => /(芯|烘干)/.test(item.equipmentType))
+        .filter((item) => isDryingEquipmentType(item.equipmentType))
         .map((item) => ({
           code: item.code,
           name: item.name,
@@ -1142,6 +1147,7 @@ export class CoremakingService {
     const dryingRequired = requiredBoolean(body.dryingRequired, '是否需要烘干')
     const sandBatchCode = textValue(body.sandBatchCode, '砂批次') || null
     const defectReason = textValue(body.defectReason, '缺陷原因') || null
+    if (scrapQuantity > 0 && !defectReason) throw new BadRequestException('报废数量大于零时请填写缺陷原因')
     const remark = textValue(body.remark, '备注') || null
     const user = getAdminContext(request)
 
@@ -1314,7 +1320,7 @@ export class CoremakingService {
     })
     return {
       dryingEquipment: equipment
-        .filter((item) => /(芯|烘干)/.test(item.equipmentType))
+        .filter((item) => isDryingEquipmentType(item.equipmentType))
         .map((item) => ({
           code: item.code,
           name: item.name,
@@ -1346,8 +1352,8 @@ export class CoremakingService {
       if (batch.versionNo !== versionNo) throw new ConflictException('砂芯批次已被其他用户更新，请刷新后重试')
       if (!batch.dryingRequired || batch.status !== 'UNDRIED') throw new ConflictException('仅待烘干批次可以确认烘干')
       const equipment = await tx.furnace.findUnique({ where: { code: equipmentCode } })
-      if (!equipment || equipment.status !== '启用' || !/(芯|烘干)/.test(equipment.equipmentType)) {
-        throw new BadRequestException('请选择启用且与制芯或烘干相关的设备')
+      if (!equipment || equipment.status !== '启用' || !isDryingEquipmentType(equipment.equipmentType)) {
+        throw new BadRequestException('请选择启用的烘干或干燥设备')
       }
       const driedAt = new Date()
       const expiresAt = calculateCoreBatchExpiresAt(true, batch.createdAt, driedAt, decimal(batch.shelfLifeHoursSnapshot))

@@ -480,6 +480,8 @@ npm run build:miniprogram
 统一防呆与一期边界：
 
 - 任务和库存动作必须携带最新 `versionNo`；旧版本返回 `409`，管理端和小程序原地刷新后提示重试。列表、详情、标签、报工和烘干使用 latest-request gate，页面卸载或筛选切换后的旧响应不得覆盖新状态。
+- 报废数量大于 `0` 时，缺陷原因由后端强制校验，不能只依赖管理端或小程序表单。烘干确认只能选择启用且设备类型明确包含“烘干”或“干燥”的设备，射芯机、制芯机不能作为烘干设备。
+- 生产工单已完成或已关闭时，后端返回 `canGenerateCoreTasks=false`；制芯任务详情返回批次前实时刷新临期和过期状态，不能只依赖定时任务。
 - 任务生成锁工单，开始/报工锁任务，烘干/库存动作/未来消费锁批次；任务与批次编码通过事务序列生成，报工、批次和流水整体成功或整体回滚。
 - `apps/api/src/production/coremaking.service.ts` 已预留无页面依赖的 `validateCoreConsumption(...)` 和 `consumeCoreBatch(...)`，包含产品、目标锁定 BOM 芯盒、状态、数量、行锁、乐观锁和 `CONSUMED` 流水校验。
 - 一期只有 `GET /admin/production/work-orders/:id/core-readiness` 暴露为 HTTP；`validateCoreConsumption`、`consumeCoreBatch` 尚未挂控制器。当前不做造型任务、造型排产或下芯领用页面，后续造型模块应复用这两个领域方法，不能绕过库存流水直接改数量。

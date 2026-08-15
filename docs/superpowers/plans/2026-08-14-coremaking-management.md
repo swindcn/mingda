@@ -192,7 +192,7 @@ POST /admin/production/core-batches/:id/unlock
 POST /admin/production/core-batches/:id/scrap
 ```
 
-烘干设备必须是启用的制芯/烘干相关设备。每个状态操作校验 `versionNo` 并写库存流水或状态记录。
+烘干设备必须是启用且类型明确包含“烘干”或“干燥”的设备，射芯机和制芯机不能被误选。每个状态操作校验 `versionNo` 并写库存流水或状态记录。
 
 - [ ] **Step 5: 实现库存列表与实时状态刷新**
 

@@ -1,6 +1,7 @@
 import { Alert, Card, Empty, Progress, Table, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { fetchCoreReadiness, type CoreReadiness } from '../../utils/coremaking'
+import { createLatestRequestGate } from '../../utils/latestRequest'
 
 const readinessLabels = { READY: '齐套', PARTIAL: '部分齐套', SHORTAGE: '缺料' }
 const readinessColors = { READY: 'success', PARTIAL: 'warning', SHORTAGE: 'error' }
@@ -9,22 +10,27 @@ export function CoreReadinessPanel({ workOrderId }: { workOrderId: string }) {
   const [record, setRecord] = useState<CoreReadiness | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [requestGate] = useState(() => createLatestRequestGate())
 
   const refresh = async () => {
     setLoading(true)
     setError('')
-    try {
-      setRecord(await fetchCoreReadiness(workOrderId))
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '砂芯齐套信息加载失败')
-    } finally {
-      setLoading(false)
-    }
+    await requestGate.run(
+      () => fetchCoreReadiness(workOrderId),
+      {
+        success: setRecord,
+        error: (reason) => setError(reason instanceof Error ? reason.message : '砂芯齐套信息加载失败'),
+        settled: () => setLoading(false),
+      },
+    )
   }
 
   // Refresh when the parent work order changes.
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { void refresh() }, [workOrderId])
+  useEffect(() => {
+    void refresh()
+    return () => requestGate.invalidate()
+  }, [workOrderId])
 
   return (
     <Card title="砂芯齐套" className="production-section-card" loading={loading} extra={record ? <Typography.Text type="secondary">总齐套率 {record.readinessRate.toFixed(2)}%</Typography.Text> : null}>

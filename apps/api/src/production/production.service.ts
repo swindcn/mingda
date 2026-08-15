@@ -287,7 +287,9 @@ export class ProductionService {
       updatedAt: record.updatedAt.toISOString(),
       canEdit: record.scheduledQuantity === 0 && record.productionStatus === 'RELEASED',
       requiresCoremaking,
-      canGenerateCoreTasks: requiresCoremaking && (coreBoxCount === 0 || coreTasks.length < coreBoxCount),
+      canGenerateCoreTasks: requiresCoremaking
+        && !['COMPLETED', 'CLOSED'].includes(record.productionStatus)
+        && (coreBoxCount === 0 || coreTasks.length < coreBoxCount),
       coreTaskCount: coreTasks.length,
       coreTaskSummary,
       routingNodes: record.routingVersion?.nodes?.map((node: any) => ({

@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
 import { fetchCoreTasks, type CoreTaskRecord, type CoreTaskStatus } from '../../utils/coremaking'
+import { createLatestRequestGate } from '../../utils/latestRequest'
 import { hasPermission } from '../../utils/roles'
 import { coreTaskStatusColors, coreTaskStatusLabels, openCoreCancel, openCoreDispatch, openCoreReport, openCoreStart } from './CoreTaskDetailPage'
 
@@ -22,6 +23,7 @@ export function CoreTaskListPage() {
   const [status, setStatus] = useState<CoreTaskStatus | 'ALL'>('ALL')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [requestGate] = useState(() => createLatestRequestGate())
   const canView = hasPermission('production.core_task.view')
   const canDispatch = hasPermission('production.core_task.dispatch')
   const canCancel = hasPermission('production.core_task.cancel')
@@ -30,11 +32,21 @@ export function CoreTaskListPage() {
 
   const refresh = async () => {
     setLoading(true); setError('')
-    try { setRecords(await fetchCoreTasks({ keyword: keyword.trim(), status, workOrderId })) } catch (reason) { setError(reason instanceof Error ? reason.message : '制芯任务加载失败') } finally { setLoading(false) }
+    await requestGate.run(
+      () => fetchCoreTasks({ keyword: keyword.trim(), status, workOrderId }),
+      {
+        success: setRecords,
+        error: (reason) => setError(reason instanceof Error ? reason.message : '制芯任务加载失败'),
+        settled: () => setLoading(false),
+      },
+    )
   }
   // Refresh when the optional work-order scope changes.
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { void refresh() }, [workOrderId])
+  useEffect(() => {
+    void refresh()
+    return () => requestGate.invalidate()
+  }, [workOrderId])
   const run = (action: Promise<void>) => void action.catch((reason) => message.error(reason instanceof Error ? reason.message : '操作加载失败'))
 
   const columns: TableColumnsType<CoreTaskRecord> = [
