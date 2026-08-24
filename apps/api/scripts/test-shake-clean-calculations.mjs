@@ -26,12 +26,24 @@ assert.deepEqual(
   calculateCoolingState('2026-08-24T08:00:00Z', '2026-08-24T10:01:00Z', 120),
   { requiredMinutes: 120, actualMinutes: 121, remainingMinutes: 0, early: false },
 )
+assert.deepEqual(
+  calculateCoolingState('2024-02-29T08:00:00+08:00', '2024-02-29T01:00:00Z', 60),
+  { requiredMinutes: 60, actualMinutes: 60, remainingMinutes: 0, early: false },
+)
+assert.deepEqual(
+  calculateCoolingState('2000-02-29T00:00:00Z', '2000-02-29T01:00:00Z', 60),
+  { requiredMinutes: 60, actualMinutes: 60, remainingMinutes: 0, early: false },
+)
 assert.throws(
   () => calculateCoolingState('invalid', '2026-08-24T09:30:00Z', 120),
   /时间.*无效/,
 )
 assert.throws(
   () => calculateCoolingState('2026-02-30T08:00:00Z', '2026-08-24T09:30:00Z', 120),
+  /时间.*无效/,
+)
+assert.throws(
+  () => calculateCoolingState('1900-02-29T00:00:00Z', '1900-03-01T00:00:00Z', 60),
   /时间.*无效/,
 )
 assert.throws(
