@@ -14,6 +14,7 @@
     "test:process-routings": "node scripts/test-process-routings.mjs",
     "test:production-calculations": "npm run build && node scripts/test-production-calculations.mjs",
     "test:coremaking-calculations": "npm run build && node scripts/test-coremaking-calculations.mjs",
+    "test:shake-clean-calculations": "npm run build && node scripts/test-shake-clean-calculations.mjs",
     "test:coremaking-tasks": "node scripts/test-coremaking-tasks.mjs",
     "test:coremaking-execution": "node scripts/test-coremaking-execution.mjs",
     "test:core-readiness": "npm run build && node scripts/test-core-readiness.mjs",
