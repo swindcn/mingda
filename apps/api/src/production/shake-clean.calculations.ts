@@ -16,6 +16,8 @@ export interface CoolingState {
   early: boolean
 }
 
+const ISO_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|([+-])(\d{2}):(\d{2}))$/
+
 function nonNegativeInteger(value: number, label: string) {
   if (!Number.isInteger(value) || value < 0) throw new Error(`${label}必须为非负整数`)
   return value
@@ -27,7 +29,38 @@ function positiveInteger(value: number, label: string) {
 }
 
 function timestamp(value: Date | string, label: string) {
-  const result = value instanceof Date ? value.getTime() : new Date(value).getTime()
+  if (value instanceof Date) {
+    const result = value.getTime()
+    if (Number.isNaN(result)) throw new Error(`${label}无效`)
+    return result
+  }
+
+  const match = ISO_DATE_TIME_PATTERN.exec(value)
+  if (!match) throw new Error(`${label}无效`)
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , , offsetHourText, offsetMinuteText] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  const second = Number(secondText)
+  const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText)
+  const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText)
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (
+    month < 1
+    || month > 12
+    || day < 1
+    || day > daysInMonth[month - 1]
+    || hour > 23
+    || minute > 59
+    || second > 59
+    || offsetHour > 23
+    || offsetMinute > 59
+  ) throw new Error(`${label}无效`)
+
+  const result = Date.parse(value)
   if (Number.isNaN(result)) throw new Error(`${label}无效`)
   return result
 }

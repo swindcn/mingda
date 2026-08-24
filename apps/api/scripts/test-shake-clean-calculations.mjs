@@ -14,9 +14,37 @@ assert.deepEqual(
   calculateCoolingState('2026-08-24T08:00:00Z', '2026-08-24T09:30:00Z', 120),
   { requiredMinutes: 120, actualMinutes: 90, remainingMinutes: 30, early: true },
 )
+assert.deepEqual(
+  calculateCoolingState('2026-08-24T08:00:00Z', '2026-08-24T09:30:59Z', 120),
+  { requiredMinutes: 120, actualMinutes: 90, remainingMinutes: 30, early: true },
+)
+assert.deepEqual(
+  calculateCoolingState('2026-08-24T08:00:00Z', '2026-08-24T10:00:00Z', 120),
+  { requiredMinutes: 120, actualMinutes: 120, remainingMinutes: 0, early: false },
+)
+assert.deepEqual(
+  calculateCoolingState('2026-08-24T08:00:00Z', '2026-08-24T10:01:00Z', 120),
+  { requiredMinutes: 120, actualMinutes: 121, remainingMinutes: 0, early: false },
+)
 assert.throws(
   () => calculateCoolingState('invalid', '2026-08-24T09:30:00Z', 120),
   /时间.*无效/,
+)
+assert.throws(
+  () => calculateCoolingState('2026-02-30T08:00:00Z', '2026-08-24T09:30:00Z', 120),
+  /时间.*无效/,
+)
+assert.throws(
+  () => calculateCoolingState('2026-08-24 08:00:00Z', '2026-08-24T09:30:00Z', 120),
+  /时间.*无效/,
+)
+assert.throws(
+  () => calculateCoolingState(new Date('invalid'), '2026-08-24T09:30:00Z', 120),
+  /时间.*无效/,
+)
+assert.throws(
+  () => calculateCoolingState('2026-08-24T09:30:00Z', '2026-08-24T08:00:00Z', 120),
+  /检查时间不能早于浇注时间/,
 )
 assert.throws(
   () => calculateCoolingState('2026-08-24T08:00:00Z', '2026-08-24T09:30:00Z', -1),
@@ -38,6 +66,16 @@ assert.deepEqual(
   ]),
   [{ batchId: 'a', quantity: 1 }, { batchId: 'b', quantity: 1 }],
 )
+const immutableCandidates = Object.freeze([
+  Object.freeze({ id: 'b', remainingQuantity: 10, availableAt: '2026-08-24T09:00:00Z' }),
+  Object.freeze({ id: 'a', remainingQuantity: 5, availableAt: '2026-08-24T08:00:00Z' }),
+])
+const immutableSnapshot = structuredClone(immutableCandidates)
+assert.deepEqual(
+  allocateQueueBatches(12, immutableCandidates),
+  [{ batchId: 'a', quantity: 5 }, { batchId: 'b', quantity: 7 }],
+)
+assert.deepEqual(immutableCandidates, immutableSnapshot)
 assert.throws(() => allocateQueueBatches(16, candidates), /待处理数量不足/)
 assert.throws(() => allocateQueueBatches(0, candidates), /正整数/)
 assert.throws(
