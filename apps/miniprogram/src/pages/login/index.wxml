@@ -1,24 +1,28 @@
 <view class="login-page">
   <view class="login-card">
-    <view class="brand-mark">闽</view>
-    <view class="brand-title">闽大铸件</view>
+    <image class="brand-logo" src="/assets/images/login-logo.png" mode="aspectFit" />
+    <view class="brand-title">闽大机械</view>
     <view class="brand-subtitle">移动协同平台</view>
 
-    <view class="form">
-      <view class="field">
-        <text class="label">账号</text>
-        <input value="{{username}}" placeholder="请输入账号" bindinput="onUsernameInput" />
+    <view class="login-form">
+      <view class="login-field">
+        <text class="login-label">账号</text>
+        <input class="login-input" value="{{username}}" placeholder="请输入账号" placeholder-style="color:#98a2b3" bindinput="onUsernameInput" />
       </view>
-      <view class="field">
-        <text class="label">密码</text>
-        <input value="{{password}}" password="{{!showPassword}}" placeholder="请输入密码" bindinput="onPasswordInput" />
-        <text class="toggle" bindtap="togglePassword">{{showPassword ? '隐藏' : '显示'}}</text>
+      <view class="login-field">
+        <text class="login-label">密码</text>
+        <view class="login-input-row">
+          <input class="login-input login-input--password" value="{{password}}" password="{{!showPassword}}" placeholder="请输入密码" placeholder-style="color:#98a2b3" bindinput="onPasswordInput" />
+          <view class="password-toggle" hover-class="password-toggle--hover" bindtap="togglePassword">
+            <image class="password-toggle-icon" src="/assets/icons/{{showPassword ? 'eye-close' : 'eye-open'}}.svg" mode="aspectFit" />
+          </view>
+        </view>
       </view>
-      <view class="form-row">
-        <checkbox checked="{{rememberPassword}}" bindtap="toggleRemember" />
-        <text class="remember">记住密码</text>
+      <view class="login-form-row">
+        <checkbox checked="{{rememberPassword}}" bindtap="toggleRemember" color="#1677ff" />
+        <text>记住密码</text>
       </view>
-      <button class="primary-button login-button" loading="{{loading}}" bindtap="login">登录</button>
+      <button class="login-button" loading="{{loading}}" bindtap="login">登 录</button>
     </view>
   </view>
 </view>

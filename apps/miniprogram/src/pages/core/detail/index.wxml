@@ -1,43 +1,88 @@
 <view class="detail-page" wx:if="{{record}}">
-  <view class="summary-card">
-    <view class="summary-head"><text class="task-code">{{record.code}}</text><text class="status-tag">{{record.statusText}}</text></view>
+  <!-- 摘要卡 -->
+  <view class="card summary-card">
+    <view class="summary-head">
+      <text class="task-code">{{record.code}}</text>
+      <text class="badge badge-{{record.status === 'COMPLETED' ? 'done' : record.status === 'CANCELED' ? 'muted' : record.status === 'WAITING' ? 'waiting' : 'active'}}">{{record.statusText}}</text>
+    </view>
     <view class="product-name">{{record.productName}}</view>
     <view class="info-grid">
-      <view><text class="label">工单</text><text class="value">{{record.workOrderCode}}</text></view>
-      <view><text class="label">芯盒</text><text class="value">{{record.coreBoxName}}</text></view>
-      <view><text class="label">计划 / 累计合格</text><text class="value">{{record.plannedQuantity}} / {{record.qualifiedQuantity}}</text></view>
-      <view><text class="label">累计废品</text><text class="value">{{record.scrapQuantity}}</text></view>
-      <view><text class="label">设备</text><text class="value">{{record.equipmentName}}</text></view>
-      <view><text class="label">班组</text><text class="value">{{record.teamName}}</text></view>
-      <view class="wide"><text class="label">计划时间</text><text class="value">{{record.plannedStartText}}</text></view>
+      <view class="info-cell">
+        <text class="field-label">工单</text>
+        <text class="field-value">{{record.workOrderCode}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">芯盒</text>
+        <text class="field-value">{{record.coreBoxName}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">计划 / 累计合格</text>
+        <text class="field-value">{{record.plannedQuantity}} / {{record.qualifiedQuantity}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">累计废品</text>
+        <text class="field-value">{{record.scrapQuantity}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">设备</text>
+        <text class="field-value">{{record.equipmentName}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">班组</text>
+        <text class="field-value">{{record.teamName}}</text>
+      </view>
+      <view class="info-cell info-cell-wide">
+        <text class="field-label">计划时间</text>
+        <text class="field-value">{{record.plannedStartText}}</text>
+      </view>
     </view>
     <view class="action-row">
-      <button wx:if="{{record.canStart}}" class="action-button primary" loading="{{starting}}" bindtap="startTask">开始生产</button>
-      <button wx:if="{{record.canReport}}" class="action-button primary" bindtap="openReport">报工</button>
-      <button wx:if="{{record.canDry}}" class="action-button outline" bindtap="openDry">确认烘干</button>
+      <button wx:if="{{record.canStart}}" class="btn btn-primary" loading="{{starting}}" bindtap="startTask">开始生产</button>
+      <button wx:if="{{record.canReport}}" class="btn btn-primary" bindtap="openReport">报工</button>
+      <button wx:if="{{record.canDry}}" class="btn btn-outline" bindtap="openDry">确认烘干</button>
     </view>
   </view>
 
-  <view class="section">
-    <view class="section-title">报工记录</view>
-    <view class="record-row" wx:for="{{record.reports}}" wx:key="id">
-      <view class="row-head"><text>{{item.operatorName}} · {{item.shiftCode}}</text><text>{{item.reportedAtText}}</text></view>
-      <view class="row-data">合格 {{item.qualifiedQuantity}}　废品 {{item.scrapQuantity}}　{{item.dryingRequired ? '需烘干' : '免烘干'}}</view>
-      <view wx:if="{{item.sandBatchCode}}" class="row-note">混砂批次：{{item.sandBatchCode}}</view>
-      <view wx:if="{{item.defectReason}}" class="row-note">废品原因：{{item.defectReason}}</view>
+  <!-- 报工记录 -->
+  <view class="card">
+    <view class="card-section-head">
+      <view class="section-bar"></view>
+      <text class="section-title">报工记录</text>
     </view>
-    <view wx:if="{{!record.reports.length}}" class="empty-inline">暂无报工记录</view>
+    <view class="record-list">
+      <view class="record-item" wx:for="{{record.reports}}" wx:key="id">
+        <view class="record-head">
+          <text class="record-meta">{{item.operatorName}} · {{item.shiftCode}}</text>
+          <text class="record-time">{{item.reportedAtText}}</text>
+        </view>
+        <view class="record-data">合格 {{item.qualifiedQuantity}}　废品 {{item.scrapQuantity}}　{{item.dryingRequired ? '需烘干' : '免烘干'}}</view>
+        <view wx:if="{{item.sandBatchCode}}" class="record-note">混砂批次：{{item.sandBatchCode}}</view>
+        <view wx:if="{{item.defectReason}}" class="record-note">废品原因：{{item.defectReason}}</view>
+      </view>
+      <view wx:if="{{!record.reports.length}}" class="empty-inline">暂无报工记录</view>
+    </view>
   </view>
 
-  <view class="section">
-    <view class="section-title">砂芯批次</view>
-    <view class="record-row" wx:for="{{record.batches}}" wx:key="id">
-      <view class="row-head"><text class="batch-code">{{item.code}}</text><text class="batch-status">{{item.statusText}}</text></view>
-      <view class="row-data">当前 {{item.currentQuantity}} / 初始 {{item.initialQuantity}}</view>
-      <view class="row-note">失效时间：{{item.expiresAtText}}</view>
-      <view class="batch-actions"><button class="label-button" data-id="{{item.id}}" catchtap="openLabel">标签</button></view>
+  <!-- 砂芯批次 -->
+  <view class="card">
+    <view class="card-section-head">
+      <view class="section-bar"></view>
+      <text class="section-title">砂芯批次</text>
     </view>
-    <view wx:if="{{!record.batches.length}}" class="empty-inline">暂无砂芯批次</view>
+    <view class="record-list">
+      <view class="record-item" wx:for="{{record.batches}}" wx:key="id">
+        <view class="record-head">
+          <text class="batch-code">{{item.code}}</text>
+          <text class="badge badge-{{item.status === 'AVAILABLE' ? 'success' : item.status === 'WARNING' ? 'warning' : item.status === 'EXPIRED' || item.status === 'SCRAPPED' ? 'danger' : item.status === 'CONSUMED' || item.status === 'LOCKED' ? 'muted' : 'pending'}}">{{item.statusText}}</text>
+        </view>
+        <view class="record-data">当前 {{item.currentQuantity}} / 初始 {{item.initialQuantity}}</view>
+        <view class="record-note">失效时间：{{item.expiresAtText}}</view>
+        <view class="batch-actions">
+          <button class="btn btn-outline btn-sm" data-id="{{item.id}}" catchtap="openLabel">查看标签</button>
+        </view>
+      </view>
+      <view wx:if="{{!record.batches.length}}" class="empty-inline">暂无砂芯批次</view>
+    </view>
   </view>
 </view>
 <view wx:elif="{{!loading}}" class="empty-page">未找到制芯任务</view>

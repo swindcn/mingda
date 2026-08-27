@@ -17,7 +17,7 @@
 - Create: `apps/api/scripts/test-shake-clean-calculations.mjs`
 - Modify: `apps/api/package.json`
 
-- [ ] **Step 1: 写数量换算、冷却和 FIFO 失败测试**
+- [x] **Step 1: 写数量换算、冷却和 FIFO 失败测试**
 
 测试直接调用将要导出的纯函数：
 
@@ -37,7 +37,7 @@ assert.deepEqual(allocateQueueBatches(12, [
 assert.throws(() => allocateQueueBatches(16, candidates), /待处理数量不足/)
 ```
 
-- [ ] **Step 2: 运行测试并确认因模块不存在而失败**
+- [x] **Step 2: 运行测试并确认因模块不存在而失败**
 
 Run:
 
@@ -48,7 +48,7 @@ node apps/api/scripts/test-shake-clean-calculations.mjs
 
 Expected: FAIL，提示 `shake-clean.calculations` 不存在。
 
-- [ ] **Step 3: 实现最小纯计算函数**
+- [x] **Step 3: 实现最小纯计算函数**
 
 `shake-clean.calculations.ts` 导出：
 
@@ -69,7 +69,7 @@ export function allocateQueueBatches(quantity: number, candidates: Array<{
 
 箱数、穴数和报工数量必须为非负整数；有效报工的“合格 + 废品”必须大于零。FIFO 固定按 `availableAt -> id` 排序。
 
-- [ ] **Step 4: 注册脚本并确认通过**
+- [x] **Step 4: 注册脚本并确认通过**
 
 `apps/api/package.json` 增加 `test:shake-clean-calculations`，运行后必须输出：
 
@@ -87,11 +87,11 @@ export function allocateQueueBatches(quantity: number, candidates: Array<{
 - Modify: `apps/api/scripts/test-process-routings.mjs`
 - Modify: `apps/admin/tests/process-routing-ui.test.mjs`
 
-- [ ] **Step 1: 在路线测试中增加冷却时长失败断言**
+- [x] **Step 1: 在路线测试中增加冷却时长失败断言**
 
 在创建的 `OP-SHAKE` 节点中提交 `coolingDurationMinutes: 120`，断言详情、编辑和版本克隆后都保留 `120`；提交小数或负数返回 `400`。管理端测试断言该字段只在落砂清理节点配置抽屉中显示。
 
-- [ ] **Step 2: 运行路线 API 和 UI 测试并确认失败**
+- [x] **Step 2: 运行路线 API 和 UI 测试并确认失败**
 
 Run:
 
@@ -102,7 +102,7 @@ node --test apps/admin/tests/process-routing-ui.test.mjs
 
 Expected: FAIL，当前 DTO 和页面未保存/展示冷却时长。
 
-- [ ] **Step 3: 增加路线冷却字段**
+- [x] **Step 3: 增加路线冷却字段**
 
 `ProcessRoutingNode` 增加：
 
@@ -112,7 +112,7 @@ coolingDurationMinutes Int @default(0)
 
 后端创建、编辑、详情和克隆统一处理该字段。必须是非负整数，非落砂清理节点强制保存为 `0`。
 
-- [ ] **Step 4: 增加落砂、清理和毛坯产出模型**
+- [x] **Step 4: 增加落砂、清理和毛坯产出模型**
 
 在 Prisma 中增加：
 
@@ -142,7 +142,7 @@ coolingDurationMinutes Int @default(0)
 
 同步给 `User`、`Furnace`、`DefectCode`、`WorkOrder`、`MoldingTask`、`ProcessRoutingVersion`、`ProcessRoutingNode`、`PouringReport` 增加反向关系。
 
-- [ ] **Step 5: 生成 Prisma Client 并同步本地 Docker 数据库**
+- [x] **Step 5: 生成 Prisma Client 并同步本地 Docker 数据库**
 
 Run:
 
@@ -161,7 +161,7 @@ Expected: 不删除已有数据，TypeScript 构建通过。
 - Modify: `apps/api/src/production/pouring.service.ts`
 - Modify: `apps/api/scripts/test-pouring-execution.mjs`
 
-- [ ] **Step 1: 写浇注到落砂队列失败测试**
+- [x] **Step 1: 写浇注到落砂队列失败测试**
 
 新增断言：
 
@@ -171,7 +171,7 @@ Expected: 不删除已有数据，TypeScript 构建通过。
 - 无可达 `OP-SHAKE`/清理工段节点时浇注仍成功，但不生成批次。
 - 工单锁定路线后续停用仍能按原版本找到落砂节点。
 
-- [ ] **Step 2: 运行浇注接口测试并确认失败**
+- [x] **Step 2: 运行浇注接口测试并确认失败**
 
 Run:
 
@@ -181,7 +181,7 @@ env DATABASE_URL='postgresql://mingda:mingda_dev_password@127.0.0.1:5433/mingda_
 
 Expected: FAIL，浇注报工尚未生成 `ShakeBatch`。
 
-- [ ] **Step 3: 实现可达落砂节点解析和历史补建**
+- [x] **Step 3: 实现可达落砂节点解析和历史补建**
 
 `shake-clean.queue.ts` 实现：
 
@@ -202,14 +202,14 @@ export async function backfillShakeBatches(tx: Prisma.TransactionClient): Promis
 
 图搜索检测循环，只接受首个可达的清理工段/`OP-SHAKE` 节点。补建仅处理 `ACTIVE` 且 `goodQty > 0` 的历史浇注报工，依靠唯一约束保证幂等。
 
-- [ ] **Step 4: 在浇注事务中生成批次并增加撤销保护**
+- [x] **Step 4: 在浇注事务中生成批次并增加撤销保护**
 
 浇注报工创建完成后、事务提交前调用 `createShakeBatchForPouringReport`。撤销浇注时：
 
 - 待落砂批次无有效消费：将其置为 `CANCELED`。
 - 已被落砂报工消费：返回“该浇注报工已进入落砂追溯，请先撤销落砂报工”。
 
-- [ ] **Step 5: 运行浇注回归**
+- [x] **Step 5: 运行浇注回归**
 
 Expected: `test:pouring-execution` PASS，测试数据清理后不留孤立落砂批次。
 
@@ -227,7 +227,7 @@ Expected: `test:pouring-execution` PASS，测试数据清理后不留孤立落�
 - Modify: `apps/api/scripts/test-defect-operations.mjs`
 - Modify: `apps/api/package.json`
 
-- [ ] **Step 1: 写完整接口失败测试**
+- [x] **Step 1: 写完整接口失败测试**
 
 隔离 PostgreSQL schema 测试覆盖：
 
@@ -245,7 +245,7 @@ Expected: `test:pouring-execution` PASS，测试数据清理后不留孤立落�
 12. 上游浇注未完成时队列清空显示 `WAITING_POURING`，全部完成时显示 `COMPLETED`。
 13. 数据范围只返回可见的 `production:molding_tasks`/生产工单来源任务。
 
-- [ ] **Step 2: 运行新接口测试并确认因接口不存在而失败**
+- [x] **Step 2: 运行新接口测试并确认因接口不存在而失败**
 
 Run:
 
@@ -255,7 +255,7 @@ env DATABASE_URL='postgresql://mingda:mingda_dev_password@127.0.0.1:5433/mingda_
 
 Expected: FAIL with HTTP 404 or missing script/module.
 
-- [ ] **Step 3: 实现队列、选项、冷却检查和缺陷查询**
+- [x] **Step 3: 实现队列、选项、冷却检查和缺陷查询**
 
 管理端路由：
 
@@ -276,7 +276,7 @@ POST /admin/production/shake-clean/cleaning-reports/:id/reverse
 
 落砂选项返回落砂设备、待落砂余量、冷却状态和批次版本；清理选项返回清理设备、待清理余量和批次版本。
 
-- [ ] **Step 4: 实现落砂和清理事务**
+- [x] **Step 4: 实现落砂和清理事务**
 
 两类报工都使用 `Serializable` 事务，流程为：
 
@@ -290,11 +290,11 @@ POST /admin/production/shake-clean/cleaning-reports/:id/reverse
 
 清理节点有一条后续边时保存 `nextRoutingNodeId` 并置 `WAITING_NEXT_OPERATION`；无后续边时置 `WAITING_WAREHOUSE`；多于一条后续边时返回明确配置错误，不猜测分支。
 
-- [ ] **Step 5: 实现撤销和下游保护**
+- [x] **Step 5: 实现撤销和下游保护**
 
 清理撤销锁定报工及其消费批次，返还数量、撤销毛坯产出并保存撤销快照。落砂撤销前查查 `CleaningBatch` 是否已有有效消费，无消费时返还待落砂数量并撤销待清理批次。
 
-- [ ] **Step 6: 注册权限和初始缺陷**
+- [x] **Step 6: 注册权限和初始缺陷**
 
 注册权限：
 
@@ -319,7 +319,7 @@ CLEAN-OVERCUT  切割过深
 CLEAN-SANDHOLE 砂眼
 ```
 
-- [ ] **Step 7: 运行后端回归**
+- [x] **Step 7: 运行后端回归**
 
 Run:
 
@@ -344,7 +344,7 @@ Expected: 全部 PASS，临时 schema 和测试数据完整清理。
 - Modify: `apps/admin/src/layouts/AppLayout.tsx`
 - Modify: `apps/admin/src/utils/roles.ts`
 
-- [ ] **Step 1: 写管理端页面失败测试**
+- [x] **Step 1: 写管理端页面失败测试**
 
 断言：
 
@@ -358,21 +358,21 @@ Expected: 全部 PASS，临时 schema 和测试数据完整清理。
 - 撤销受 `production.shake_clean.reverse` 保护并强制填写原因。
 - 只调用真实 `/admin/production/shake-clean*` 接口。
 
-- [ ] **Step 2: 运行 UI 测试并确认失败**
+- [x] **Step 2: 运行 UI 测试并确认失败**
 
 Run: `node --test apps/admin/tests/shake-clean-ui.test.mjs`
 
 Expected: FAIL，页面和工具尚不存在。
 
-- [ ] **Step 3: 实现真实 API 类型和工具**
+- [x] **Step 3: 实现真实 API 类型和工具**
 
 `shakeClean.ts` 定义队列、选项、落砂检查、落砂/清理报工、缺陷、批次追溯和撤销 DTO，全部使用现有 `apiRequest`。
 
-- [ ] **Step 4: 实现列表和详情页**
+- [x] **Step 4: 实现列表和详情页**
 
 列表显示任务/工单/产品、浇注件数、待落砂、待清理、合格毛坯、冷却状态、进度和状态。详情页用标签页展示“任务信息、落砂记录、清理记录、批次追溯”，报工弹窗使用项目既有 Ant Design 表单和数量控件标准。
 
-- [ ] **Step 5: 运行管理端测试和构建**
+- [x] **Step 5: 运行管理端测试和构建**
 
 Run:
 
@@ -409,7 +409,7 @@ Expected: PASS；只允许现有 Vite 大包体积告警，不允许 TypeScript 
 - Modify: `apps/miniprogram/src/services/api.ts`
 - Modify: `apps/miniprogram/src/types/business.ts`
 
-- [ ] **Step 1: 写小程序失败测试**
+- [x] **Step 1: 写小程序失败测试**
 
 断言：
 
@@ -420,21 +420,21 @@ Expected: PASS；只允许现有 Vite 大包体积告警，不允许 TypeScript 
 - 清理报工支持设备下拉/扫码、快捷数量、缺陷和浇冒口重量。
 - 页面使用真实 `/mini/production/shake-clean*` 接口，`requestId` 在当前页面实例内稳定。
 
-- [ ] **Step 2: 运行小程序测试并确认失败**
+- [x] **Step 2: 运行小程序测试并确认失败**
 
 Run: `npm --prefix apps/miniprogram test`
 
 Expected: FAIL，落砂清理页面和路由尚不存在。
 
-- [ ] **Step 3: 实现真实 API、类型、首页入口和列表**
+- [x] **Step 3: 实现真实 API、类型、首页入口和列表**
 
 复用现有请求层的 token 过期、超时、`409` 和 latest-request gate。列表按最早上游时间排序，冷却状态使用红/绿状态文字，不增加装饰性卡片。
 
-- [ ] **Step 4: 实现落砂、清理报工与并发刷新**
+- [x] **Step 4: 实现落砂、清理报工与并发刷新**
 
 两个报工页面都先调用服务端 check/options，再提交最新 `versionNo`。收到冷却提醒时显示一个二次确认；收到并发冲突时就地刷新任务，不返回首页。
 
-- [ ] **Step 5: 运行小程序全量测试和构建**
+- [x] **Step 5: 运行小程序全量测试和构建**
 
 Run: `npm --prefix apps/miniprogram test`
 
@@ -449,11 +449,11 @@ Expected: PASS，`apps/miniprogram/dist/pages/shake-clean/` 包含四个已构�
 - Modify: `docs/product/production-execution-test-cases.md`
 - Modify: `docs/superpowers/plans/2026-08-24-shake-cleaning-execution.md`
 
-- [ ] **Step 1: 固化长期业务规则**
+- [x] **Step 1: 固化长期业务规则**
 
 记录单工序双阶段、箱数乘穴数、冷却只提醒、FIFO、设备类型字典、缺陷绑定、下游先撤销、毛坯产出边界、幂等和并发版本规则，并链接设计文档。
 
-- [ ] **Step 2: 执行完整回归**
+- [x] **Step 2: 执行完整回归**
 
 Run:
 
@@ -472,7 +472,7 @@ git diff --check
 
 Expected: 全部测试和构建通过。
 
-- [ ] **Step 3: 重建 Docker 并运行真实接口验收**
+- [x] **Step 3: 重建 Docker 并运行真实接口验收**
 
 Run:
 
@@ -487,3 +487,22 @@ docker compose ps
 用管理员登录 `http://127.0.0.1:8080/dashboard/production/shake-clean-tasks`，验证列表、详情和两阶段报工页面非空白；用 Playwright 保存列表和详情截图到 `output/playwright/`。
 
 Expected: PostgreSQL healthy，API 和管理端容器运行，健康接口返回 `status: ok`。
+
+#### 2026-08-24 Task 7 验收摘要
+
+- `npm --prefix apps/api run prisma:generate`：退出码 `0`。
+- `npm --prefix apps/api run build`：退出码 `0`。
+- `npm --prefix apps/api run test:shake-clean-calculations`：退出码 `0`。
+- `test:defect-operations`：退出码 `0`，`OP-SHAKE` 缺陷 `6` 项。
+- `test:pouring-execution`：退出码 `0`；显式使用共享本地库开关，脚本 `finally` 已恢复路线边、穴数、冷却、版本和测试记录。
+- `test:shake-clean-execution`：退出码 `0`；使用临时隔离 schema 并在结束后删除。
+- 管理端 `process-routing-ui + shake-clean-ui`：退出码 `0`，`15/15` 通过。
+- 管理端构建：退出码 `0`；保留既有单包超过 `500 kB` 的构建警告。
+- 小程序全量测试和构建：退出码 `0`，`46/46` 通过，`src` 已同步到 `dist`。
+- `git diff --check`：退出码 `0`。
+- Docker Prisma `db push`：首次从仓库根传入错误相对路径退出 `1`，未连接数据库；改在 `apps/api` 执行后退出 `0`，数据库已与 schema 同步且未删除数据。
+- API 和管理端 Docker buildx：退出码均为 `0`。API 镜像依赖扫描报告 `9` 个漏洞（`1 low / 8 high`），需单独评估升级，未在本次范围内强制升级依赖。
+- `docker compose up` 后首次 health 请求撞到启动窗口，curl 退出 `56`；重试退出 `0`，API 返回 `status: ok`。最终 PostgreSQL `healthy`，API 和管理端均运行。
+- Playwright：管理员登录成功，`GET /api/admin/production/shake-clean-tasks?page=1&pageSize=20` 返回 `200`，控制台 `0 errors / 0 warnings`，页面与主内容区无横向溢出。
+- 本地 Docker 数据库暂无落砂清理任务，因此只保存真实空列表截图，详情能力由隔离 schema 接口测试和管理端 UI 测试覆盖；未创建伪造验收数据。
+- 截图：`output/playwright/shake-clean-task-list.png`。

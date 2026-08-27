@@ -47,6 +47,8 @@ export function ShiftSchedulePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const formWorkshopCode = Form.useWatch('workshopCode', form)
+  const batchWorkshopCode = Form.useWatch('workshopCode', batchForm)
 
   const canCreate = hasPermission('model.schedule.create')
   const canEdit = hasPermission('model.schedule.edit')
@@ -89,6 +91,13 @@ export function ShiftSchedulePage() {
 
   const getShift = (code: unknown) => options?.shifts.find((item) => item.code === code)
   const getTeam = (code: unknown) => options?.teams.find((item) => item.code === code)
+  const activeShifts = (options?.shifts || []).filter((item) => item.status === '启用')
+  const workshopTeams = (options?.teams || []).filter(
+    (item) => item.status === '启用' && (!formWorkshopCode || item.workshopCode === formWorkshopCode),
+  )
+  const batchWorkshopTeams = (options?.teams || []).filter(
+    (item) => item.status === '启用' && (!batchWorkshopCode || item.workshopCode === batchWorkshopCode),
+  )
 
   const openCreate = (date?: string) => {
     setEditing(null)
@@ -167,7 +176,7 @@ export function ShiftSchedulePage() {
             查询
           </Button>
           {canBatch && (
-            <Button icon={<CalendarOutlined />} onClick={() => setBatchOpen(true)}>
+          <Button icon={<CalendarOutlined />} onClick={() => { batchForm.resetFields(); batchForm.setFieldsValue({ workshopCode }); setBatchOpen(true) }}>
               一键生成
             </Button>
           )}
@@ -266,11 +275,11 @@ export function ShiftSchedulePage() {
             />
           </Form.Item>
           <Form.Item name="shiftCode" label="班次" rules={[{ required: true, message: '请选择班次' }]}>
-            <Select options={(options?.shifts || []).map((record) => ({ label: optionLabel(record), value: record.code }))} />
+            <Select options={activeShifts.map((record) => ({ label: optionLabel(record), value: record.code }))} />
           </Form.Item>
           <Form.Item name="teamCode" label="班组" rules={[{ required: true, message: '请选择班组' }]}>
             <Select
-              options={(options?.teams || []).map((record) => ({ label: optionLabel(record), value: record.code }))}
+              options={workshopTeams.map((record) => ({ label: optionLabel(record), value: record.code }))}
             />
           </Form.Item>
         </Form>
@@ -302,13 +311,13 @@ export function ShiftSchedulePage() {
           <Form.Item name="shiftCodes" label="班次" rules={[{ required: true, message: '请选择班次' }]}>
             <Select
               mode="multiple"
-              options={(options?.shifts || []).map((record) => ({ label: optionLabel(record), value: record.code }))}
+              options={activeShifts.map((record) => ({ label: optionLabel(record), value: record.code }))}
             />
           </Form.Item>
           <Form.Item name="teamCodes" label="班组轮换顺序" rules={[{ required: true, message: '请选择班组' }]}>
             <Select
               mode="multiple"
-              options={(options?.teams || []).map((record) => ({ label: optionLabel(record), value: record.code }))}
+              options={batchWorkshopTeams.map((record) => ({ label: optionLabel(record), value: record.code }))}
             />
           </Form.Item>
         </Form>

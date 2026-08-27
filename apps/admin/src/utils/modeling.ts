@@ -67,6 +67,7 @@ export interface ModelingOptions {
   shifts: ModelingRecord[]
   suppliers: ModelingRecord[]
   employees: Array<{ id: string; name: string; phone: string; department: string }>
+  operations: ModelingRecord[]
 }
 
 export async function fetchModelingRecords(resource: ModelingResource, params?: Record<string, string | undefined>) {

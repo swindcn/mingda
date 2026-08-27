@@ -215,7 +215,14 @@ export const modelingPages: ModelingMasterPageProps[] = [
     fields: [
       ...codeNameFields,
       { name: 'category', label: '缺陷分类', required: true, width: 130 },
-      { name: 'sourceOperation', label: '易发工序', width: 140 },
+      {
+        name: 'operationCodes',
+        label: '适用工序',
+        type: 'multiSelect',
+        optionSource: 'operations',
+        optionLabel: (record) => `${record.name}（${record.code}）`,
+        width: 220,
+      },
       statusField,
       { name: 'remark', label: '备注', type: 'textarea' },
     ],

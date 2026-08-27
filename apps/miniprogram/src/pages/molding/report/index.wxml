@@ -1,0 +1,128 @@
+<view class="page" wx:if="{{task}}">
+  <!-- 任务头 -->
+  <view class="task-card">
+    <view class="task-head-row">
+      <text class="task-code">{{task.code}}</text>
+      <text class="badge badge-{{task.statusTone || 'active'}}">{{task.statusText}}</text>
+    </view>
+    <view class="task-product">{{task.productName}}</view>
+    <view class="task-meta">计划 {{task.planBoxQty}} 箱 · 已完成 {{task.completedGoodQty}} 箱</view>
+  </view>
+
+  <!-- 本次合格箱数 -->
+  <view class="card">
+    <view class="section-title">本次合格箱数</view>
+    <view class="stepper quick-row">
+      <view class="chip chip-ghost" data-delta="-10" bindtap="adjustGood">-10</view>
+      <view class="chip chip-ghost" data-delta="-1" bindtap="adjustGood">-1</view>
+      <view class="chip chip-ghost" data-delta="+1" bindtap="adjustGood">+1</view>
+      <view class="chip chip-ghost" data-delta="+10" bindtap="adjustGood">+10</view>
+    </view>
+    <view class="stepper">
+      <view class="stepper-btn" hover-class="stepper-btn-hover" data-delta="-1" bindtap="adjustGood">
+        <image class="icon icon-40" src="/assets/icons/minus.svg" />
+      </view>
+      <input class="stepper-input" type="number" value="{{goodQty}}" placeholder="0" placeholder-style="color:#cbd5e1" bindinput="inputGood" />
+      <view class="stepper-btn stepper-btn-primary" hover-class="stepper-btn-primary-hover" data-delta="1" bindtap="adjustGood">
+        <image class="icon icon-40 icon-inverse" src="/assets/icons/plus.svg" />
+      </view>
+    </view>
+    <view class="stepper-aux">
+      <view class="fill-btn" hover-class="fill-btn-hover" bindtap="fillRemaining">
+        <image class="icon icon-28 icon-primary" src="/assets/icons/plus-circle.svg" />
+        <text>填入当前可生产数量</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 本次废品箱数 -->
+  <view class="card">
+    <view class="section-title">本次废品箱数</view>
+    <view class="stepper">
+      <view class="stepper-btn" hover-class="stepper-btn-hover" data-delta="-1" bindtap="adjustScrap">
+        <image class="icon icon-40" src="/assets/icons/minus.svg" />
+      </view>
+      <input class="stepper-input" type="number" value="{{scrapQty}}" placeholder="0" placeholder-style="color:#cbd5e1" bindinput="inputScrap" />
+      <view class="stepper-btn stepper-btn-primary" hover-class="stepper-btn-primary-hover" data-delta="1" bindtap="adjustScrap">
+        <image class="icon icon-40 icon-inverse" src="/assets/icons/plus.svg" />
+      </view>
+    </view>
+  </view>
+
+  <!-- 缺陷明细 -->
+  <view class="card">
+    <view class="section-head">
+      <text class="section-title">缺陷明细</text>
+      <view class="add-btn" hover-class="add-btn-hover" bindtap="addDefect">
+        <image class="icon icon-24 icon-primary" src="/assets/icons/plus-circle.svg" />
+        <text>新增</text>
+      </view>
+    </view>
+    <view wx:if="{{!defectRows.length}}" class="defect-empty">
+      <image class="icon icon-32 icon-muted" src="/assets/icons/empty-box.svg" />
+      <text>有废品时请添加缺陷明细</text>
+    </view>
+    <block wx:for="{{defectRows}}" wx:key="index">
+      <view class="defect-card">
+        <view class="defect-line">
+          <picker range="{{defectOptions}}" range-key="name" data-index="{{index}}" bindchange="chooseDefect">
+            <view class="defect-picker {{item.defectName ? '' : 'placeholder'}}">
+              <text>{{item.defectName || '选择缺陷类型'}}</text>
+              <image class="icon icon-24 icon-muted" src="/assets/icons/chevron-down.svg" />
+            </view>
+          </picker>
+        </view>
+        <view class="defect-line defect-line-split">
+          <view class="defect-qty-wrap">
+            <text class="defect-qty-label">数量</text>
+            <input class="defect-qty-input" type="number" value="{{item.quantity}}" data-index="{{index}}" bindinput="inputDefectQty" />
+            <text class="defect-qty-unit">箱</text>
+          </view>
+          <view class="defect-remove" hover-class="defect-remove-hover" data-index="{{index}}" bindtap="removeDefect">
+            <image class="icon icon-24" src="/assets/icons/close.svg" />
+          </view>
+        </view>
+        <view class="defect-line">
+          <input class="defect-remark-input" placeholder="备注（选填）" placeholder-style="color:#cbd5e1" value="{{item.remark}}" data-index="{{index}}" bindinput="inputDefectRemark" />
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <!-- 完工状态 -->
+  <view class="card">
+    <view class="section-title">完工状态</view>
+    <view wx:if="{{goodQty + scrapQty === 0}}" class="zero-report-hint">本次报工不产生数量，仅用于补充关闭任务</view>
+    <view class="radio-row">
+      <view class="radio-item {{finishTask ? '' : 'radio-item-active'}} {{goodQty + scrapQty === 0 ? 'radio-item-disabled' : ''}}" hover-class="radio-item-hover" bindtap="changeFinish" data-value="continue">
+        <view class="radio-circle">
+          <image wx:if="{{!finishTask}}" class="icon icon-32" src="/assets/icons/check.svg" />
+        </view>
+        <text>继续生产</text>
+      </view>
+      <view class="radio-item {{finishTask ? 'radio-item-active' : ''}}" hover-class="radio-item-hover" bindtap="changeFinish" data-value="finish">
+        <view class="radio-circle">
+          <image wx:if="{{finishTask}}" class="icon icon-32" src="/assets/icons/check.svg" />
+        </view>
+        <text>本任务已结束</text>
+      </view>
+    </view>
+    <view wx:if="{{finishTask && (goodQty + scrapQty === 0 || task.completedGoodQty + goodQty < task.planBoxQty)}}" class="reason-wrap">
+      <text class="form-label">{{goodQty + scrapQty === 0 ? '结束原因' : '提前结束原因'}}</text>
+      <textarea class="textarea" placeholder="{{goodQty + scrapQty === 0 ? '请说明零数量关闭任务的原因' : '请说明提前结束的原因'}}" placeholder-style="color:#cbd5e1" value="{{earlyCompletionReason}}" bindinput="inputEarlyReason" />
+    </view>
+    <view class="reason-wrap">
+      <text class="form-label">报工备注（选填）</text>
+      <textarea class="textarea" placeholder="如有其他要说明的情况请填写" placeholder-style="color:#cbd5e1" value="{{remark}}" bindinput="inputRemark" />
+    </view>
+  </view>
+
+  <!-- 底部提交 -->
+  <view class="bottom-space"></view>
+  <view class="bottom-actions">
+    <view class="primary-btn {{submitting ? 'primary-btn-disabled' : ''}}" hover-class="{{submitting ? '' : 'primary-btn-hover'}}" bindtap="submit">
+      <text wx:if="{{submitting}}">提交中...</text>
+      <text wx:else>提交报工</text>
+    </view>
+  </view>
+</view>

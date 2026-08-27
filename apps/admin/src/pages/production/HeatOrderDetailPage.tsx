@@ -1,7 +1,7 @@
 import { ArrowLeftOutlined, CalendarOutlined, CloseCircleOutlined, FireOutlined, SwapOutlined } from '@ant-design/icons'
 import { Button, Card, Descriptions, Input, Modal, Space, Table, Tag, Timeline, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { cancelHeatOrder, fetchHeatOrder, heatStatusColors, heatStatusLabels, type HeatOrderRecord } from '../../utils/production'
 import { hasPermission } from '../../utils/roles'
 import { openHeatComplete, openHeatStart, openHeatTransfer } from './HeatExecutionActions'
@@ -12,6 +12,7 @@ const actionLabels: Record<string, string> = { CREATED: '任务下发', SCHEDULE
 export function HeatOrderDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [record, setRecord] = useState<HeatOrderRecord | null>(null)
   const [loading, setLoading] = useState(false)
   const canStart = hasPermission('production.heat.start')
@@ -41,7 +42,19 @@ export function HeatOrderDetailPage() {
     <div className="page-header">
       <div><h1 className="page-title">熔炼任务详情</h1><p className="page-description">{record.code} · {record.materialGradeName}</p></div>
       <Space>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/dashboard/production/heat-orders')}>返回</Button>
+        <Button icon={<ArrowLeftOutlined />} onClick={() => {
+          const next = new URLSearchParams(searchParams)
+          const fromWorkOrderId = next.get('fromWorkOrderId')
+          const fromPage = next.get('fromPage')
+          const fromPageSize = next.get('fromPageSize')
+          next.delete('fromWorkOrderId')
+          next.delete('fromPage')
+          next.delete('fromPageSize')
+          if (fromWorkOrderId) next.set('workOrderId', fromWorkOrderId)
+          if (fromPage) next.set('page', fromPage)
+          if (fromPageSize) next.set('pageSize', fromPageSize)
+          navigate(`/dashboard/production/heat-orders${next.size ? `?${next}` : ''}`)
+        }}>返回</Button>
         {record.status === 'WAITING' && canAdjustSchedule && <Button type="primary" icon={<CalendarOutlined />} onClick={() => reportActionError(openHeatScheduleAdjustment(record, refresh))}>调整排程</Button>}
         {record.canStart && canStart && <Button type="primary" icon={<FireOutlined />} onClick={() => reportActionError(openHeatStart(record, refresh))}>开始生产</Button>}
         {record.canTransfer && canTransfer && <Button type="primary" icon={<SwapOutlined />} onClick={() => reportActionError(openHeatTransfer(record, refresh))}>转运出炉</Button>}

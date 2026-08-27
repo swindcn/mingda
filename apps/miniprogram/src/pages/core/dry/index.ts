@@ -1,4 +1,4 @@
-import { dryCoreBatch, getCoreDryingBatches, getCoreExecutionOptions } from '../../../services/api'
+import { dryCoreBatches, getCoreDryingBatches, getCoreExecutionOptions } from '../../../services/api'
 import { CoreExecutionOptions, CoreInventoryBatch } from '../../../types/business'
 import { createLatestRequestGate, type LatestRequestGate } from '../../../utils/latest-request'
 import { isConflict } from '../../../utils/request'
@@ -23,8 +23,8 @@ function estimateExpiry(batch: CoreInventoryBatch | undefined) {
 
 Page({
   data: {
-    id: '', batches: [] as CoreInventoryBatch[], options: null as CoreExecutionOptions | null,
-    batchIndex: -1, batchId: '', versionNo: 0, equipmentIndex: -1, equipmentCode: '',
+    id: '', batches: [] as CoreInventoryBatch[], displayBatches: [] as Array<CoreInventoryBatch & { selected: boolean }>, options: null as CoreExecutionOptions | null,
+    selectedBatchIds: [] as string[], selectedCount: 0, equipmentIndex: -1, equipmentCode: '',
     estimatedExpiresAt: '-', loading: false, submitting: false,
   },
   onLoad(query: Record<string, string>) {
@@ -52,12 +52,14 @@ Page({
     try {
       const [batches, options] = await Promise.all([getCoreDryingBatches(this.data.id), getCoreExecutionOptions(this.data.id)])
       if (!isRequestCurrent(state, gate, requestId)) return
-      const selected = batches.find((item) => item.id === this.data.batchId) || batches[0]
-      const batchIndex = selected ? batches.findIndex((item) => item.id === selected.id) : -1
+      const currentIds = new Set(this.data.selectedBatchIds)
+      const selectedBatchIds = batches.filter((item) => currentIds.size ? currentIds.has(item.id) : true).map((item) => item.id)
+      const selected = new Set(selectedBatchIds)
       const equipmentIndex = options.dryingEquipment.findIndex((item) => item.code === this.data.equipmentCode)
       this.setData({
-        batches, options, batchIndex, batchId: selected?.id || '', versionNo: selected?.versionNo || 0,
-        estimatedExpiresAt: estimateExpiry(selected), equipmentIndex, equipmentCode: equipmentIndex >= 0 ? this.data.equipmentCode : '',
+        batches, displayBatches: batches.map((item) => ({ ...item, selected: selected.has(item.id) })),
+        options, selectedBatchIds, selectedCount: selectedBatchIds.length,
+        estimatedExpiresAt: this.estimateSelectedExpiry(batches, selectedBatchIds), equipmentIndex, equipmentCode: equipmentIndex >= 0 ? this.data.equipmentCode : '',
       })
     } catch (error) {
       if (!isRequestCurrent(state, gate, requestId)) return
@@ -66,10 +68,23 @@ Page({
       if (isRequestCurrent(state, gate, requestId)) this.setData({ loading: false })
     }
   },
-  selectBatch(event: WechatMiniprogram.TouchEvent) {
-    const batchIndex = Number(event.currentTarget.dataset.index)
-    const batch = this.data.batches[batchIndex]
-    if (batch) this.setData({ batchIndex, batchId: batch.id, versionNo: batch.versionNo, estimatedExpiresAt: estimateExpiry(batch) })
+  estimateSelectedExpiry(batches: CoreInventoryBatch[], selectedBatchIds: string[]) {
+    if (selectedBatchIds.length !== 1) return selectedBatchIds.length ? '多个批次以服务端计算为准' : '-'
+    return estimateExpiry(batches.find((item) => item.id === selectedBatchIds[0]))
+  },
+  toggleBatch(event: WechatMiniprogram.TouchEvent) {
+    const id = String(event.currentTarget.dataset.id || '')
+    if (!id) return
+    const selected = new Set(this.data.selectedBatchIds)
+    if (selected.has(id)) selected.delete(id)
+    else selected.add(id)
+    const selectedBatchIds = this.data.batches.filter((item) => selected.has(item.id)).map((item) => item.id)
+    this.setData({
+      selectedBatchIds,
+      selectedCount: selectedBatchIds.length,
+      displayBatches: this.data.batches.map((item) => ({ ...item, selected: selected.has(item.id) })),
+      estimatedExpiresAt: this.estimateSelectedExpiry(this.data.batches, selectedBatchIds),
+    })
   },
   selectEquipment(event: WechatMiniprogram.PickerChange) {
     const equipmentIndex = Number(event.detail.value)
@@ -78,11 +93,12 @@ Page({
   async submit() {
     const state = requestState(this)
     if (state.unloaded || this.data.submitting) return
-    if (!this.data.batchId) { wx.showToast({ title: '请选择待烘干批次', icon: 'none' }); return }
+    if (!this.data.selectedBatchIds.length) { wx.showToast({ title: '请选择待烘干批次', icon: 'none' }); return }
     if (!this.data.equipmentCode) { wx.showToast({ title: '请选择烘干设备', icon: 'none' }); return }
+    const selected = this.data.batches.filter((item) => this.data.selectedBatchIds.includes(item.id))
     this.setData({ submitting: true })
     try {
-      await dryCoreBatch(this.data.batchId, { versionNo: this.data.versionNo, equipmentCode: this.data.equipmentCode })
+      await dryCoreBatches({ equipmentCode: this.data.equipmentCode, batches: selected.map((item) => ({ id: item.id, versionNo: item.versionNo })) })
       if (state.unloaded) return
       wx.showToast({ title: '已确认烘干', icon: 'success' })
       setTimeout(() => { if (!state.unloaded) wx.navigateBack() }, 600)

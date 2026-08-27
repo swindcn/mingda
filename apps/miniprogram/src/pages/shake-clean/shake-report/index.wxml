@@ -1,0 +1,77 @@
+<view class="page" wx:if="{{options}}">
+  <!-- 输入控件高度至少 88rpx：统一 Form UI（.input=88rpx / .stepper-input=96rpx） -->
+  <view wx:if="{{!hasPermission}}" class="permission-block">当前账号无落砂报工权限</view>
+  <block wx:if="{{hasPermission}}">
+    <view class="task-card">
+      <view class="head">
+        <text class="code">{{options.moldingTaskCode}}</text>
+        <text class="task-state">待落砂 {{options.shakeRemaining}} 件</text>
+      </view>
+      <view class="product">{{options.productName}}（{{options.productCode}}）</view>
+      <view class="cooling {{options.cooling && options.cooling.earlyShake ? 'danger' : 'success'}}">{{options.cooling && options.cooling.earlyShake ? '冷却未到期' : '已达到冷却时长'}}</view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">落砂设备</view>
+      <view class="scan-row">
+        <picker class="scan-input" range="{{options.shakeEquipment}}" range-key="name" bindchange="chooseEquipment">
+          <view class="picker-value">{{equipmentText || '请选择路线绑定的落砂设备'}}</view>
+        </picker>
+        <view class="scan-button" hover-class="scan-button-hover" bindtap="scanEquipment">
+          <image src="/assets/icons/scan.svg" />
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">落砂成果</view>
+      <view class="form-label">合格件数</view>
+      <view class="quick">
+        <view class="chip" data-delta="-10" bindtap="adjustGood">-10</view>
+        <view class="chip" data-delta="-1" bindtap="adjustGood">-1</view>
+        <view class="chip" data-delta="1" bindtap="adjustGood">+1</view>
+        <view class="chip" data-delta="10" bindtap="adjustGood">+10</view>
+      </view>
+      <view class="stepper">
+        <view class="stepper-btn" data-delta="-1" bindtap="adjustGood">−</view>
+        <input class="stepper-input" type="number" value="{{goodQty}}" bindinput="inputGood" />
+        <view class="stepper-btn stepper-btn-primary" data-delta="1" bindtap="adjustGood">+</view>
+      </view>
+      <view class="fill-btn" hover-class="fill-btn-hover" bindtap="fillRemaining">一键拉满（{{options.shakeRemaining}}件）</view>
+
+      <view class="form-label spaced">废品件数</view>
+      <view class="stepper">
+        <view class="stepper-btn" data-delta="-1" bindtap="adjustScrap">−</view>
+        <input class="stepper-input" type="number" value="{{scrapQty}}" bindinput="inputScrap" />
+        <view class="stepper-btn stepper-btn-primary" data-delta="1" bindtap="adjustScrap">+</view>
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{scrapQty > 0}}">
+      <view class="section-head">
+        <text class="section-title">落砂缺陷</text>
+        <view class="add-btn" hover-class="add-btn-hover" bindtap="addDefect">+ 新增</view>
+      </view>
+      <view class="defect" wx:for="{{defectRows}}" wx:key="index">
+        <picker range="{{defects}}" range-key="name" data-index="{{index}}" bindchange="chooseDefect">
+          <view class="picker-value">{{item.defectName || '选择缺陷'}}</view>
+        </picker>
+        <view class="defect-row">
+          <input class="input" type="number" value="{{item.quantity}}" data-index="{{index}}" bindinput="inputDefectQty" />
+          <input class="input" placeholder="备注" value="{{item.remark}}" data-index="{{index}}" bindinput="inputDefectRemark" />
+          <text class="defect-remove" data-index="{{index}}" bindtap="removeDefect">删除</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="form-label">备注</view>
+      <textarea class="textarea" value="{{remark}}" placeholder="选填" bindinput="inputRemark" />
+    </view>
+
+    <view class="bottom-space"></view>
+    <view class="bottom">
+      <view class="submit-inline {{submitting || completed ? 'is-disabled' : ''}}" hover-class="submit-inline-hover" bindtap="submit">{{submitting || completed ? '处理中...' : '确认落砂报工'}}</view>
+    </view>
+  </block>
+</view>

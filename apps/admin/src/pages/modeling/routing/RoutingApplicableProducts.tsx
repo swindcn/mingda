@@ -10,6 +10,7 @@ type RoutingProduct = RoutingOptions['products'][number]
 interface RoutingApplicableProductsProps {
   products: RoutingProduct[]
   selectedCodes: string[]
+  currentRoutingCode?: string
   defaultProductCodes: string[]
   editable: boolean
   saved: boolean
@@ -20,6 +21,7 @@ interface RoutingApplicableProductsProps {
 export function RoutingApplicableProducts({
   products,
   selectedCodes,
+  currentRoutingCode,
   defaultProductCodes,
   editable,
   saved,
@@ -36,7 +38,10 @@ export function RoutingApplicableProducts({
     const key = keyword.trim().toLowerCase()
     return products.filter((product) => selectedSet.has(product.code) && (!key || `${product.code}${product.name}${product.type}${product.materialGradeName}`.toLowerCase().includes(key)))
   }, [keyword, products, selectedSet])
-  const candidates = useMemo(() => products.filter((product) => !selectedSet.has(product.code)), [products, selectedSet])
+  const candidates = useMemo(() => products.filter((product) => (
+    !selectedSet.has(product.code)
+    && (!product.assignedRoutingCode || product.assignedRoutingCode === currentRoutingCode)
+  )), [currentRoutingCode, products, selectedSet])
 
   const persist = async (nextCodes: string[], successMessage: string) => {
     try {

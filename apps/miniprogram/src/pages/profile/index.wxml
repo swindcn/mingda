@@ -1,13 +1,13 @@
-<view class="page profile-page">
-  <view class="profile-card card">
-    <view class="avatar">闽</view>
-    <view>
-      <view class="name">闽大铸件</view>
-      <view class="muted">欢迎，{{username}}</view>
+<view class="profile-page">
+  <view class="profile-hero">
+    <view class="profile-avatar">闽</view>
+    <view class="profile-info">
+      <view class="profile-name">闽大铸件</view>
+      <view class="profile-sub">欢迎，{{username}}</view>
     </view>
   </view>
 
-  <view class="menu-card card">
+  <view class="section-card">
     <view class="menu-row">
       <text>当前版本</text>
       <text class="muted">0.1.0</text>

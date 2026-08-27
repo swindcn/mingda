@@ -55,7 +55,27 @@ export const productionPermissionKeys = [
   'production.core_inventory.dry',
   'production.core_inventory.lock',
   'production.core_inventory.scrap',
+  'production.molding.view',
+  'production.molding.create',
+  'production.molding.dispatch',
+  'production.molding.start',
+  'production.molding.report',
+  'production.molding.cancel',
+  'production.molding.reverse',
+  'production.pouring.view',
+  'production.pouring.report',
+  'production.pouring.reverse',
+  'production.shake_clean.view',
+  'production.shake_clean.shake_report',
+  'production.shake_clean.clean_report',
+  'production.shake_clean.reverse',
+  'production.inspection.view',
+  'production.inspection.report',
+  'production.inspection.reverse',
+  'production.cleaning_rework.view',
+  'production.cleaning_rework.report',
   'production.schedule.view',
+  'production.schedule.release',
   'production.schedule.create',
   'production.schedule.adjust',
   'production.schedule.cancel',
@@ -67,6 +87,8 @@ export const productionPermissionKeys = [
 
 export const miniProgramPermissionKeys = [
   'mini',
+  'mini.mold',
+  'mini.mold.development.view',
   'mini.production',
   'mini.production.heat.view',
   'mini.production.heat.start',
@@ -76,6 +98,18 @@ export const miniProgramPermissionKeys = [
   'mini.production.core.start',
   'mini.production.core.report',
   'mini.production.core.dry',
+  'mini.production.molding.view',
+  'mini.production.molding.start',
+  'mini.production.molding.report',
+  'mini.production.pouring.view',
+  'mini.production.pouring.report',
+  'mini.production.shake_clean.view',
+  'mini.production.shake_clean.shake_report',
+  'mini.production.shake_clean.clean_report',
+  'mini.production.inspection.view',
+  'mini.production.inspection.report',
+  'mini.production.cleaning_rework.view',
+  'mini.production.cleaning_rework.report',
 ] as const
 
 export const modelingPermissionKeys = [
@@ -125,6 +159,7 @@ export const modelingPermissionKeys = [
   'model.routing.activate',
   'model.routing.disable',
   'model.routing.default',
+  'model.routing.recycle',
   'model.calendar.view',
   'model.calendar.create',
   'model.calendar.edit',
@@ -365,10 +400,60 @@ export const adminPermissionTree: DataNode[] = [
             ],
           },
           {
+            title: '造型下芯',
+            key: 'group.production.molding',
+            children: [
+              { title: '造型下芯-数据列表', key: 'production.molding.view' },
+              { title: '造型下芯-生成任务', key: 'production.molding.create' },
+              { title: '造型下芯-派工', key: 'production.molding.dispatch' },
+              { title: '造型下芯-开始生产', key: 'production.molding.start' },
+              { title: '造型下芯-报工', key: 'production.molding.report' },
+              { title: '造型下芯-取消', key: 'production.molding.cancel' },
+              { title: '造型下芯-撤销报工', key: 'production.molding.reverse' },
+            ],
+          },
+          {
+            title: '合型浇注',
+            key: 'group.production.pouring',
+            children: [
+              { title: '合型浇注-数据列表', key: 'production.pouring.view' },
+              { title: '合型浇注-报工', key: 'production.pouring.report' },
+              { title: '合型浇注-撤销报工', key: 'production.pouring.reverse' },
+            ],
+          },
+          {
+            title: '落砂清理',
+            key: 'group.production.shake_clean',
+            children: [
+              { title: '落砂清理-数据列表', key: 'production.shake_clean.view' },
+              { title: '落砂清理-落砂报工', key: 'production.shake_clean.shake_report' },
+              { title: '落砂清理-清理报工', key: 'production.shake_clean.clean_report' },
+              { title: '落砂清理-撤销报工', key: 'production.shake_clean.reverse' },
+            ],
+          },
+          {
+            title: '成品终检',
+            key: 'group.production.inspection',
+            children: [
+              { title: '成品终检-数据列表', key: 'production.inspection.view' },
+              { title: '成品终检-质检报工', key: 'production.inspection.report' },
+              { title: '成品终检-撤销报工', key: 'production.inspection.reverse' },
+            ],
+          },
+          {
+            title: '清理返修',
+            key: 'group.production.cleaning_rework',
+            children: [
+              { title: '清理返修-数据列表', key: 'production.cleaning_rework.view' },
+              { title: '清理返修-报工', key: 'production.cleaning_rework.report' },
+            ],
+          },
+          {
             title: '合炉排产',
             key: 'group.production.schedule',
             children: [
               { title: '合炉排产-数据列表', key: 'production.schedule.view' },
+              { title: '生产工单-下达熔炼排产', key: 'production.schedule.release' },
               { title: '合炉排产-生成熔炼任务', key: 'production.schedule.create' },
               { title: '合炉排产-调整排程', key: 'production.schedule.adjust' },
               { title: '合炉排产-撤销熔炼任务', key: 'production.schedule.cancel' },
@@ -450,6 +535,7 @@ export const adminPermissionTree: DataNode[] = [
               { title: '工艺路线-发布', key: 'model.routing.activate' },
               { title: '工艺路线-停用', key: 'model.routing.disable' },
               { title: '工艺路线-设置默认', key: 'model.routing.default' },
+              { title: '工艺路线-回收与恢复', key: 'model.routing.recycle' },
             ],
           },
           {
@@ -474,6 +560,19 @@ export const miniProgramPermissionTree: DataNode[] = [
     key: 'mini',
     children: [
       {
+        title: '模具业务',
+        key: 'mini.mold',
+        children: [
+          {
+            title: '模具开发',
+            key: 'group.mini.mold.development',
+            children: [
+              { title: '模具开发-数据列表', key: 'mini.mold.development.view' },
+            ],
+          },
+        ],
+      },
+      {
         title: '生产执行',
         key: 'mini.production',
         children: [
@@ -495,6 +594,48 @@ export const miniProgramPermissionTree: DataNode[] = [
               { title: '制芯任务-开始生产', key: 'mini.production.core.start' },
               { title: '制芯任务-报工', key: 'mini.production.core.report' },
               { title: '制芯任务-烘干', key: 'mini.production.core.dry' },
+            ],
+          },
+          {
+            title: '造型下芯',
+            key: 'group.mini.production.molding',
+            children: [
+              { title: '造型下芯-数据列表', key: 'mini.production.molding.view' },
+              { title: '造型下芯-开始生产', key: 'mini.production.molding.start' },
+              { title: '造型下芯-报工', key: 'mini.production.molding.report' },
+            ],
+          },
+          {
+            title: '合型浇注',
+            key: 'group.mini.production.pouring',
+            children: [
+              { title: '合型浇注-数据列表', key: 'mini.production.pouring.view' },
+              { title: '合型浇注-报工', key: 'mini.production.pouring.report' },
+            ],
+          },
+          {
+            title: '落砂清理',
+            key: 'group.mini.production.shake_clean',
+            children: [
+              { title: '落砂清理-数据列表', key: 'mini.production.shake_clean.view' },
+              { title: '落砂清理-落砂报工', key: 'mini.production.shake_clean.shake_report' },
+              { title: '落砂清理-清理报工', key: 'mini.production.shake_clean.clean_report' },
+            ],
+          },
+          {
+            title: '成品终检',
+            key: 'group.mini.production.inspection',
+            children: [
+              { title: '成品终检-数据列表', key: 'mini.production.inspection.view' },
+              { title: '成品终检-质检报工', key: 'mini.production.inspection.report' },
+            ],
+          },
+          {
+            title: '清理返修',
+            key: 'group.mini.production.cleaning_rework',
+            children: [
+              { title: '清理返修-数据列表', key: 'mini.production.cleaning_rework.view' },
+              { title: '清理返修-报工', key: 'mini.production.cleaning_rework.report' },
             ],
           },
         ],

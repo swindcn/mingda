@@ -538,7 +538,8 @@ export class MoldDevelopmentController {
   @UseGuards(AdminAuthGuard)
   async home(@Req() request: RequestWithAdmin, @Headers('authorization') authorization?: string) {
     const viewerUser = await this.getViewerUser(authorization)
-    const records = await this.findMoldsForViewer(viewerUser, request)
+    const canViewMolds = hasAdminPermission(getAdminContext(request), 'mini.mold.development.view')
+    const records = canViewMolds ? await this.findMoldsForViewer(viewerUser, request) : []
     const todos = records
       .map((record) => todoFromMold(record, viewerUser))
       .filter((todo): todo is NonNullable<typeof todo> => Boolean(todo))
@@ -566,6 +567,7 @@ export class MoldDevelopmentController {
   @Get('mobile/todos')
   @UseGuards(AdminAuthGuard)
   async todoList(@Req() request: RequestWithAdmin, @Headers('authorization') authorization?: string) {
+    this.requireMobileMoldViewPermission(request)
     const viewerUser = await this.getViewerUser(authorization)
     return (await this.findMoldsForViewer(viewerUser, request))
       .map((record) => todoFromMold(record, viewerUser))
@@ -581,6 +583,7 @@ export class MoldDevelopmentController {
     @Headers('authorization') authorization?: string,
   ) {
     if (viewer === 'admin') this.requireMoldPermission(request, 'mold.development.view')
+    else this.requireMobileMoldViewPermission(request)
     const viewerUser = await this.getViewerUser(authorization)
     const records = await this.findMoldsForViewer(viewerUser, request)
     const normalized = keyword?.trim()
@@ -613,6 +616,7 @@ export class MoldDevelopmentController {
     @Headers('authorization') authorization?: string,
   ) {
     if (viewer === 'admin') this.requireMoldPermission(request, 'mold.development.view')
+    else this.requireMobileMoldViewPermission(request)
     const viewerUser = await this.getViewerUser(authorization)
     const mold = await this.findMoldForViewer(id, viewerUser, request)
     const archiveMap = await this.findArchiveMap([mold.code])
@@ -793,59 +797,76 @@ export class MoldDevelopmentController {
   }
 
   @Post('mobile/molds/:id/confirm-drawing')
-  async confirmDrawing(@Param('id') id: string, @Headers('authorization') authorization?: string) {
+  @UseGuards(AdminAuthGuard)
+  async confirmDrawing(@Param('id') id: string, @Req() request: RequestWithAdmin, @Headers('authorization') authorization?: string) {
+    this.requireMobileMoldViewPermission(request)
     requireSupplierEmployee(authorization)
     const viewerUser = await this.requireSupplierViewer(authorization)
     return this.confirmDrawingRecord(id, viewerUser.name || '当前用户', { authorization, user: viewerUser })
   }
 
   @Post('mobile/molds/:id/shipping')
+  @UseGuards(AdminAuthGuard)
   async shipping(
     @Param('id') id: string,
     @Body() body: ShippingBody,
+    @Req() request: RequestWithAdmin,
     @Headers('authorization') authorization?: string,
   ) {
+    this.requireMobileMoldViewPermission(request)
     requireSupplierEmployee(authorization)
     const viewerUser = await this.requireSupplierViewer(authorization)
     return this.shippingRecord(id, body, { authorization, user: viewerUser })
   }
 
   @Post('mobile/molds/:id/receive')
+  @UseGuards(AdminAuthGuard)
   async receive(
     @Param('id') id: string,
     @Body() body: ReceiveBody,
+    @Req() request: RequestWithAdmin,
     @Headers('authorization') authorization?: string,
   ) {
+    this.requireMobileMoldViewPermission(request)
     const viewerUser = await this.requireFollowerViewer(id, authorization)
     return this.receiveRecord(id, { ...body, operator: body.operator || viewerUser.name }, { authorization, user: viewerUser })
   }
 
   @Post('mobile/molds/:id/trial')
+  @UseGuards(AdminAuthGuard)
   async trial(
     @Param('id') id: string,
     @Body() body: ProductionBody,
+    @Req() request: RequestWithAdmin,
     @Headers('authorization') authorization?: string,
   ) {
+    this.requireMobileMoldViewPermission(request)
     const viewerUser = await this.requireFollowerViewer(id, authorization)
     return this.productionRecord(id, 'TRIAL', { ...body, operator: body.operator || viewerUser.name }, { authorization, user: viewerUser })
   }
 
   @Post('mobile/molds/:id/batch')
+  @UseGuards(AdminAuthGuard)
   async batch(
     @Param('id') id: string,
     @Body() body: ProductionBody,
+    @Req() request: RequestWithAdmin,
     @Headers('authorization') authorization?: string,
   ) {
+    this.requireMobileMoldViewPermission(request)
     const viewerUser = await this.requireFollowerViewer(id, authorization)
     return this.productionRecord(id, 'BATCH', { ...body, operator: body.operator || viewerUser.name }, { authorization, user: viewerUser })
   }
 
   @Post('mobile/molds/:id/evaluation')
+  @UseGuards(AdminAuthGuard)
   async evaluation(
     @Param('id') id: string,
     @Body() body: EvaluationBody,
+    @Req() request: RequestWithAdmin,
     @Headers('authorization') authorization?: string,
   ) {
+    this.requireMobileMoldViewPermission(request)
     const viewerUser = await this.requireFollowerViewer(id, authorization)
     return this.evaluationRecord(id, { ...body, operator: body.operator || viewerUser.name }, { authorization, user: viewerUser })
   }
@@ -1040,6 +1061,10 @@ export class MoldDevelopmentController {
     if (!hasAdminPermission(getAdminContext(request), permission)) {
       throw new ForbiddenException('无权执行当前操作')
     }
+  }
+
+  private requireMobileMoldViewPermission(request: RequestWithAdmin) {
+    this.requireMoldPermission(request, 'mini.mold.development.view')
   }
 
   private async visibleMoldCodes(request: RequestWithAdmin) {

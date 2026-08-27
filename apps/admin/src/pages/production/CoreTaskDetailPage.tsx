@@ -12,7 +12,7 @@ import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 import type { RefObject } from 'react'
 import { createRef, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { SubPageHeader } from '../../components/SubPageHeader'
 import { ApiRequestError } from '../../services/api'
 import {
@@ -138,6 +138,7 @@ export async function openCoreReport(record: CoreTaskRecord, refresh: RefreshAct
 export function CoreTaskDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [record, setRecord] = useState<CoreTaskRecord | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -206,7 +207,19 @@ export function CoreTaskDetailPage() {
 
   if (!record) return <Card loading={loading}>{error && <Alert type="error" showIcon message={error} action={<Button size="small" onClick={() => void refresh()}>重试</Button>} />}</Card>
   return <>
-    <SubPageHeader title="制芯任务详情" description={`${record.code} · ${record.productName}`} onBack={() => navigate('/dashboard/production/core-tasks')} extra={<Space>
+    <SubPageHeader title="制芯任务详情" description={`${record.code} · ${record.productName}`} onBack={() => {
+      const next = new URLSearchParams(searchParams)
+      const fromWorkOrderId = next.get('fromWorkOrderId')
+      const fromPage = next.get('fromPage')
+      const fromPageSize = next.get('fromPageSize')
+      next.delete('fromWorkOrderId')
+      next.delete('fromPage')
+      next.delete('fromPageSize')
+      if (fromWorkOrderId) next.set('workOrderId', fromWorkOrderId)
+      if (fromPage) next.set('page', fromPage)
+      if (fromPageSize) next.set('pageSize', fromPageSize)
+      navigate(`/dashboard/production/core-tasks${next.size ? `?${next}` : ''}`)
+    }} extra={<Space>
       {record.canDispatch && canDispatch && <Button type="primary" icon={<SendOutlined />} onClick={() => run(openCoreDispatch(record, refresh))}>派工</Button>}
       {record.canStart && canStart && <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => run(openCoreStart(record, refresh))}>开始</Button>}
       {record.canReport && canReport && <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => run(openCoreReport(record, refresh))}>报工</Button>}

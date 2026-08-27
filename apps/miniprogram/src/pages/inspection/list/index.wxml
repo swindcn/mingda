@@ -1,0 +1,12 @@
+<view class="page">
+  <view class="tab-bar cols-5">
+    <view wx:for="{{tabs}}" wx:key="key" class="tab {{activeStatus === item.key ? 'tab-active' : ''}}" data-status="{{item.key}}" bindtap="changeTab">{{item.label}}</view>
+  </view>
+  <view class="search-row"><input value="{{keyword}}" placeholder="工单、产品编码或名称" bindinput="inputKeyword" bindconfirm="search" confirm-type="search"/><view class="scan-btn" hover-class="scan-btn-hover" bindtap="scanCode">扫码</view><view class="query-btn" hover-class="query-btn-hover" bindtap="search">查询</view></view>
+  <view class="task-card" wx:for="{{records}}" wx:key="id" data-id="{{item.id}}" bindtap="openDetail">
+    <view class="head"><text class="code">{{item.code}}</text><text class="badge badge-{{item.statusTone}}">{{item.statusText}}</text></view>
+    <view class="product">{{item.productName}}（{{item.productCode}}）</view><view class="material">{{item.materialGradeName || '未设置材质'}}</view>
+    <view class="metrics"><view><text>待检</text><strong>{{item.remainingQuantity}}</strong></view><view><text>返修中</text><strong>{{item.openReworkQuantity}}</strong></view><view><text>已入库</text><strong>{{item.qualifiedQuantity}}</strong></view></view>
+  </view>
+  <view class="empty" wx:if="{{!loading && !records.length}}">暂无成品终检任务</view><view class="load-more" wx:if="{{loadingMore}}">正在加载...</view><view class="load-more" wx:elif="{{records.length && records.length >= total}}">已显示全部 {{total}} 项</view>
+</view>

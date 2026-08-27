@@ -49,7 +49,7 @@ export const defaultDictionaries: DictionaryState = {
   workshopTypes: ['熔炼', '造型', '制芯', '清理', '机加工', '检验'],
   operationSections: ['熔炼', '制芯', '造型', '浇注', '清理', '后处理', '质检'],
   materialTypes: ['球铁', '灰铁', '碳钢'],
-  equipmentTypes: ['熔炼炉', '浇注包', '球化包', '其他设备'],
+  equipmentTypes: ['熔炼炉', '浇注包', '球化包', '烘干设备', '其他设备'],
   chemicalElements: [
     { name: 'C', unit: '%' },
     { name: 'Si', unit: '%' },

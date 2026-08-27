@@ -151,17 +151,22 @@ CastingBomVersion -> CastingBomVersionCoreBox -> CoreBoxMaster（芯盒工装）
 ### 工序与工艺路线规则
 
 - 工序是独立主档，工段来自字典 `operationSections`。工序禁用后保留历史路线关系，但新路线不可选择；同一状态权限可重新启用。
-- 一条路线可绑定多个成品或半成品；材质牌号由关联产品聚合展示，不冗余保存在路线中。
+- 一条路线可绑定多个成品或半成品，但一个产品物料编码只能归属一个当前工艺路线主档。工艺路线与材质牌号无直接关系，主列表不提供材质筛选和材质列；产品自身的材质信息仍由物料、BOM 和生产业务使用。
+- 工艺路线主列表展示“关联产品数”，按当前路线版本的 `RoutingApplicableProduct` 实际数量计算，不再展示“默认产品”统计。
 - 路线详情分为“工艺线路”和“适用产品”两个标签页。工序节点、连接关系、设备和工艺参数属于版本化内容；适用产品是独立维护范围，不因新增或移除产品触发路线升版。
 - 草稿和已生效路线可通过 `PUT /admin/modeling/routings/:id/applicable-products` 直接增减适用产品；已停用历史版本只读。移除当前默认产品时，同一事务内取消其 `ProductDefaultRouting` 关系。
+- 草稿和已生效版本都会占用产品归属。同一路线主档的历史版本和新版本可共同保留产品；其他路线主档不能再选择该产品。路线停用后释放当前归属，允许产品改配到其他路线。
+- 产品归属校验必须在后端事务中执行，并按产品编码获取 PostgreSQL advisory lock，避免两个请求并发绕过唯一性检查。前端选项过滤只用于改善交互，不能替代后端约束。
 - 适用产品调整只影响后续路线选择。已创建生产工单保存了 `routingVersionId` 和路线快照，不随适用范围变化。
 - 每个节点关联一个标准工序，可多选适用设备，并保存路线属性、报工点、质检要求、标准节拍和生产绑定规则。
 - 路线工作台采用受控可视化拖拽，分为熔炼副线、制芯副线、造型主线、关键汇合和汇合后主线。节点和连线都是真实 Prisma relation。
 - 后端拒绝自环、重复边和循环。发布时还要求节点全部可达、仅有一个终点，汇合节点至少有两个前置，并按拓扑顺序生成 `10/20/30...` 工序号。
 - 浇注汇合工序强制转为关键汇合节点，强制炉批次、铁水包号和砂芯批次绑定，为后续 PDA 报工防错提供依据。
 - 路线编码稳定，版本按 `V1.0/V2.0/V3.0...` 升级。新版本发布时自动停用同编码旧生效版本，并迁移仍属于新版本产品范围的默认关系。
-- 克隆生成新路线编码和 `V1.0` 草稿，复制产品、节点、设备和边，不复制默认产品关系。
-- 同一产品可有多条已生效替代路线，但 `ProductDefaultRouting` 保证同一时间只有一条默认路线。
+- 克隆生成新路线编码和 `V1.0` 草稿，只复制节点、设备和边，不复制适用产品及默认产品关系；复制后由用户重新选择尚未归属的产品。
+- `ProductDefaultRouting` 继续用于定位生产工单采用的当前生效版本；由于产品只能归属一个路线主档，不再支持将同一产品配置到多个替代路线主档。
+- 已停用路线版本可通过 `POST /admin/modeling/routings/:id/recycle` 移入回收站，普通列表默认按 `recycledAt = null` 过滤；回收站通过 `recycled=true` 查询并可调用 `restore` 恢复。回收仅归档显示，不删除路线、节点、工单或追溯关系，也不参与产品归属释放。
+- 回收与恢复使用独立权限 `model.routing.recycle`。已回收版本只允许查看和恢复，创建新版本、克隆及其他业务动作必须先恢复。
 - 所有详情和状态操作先校验 `modeling:routings` 数据归属，不允许通过已知 ID 越权查看或修改。
 - 数据库迁移先将旧 `ProcessRoutingStep` 直线数据转为 `V1.0` 节点和有向边，然后才删除旧结构，不丢失历史路线。
 
@@ -169,7 +174,7 @@ CastingBomVersion -> CastingBomVersionCoreBox -> CoreBoxMaster（芯盒工装）
 
 - 产线、班组、设备和排班引用车间编码。
 - 熔炼配方引用材质牌号编码。
-- 模具档案引用物料；工艺路线版本通过 `RoutingApplicableProduct` 多选成品/半成品。
+- 模具档案引用物料；工艺路线版本通过 `RoutingApplicableProduct` 多选成品/半成品，并由服务层保证产品只归属一个当前路线主档。
 - 路线节点引用工序主档，通过 `RoutingNodeEquipment` 多选设备。
 - 芯盒档案引用模具编码，关系为模具 `1:N` 芯盒；移除历史芯盒使用停用，不做物理删除。
 - 芯盒档案的 `cavityCount` 表示芯盒穴数，新增默认 `1`，必须为正整数；与模具型腔数和 BOM 芯件比分开维护。
@@ -280,8 +285,8 @@ WorkOrder（锁定 BOM / 路线）
 
 - `GET /admin/production/work-orders/:id/core-readiness` 按目标工单锁定 BOM 的每套芯盒返回需求量、可用量、待烘干量、缺口、最短剩余小时和 `READY/PARTIAL/SHORTAGE`。
 - 齐套和消费兼容规则是“同产品 + 目标锁定 BOM 包含同一芯盒”，不要求库存来自当前工单。因此同一产品跨工单、跨 BOM 版本的同芯盒有效库存可以共用；不同产品即使芯盒编码相同也拒绝。
-- `apps/api/src/production/coremaking.service.ts` 已实现领域方法 `validateCoreConsumption(workOrderId, batchCode, quantity, operatorContext?)` 和 `consumeCoreBatch(workOrderId, batchCode, quantity, operatorContext)`。消费使用批次行锁、`versionNo` 和库存条件更新，写 `CONSUMED` 流水，禁止并发负库存。
-- 一期只暴露齐套 HTTP 接口；上述 validate/consume 方法尚未挂接控制器。本期不提供造型任务、造型排产、下芯领用或造型扫码页面，未来造型模块应直接复用领域方法并补自己的鉴权控制器。
+- `apps/api/src/production/coremaking.service.ts` 已实现领域方法 `validateCoreConsumption(workOrderId, batchCode, quantity, operatorContext?)` 和 `consumeCoreBatch(workOrderId, batchCode, quantity, operatorContext)`。通用领用仍使用批次行锁、`versionNo` 和库存条件更新，写 `CONSUMED` 流水并禁止并发负库存。造型报工是明确的业务例外：允许对同工单可追溯来源批次透支，必须通过 `MoldingService` 的事务消费和台账实现，其他模块不得直接复用该例外。
+- 通用 `validate/consume` 方法仍未挂接控制器；造型下芯已由独立 `MoldingService`、管理端页面和小程序页面实现。造型的工单隔离齐套、负库存透支和撤销返还不得回退到通用领用逻辑。
 
 ### 页面、接口与权限
 
@@ -340,6 +345,24 @@ npm --prefix apps/api run test:core-readiness
 node --test apps/admin/tests/coremaking-permissions.test.mjs apps/admin/tests/coremaking-ui.test.mjs
 npm --prefix apps/miniprogram test
 ```
+
+## 工艺路线与合型浇注衔接（2026-08-24）
+
+- 合型浇注不单独配置产品范围，而是沿生产工单已锁定的工艺路线版本执行。即使该版本后续停用，历史工单仍使用锁定版本的真实节点和边。
+- 造型报工后，系统从当前造型节点向后查找首个 `OperationMaster.pouringMergePoint = true` 的可达节点，并生成 `PouringMoldBatch` 待浇砂型批次。无可达汇合节点时不生成待浇队列，但不阻断造型报工。
+- 浇注扣减以 `closingTime -> id` 固定 FIFO，支持一次报工跨多笔造型批次。浇注报工必须绑定同一工单、同材质的具体铁水转运包次，以及路线浇注节点上绑定的启用工位设备。
+- 工艺路线的浇注节点应绑定启用的浇注工位设备；未绑定时可查看待浇队列，但不允许提交报工。浇注完成判断为“造型任务已完成且所有有效待浇批次余量为零”。
+- 完整浇注业务规则见 `docs/product/context-summary.md` 的“合型浇注执行”，实施细节见 `docs/superpowers/specs/2026-08-24-pouring-execution-design.md` 和 `docs/superpowers/plans/2026-08-24-pouring-execution.md`。
+
+## 工艺路线与落砂清理衔接（2026-08-24）
+
+- 标准工序库使用一个 `OP-SHAKE / 落砂清理` 工序，工艺路线也只放置一个节点；现场执行在该节点内分为落砂、清理打磨两个阶段。
+- 路线节点新增 `coolingDurationMinutes`，单位为分钟，只在 `OP-SHAKE` 或清理工段节点可编辑，默认 `0`。创建、编辑、克隆和新版本必须完整保留该字段。
+- 冷却时长属于路线版本快照。历史工单继续按已锁定路线节点的数值执行，即使路线版本后来停用或新版本修改了冷却时长，也不能回写历史落砂批次。
+- 落砂和清理设备均来自设备配置，并同时满足启用状态、节点设备绑定和设备类型字典。设备类型至少应维护“落砂、清理、抛丸、打磨、切割”，不能使用设备名称关键字代替字典关系。
+- 缺陷代码通过 `DefectOperation` 绑定 `OP-SHAKE`；两个阶段共用该工序缺陷范围。其他自定义工序绑定的缺陷不能出现在落砂清理报工中。
+- 路线后继约束：`0` 个后继生成待入库毛坯，`1` 个后继将 `BlankOutputBatch.nextRoutingNodeId` 指向该节点，`>1` 个直接后继视为配置歧义并阻止清理报工。
+- 后续工序必须以有效 `BlankOutputBatch` 为输入队列，保存来源批次和消费关系，沿 `nextRoutingNodeId` 校验当前工序；不能绕过毛坯批次直接读取清理报工累计数。
 
 ## 验证情况
 

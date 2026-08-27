@@ -11,8 +11,8 @@ export class HeatExecutionController {
   constructor(private readonly production: ProductionService) {}
 
   @Get()
-  list(@Req() request: RequestWithAdmin, @Query('status') status?: string) {
-    return this.production.listHeatOrders(request, status, false)
+  list(@Req() request: RequestWithAdmin, @Query('status') status?: string, @Query('workOrderId') workOrderId?: string) {
+    return this.production.listHeatOrders(request, status, workOrderId, false)
   }
 
   @Get(':id')
@@ -48,7 +48,7 @@ export class MobileHeatExecutionController {
 
   @Get()
   list(@Req() request: RequestWithAdmin, @Query('status') status?: string) {
-    return this.production.listHeatOrders(request, status, true)
+    return this.production.listHeatOrders(request, status, undefined, true)
   }
 
   @Get(':id')

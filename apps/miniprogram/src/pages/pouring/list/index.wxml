@@ -1,0 +1,11 @@
+<view class="page">
+  <view class="tab-bar cols-4">
+    <view wx:for="{{tabs}}" wx:key="key" class="tab {{activeTab === item.key ? 'tab-active' : ''}}" data-key="{{item.key}}" bindtap="changeTab">{{item.label}}</view>
+  </view>
+  <view class="list"><view class="card" wx:for="{{records}}" wx:key="moldingTaskId" data-id="{{item.moldingTaskId}}" bindtap="openDetail">
+    <view class="head"><text class="code">{{item.moldingTaskCode}}</text><text class="badge badge-{{item.statusTone}}">{{item.statusText}}</text></view>
+    <view class="product">{{item.productName}}（{{item.productCode}}）</view>
+    <view class="grid"><view><text>生产工单</text><strong>{{item.workOrderCode}}</strong></view><view><text>待浇数量</text><strong>{{item.remainingQuantity}} 箱</strong></view><view><text>造型 / 已浇</text><strong>{{item.moldedQuantity}} / {{item.pouredQuantity}} 箱</strong></view><view><text>合型停留</text><strong class="hold-{{item.holdTone}}">{{item.holdText}}</strong></view></view>
+  </view></view>
+  <view wx:if="{{!loading && !records.length}}" class="empty"><image src="/assets/icons/empty-box.svg"/><text>暂无当前状态的待浇任务</text></view>
+</view>

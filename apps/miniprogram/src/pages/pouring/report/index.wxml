@@ -1,0 +1,85 @@
+<view class="page" wx:if="{{options}}">
+  <view class="task-card">
+    <view class="head">
+      <text class="code">{{options.workOrderCode}}</text>
+      <text class="badge badge-active">待浇 {{options.remainingQuantity}} 箱</text>
+    </view>
+    <view class="product">{{options.productName}} · {{options.materialGradeName}}</view>
+    <view class="meta">合型已停留 {{options.holdMinutes}} 分钟</view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">步骤 1 · 选择铁水包次</view>
+    <view class="scan-row">
+      <picker class="scan-input" range="{{options.transfers}}" range-key="transferDeviceName" bindchange="chooseTransfer">
+        <view class="picker-value">{{selectedTransferText || '请选择具体炉次与包次'}}</view>
+      </picker>
+      <view class="scan-button" hover-class="scan-button-hover" bindtap="scanTransfer">
+        <image src="/assets/icons/scan.svg" />
+      </view>
+    </view>
+    <view wx:if="{{!options.transfers.length}}" class="warning">当前工单没有可用的转运铁水包次</view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">步骤 2 · 选择浇注工位</view>
+    <picker range="{{options.stations}}" range-key="name" bindchange="chooseStation">
+      <view class="picker-value">{{selectedStationText || '请选择路线绑定的浇注设备'}}</view>
+    </picker>
+    <view wx:if="{{!options.stations.length}}" class="warning">工艺路线的浇注节点尚未绑定设备</view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">步骤 3 · 录入浇注成果</view>
+    <view class="form-label">本次浇注合格箱数</view>
+    <view class="quick">
+      <view class="chip" data-delta="-10" bindtap="adjustGood">-10</view>
+      <view class="chip" data-delta="-1" bindtap="adjustGood">-1</view>
+      <view class="chip" data-delta="1" bindtap="adjustGood">+1</view>
+      <view class="chip" data-delta="10" bindtap="adjustGood">+10</view>
+    </view>
+    <view class="stepper">
+      <view class="stepper-btn" data-delta="-1" bindtap="adjustGood">−</view>
+      <input class="stepper-input" type="number" value="{{goodQty}}" bindinput="inputGood" />
+      <view class="stepper-btn stepper-btn-primary" data-delta="1" bindtap="adjustGood">+</view>
+    </view>
+    <view class="fill-btn" hover-class="fill-btn-hover" bindtap="fillRemaining">一键清完剩余（{{options.remainingQuantity}}箱）</view>
+
+    <view class="form-label spaced">浇注废品箱数</view>
+    <view class="stepper">
+      <view class="stepper-btn" data-delta="-1" bindtap="adjustScrap">−</view>
+      <input class="stepper-input" type="number" value="{{scrapQty}}" bindinput="inputScrap" />
+      <view class="stepper-btn stepper-btn-primary" data-delta="1" bindtap="adjustScrap">+</view>
+    </view>
+
+    <view class="form-label spaced">实际浇注重量（kg）</view>
+    <input class="input" type="digit" value="{{actualWeightKg}}" placeholder="留空按BOM浇注毛重自动计算" bindinput="inputWeight" />
+  </view>
+
+  <view class="card" wx:if="{{scrapQty > 0}}">
+    <view class="section-head">
+      <text class="section-title">浇注缺陷</text>
+      <view class="add-btn" hover-class="add-btn-hover" bindtap="addDefect">+ 新增</view>
+    </view>
+    <view class="defect" wx:for="{{defectRows}}" wx:key="index">
+      <picker range="{{defects}}" range-key="name" data-index="{{index}}" bindchange="chooseDefect">
+        <view class="picker-value">{{item.defectName || '选择缺陷'}}</view>
+      </picker>
+      <view class="defect-row">
+        <input class="input" type="number" value="{{item.quantity}}" data-index="{{index}}" bindinput="inputDefectQty" />
+        <input class="input" placeholder="备注" value="{{item.remark}}" data-index="{{index}}" bindinput="inputDefectRemark" />
+        <text class="defect-remove" data-index="{{index}}" bindtap="removeDefect">删除</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="form-label">报工备注（选填）</view>
+    <textarea class="textarea" value="{{remark}}" placeholder="填写浇注过程说明" bindinput="inputRemark" />
+  </view>
+
+  <view class="bottom-space"></view>
+  <view class="bottom">
+    <view class="submit-inline {{submitting ? 'is-disabled' : ''}}" hover-class="submit-inline-hover" bindtap="submit">{{submitting ? '提交中...' : '提交浇注报工'}}</view>
+  </view>
+</view>

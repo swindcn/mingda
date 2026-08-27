@@ -14,6 +14,7 @@ const equipmentB = `${prefix}-EB`
 const operationCode = `${prefix}-OP`
 const routeCode = `${prefix}-RT`
 const cloneCode = `${prefix}-CLONE`
+const conflictCode = `${prefix}-CONFLICT`
 
 async function request(path, options = {}, expectedFailure = false) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -24,7 +25,7 @@ async function request(path, options = {}, expectedFailure = false) {
   const failed = !response.ok || payload.code !== 0
   if (expectedFailure) {
     if (!failed) throw new Error(`${options.method || 'GET'} ${path}: 应该失败但成功了`)
-    return payload
+    return { ...payload, httpStatus: response.status }
   }
   if (failed) throw new Error(`${options.method || 'GET'} ${path}: ${payload.message || response.status}`)
   return payload.data
@@ -80,13 +81,15 @@ try {
     { id: 'core', operationCode: 'OP-CORE', routeType: 'CORE_BRANCH', equipmentCodes: [], positionX: 80, positionY: 180 },
     { id: 'mold', operationCode: 'OP-MOLD', routeType: 'MOLD_MAIN', equipmentCodes: [], positionX: 80, positionY: 320 },
     { id: 'pour', operationCode: 'OP-POUR', routeType: 'MERGE_POINT', equipmentCodes: [equipmentB], positionX: 420, positionY: 180 },
-    { id: 'inspect', operationCode: 'OP-INSP', routeType: 'AFTER_MERGE', equipmentCodes: [], positionX: 720, positionY: 180 },
+    { id: 'shake', operationCode: 'OP-SHAKE', routeType: 'AFTER_MERGE', coolingDurationMinutes: 120, equipmentCodes: [], positionX: 620, positionY: 180 },
+    { id: 'inspect', operationCode: 'OP-INSP', routeType: 'AFTER_MERGE', coolingDurationMinutes: 30, equipmentCodes: [], positionX: 820, positionY: 180 },
   ]
   const edges = [
     { sourceNodeId: 'melt', targetNodeId: 'pour' },
     { sourceNodeId: 'core', targetNodeId: 'pour' },
     { sourceNodeId: 'mold', targetNodeId: 'pour' },
-    { sourceNodeId: 'pour', targetNodeId: 'inspect' },
+    { sourceNodeId: 'pour', targetNodeId: 'shake' },
+    { sourceNodeId: 'shake', targetNodeId: 'inspect' },
   ]
   const payload = {
     code: routeCode,
@@ -103,15 +106,54 @@ try {
     body: JSON.stringify({ ...payload, code: `${routeCode}-CYCLE`, edges: [...edges, { sourceNodeId: 'inspect', targetNodeId: 'melt' }] }),
   }, true)
 
+  for (const [suffix, coolingDurationMinutes] of [
+    ['NEGATIVE', -1],
+    ['DECIMAL', 1.5],
+    ['STRING', '120'],
+    ['BOOLEAN', true],
+    ['INT-OVERFLOW', 2147483648],
+  ]) {
+    const invalidCooling = await request('/admin/modeling/routings', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        code: `${routeCode}-${suffix}`,
+        name: `无效冷却时长-${suffix}`,
+        productCodes: [],
+        nodes: nodes.map((node) => node.id === 'shake' ? { ...node, coolingDurationMinutes } : node),
+      }),
+    }, true)
+    if (invalidCooling.httpStatus !== 400) throw new Error(`冷却时长 ${coolingDurationMinutes} 应返回 HTTP 400，实际 ${invalidCooling.httpStatus}`)
+  }
+
   const v1 = await request('/admin/modeling/routings', { method: 'POST', headers, body: JSON.stringify(payload) })
   if (v1.version !== 'V1.0' || v1.status !== 'DRAFT') throw new Error('路线首版状态不正确')
-  if (v1.productCodes.length !== 3 || v1.nodes.length !== 5 || v1.edges.length !== 4) throw new Error('路线关系保存不完整')
+  if (v1.productCodes.length !== 3 || v1.nodes.length !== 6 || v1.edges.length !== 5) throw new Error('路线关系保存不完整')
+  if (v1.nodes.find((item) => item.operationCode === 'OP-SHAKE')?.coolingDurationMinutes !== 120) throw new Error('创建路线未保存落砂冷却时长')
+  if (v1.nodes.find((item) => item.operationCode === 'OP-INSP')?.coolingDurationMinutes !== 0) throw new Error('非清理节点冷却时长未强制归零')
+  const v1Detail = await request(`/admin/modeling/routings/${v1.id}`, { headers })
+  if (v1Detail.nodes.find((item) => item.operationCode === 'OP-SHAKE')?.coolingDurationMinutes !== 120) throw new Error('路线详情未返回落砂冷却时长')
+  const editedV1 = await request(`/admin/modeling/routings/${v1.id}`, { method: 'PUT', headers, body: JSON.stringify(payload) })
+  if (editedV1.nodes.find((item) => item.operationCode === 'OP-SHAKE')?.coolingDurationMinutes !== 120) throw new Error('编辑路线未保留落砂冷却时长')
+  const productConflict = await request('/admin/modeling/routings', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ...payload, code: conflictCode, name: '冲突工艺路线', productCodes: [productA] }),
+  }, true)
+  if (!String(productConflict.message || '').includes(productA) || !String(productConflict.message || '').includes(routeCode)) {
+    throw new Error(`产品工艺路线唯一性提示不明确: ${productConflict.message || ''}`)
+  }
+  const optionsAfterAssignment = await request('/admin/modeling/routings/options', { headers })
+  const assignedProduct = optionsAfterAssignment.products.find((item) => item.code === productA)
+  if (assignedProduct?.assignedRoutingCode !== routeCode) throw new Error('产品选项未返回当前归属路线')
   const pouringNode = v1.nodes.find((item) => item.operationCode === 'OP-POUR')
   if (!pouringNode?.requireFurnaceBatch || !pouringNode.requireLadle || !pouringNode.requireCoreBatch) throw new Error('浇注绑定规则未强制启用')
-  if (v1.nodes.map((item) => item.seqNo).join(',') !== '10,20,30,40,50') throw new Error('工序号未按拓扑顺序生成')
+  if (v1.nodes.map((item) => item.seqNo).join(',') !== '10,20,30,40,50,60') throw new Error('工序号未按拓扑顺序生成')
 
   const activeV1 = await request(`/admin/modeling/routings/${v1.id}/activate`, { method: 'POST', headers })
   if (activeV1.status !== 'ACTIVE') throw new Error('路线未发布生效')
+  await request(`/admin/modeling/routings/${v1.id}/recycle`, { method: 'POST', headers }, true)
   const withDefaults = await request(`/admin/modeling/routings/${v1.id}/default-products`, {
     method: 'PUT',
     headers,
@@ -135,7 +177,8 @@ try {
   }, true)
 
   const v2 = await request(`/admin/modeling/routings/${v1.id}/new-version`, { method: 'POST', headers })
-  if (v2.version !== 'V2.0' || v2.status !== 'DRAFT' || v2.nodes.length !== 5) throw new Error('路线新版本复制失败')
+  if (v2.version !== 'V2.0' || v2.status !== 'DRAFT' || v2.nodes.length !== 6) throw new Error('路线新版本复制失败')
+  if (v2.nodes.find((item) => item.operationCode === 'OP-SHAKE')?.coolingDurationMinutes !== 120) throw new Error('路线新版本未保留落砂冷却时长')
   const activeV2 = await request(`/admin/modeling/routings/${v2.id}/activate`, { method: 'POST', headers })
   if (activeV2.defaultProductCodes.length !== 1) throw new Error('新版本未接替默认产品')
   const oldV1 = await request(`/admin/modeling/routings/${v1.id}`, { headers })
@@ -158,7 +201,32 @@ try {
     body: JSON.stringify({ code: cloneCode, name: '测试通用铸造路线复制' }),
   })
   if (cloned.code !== cloneCode || cloned.version !== 'V1.0' || cloned.status !== 'DRAFT') throw new Error('路线克隆失败')
+  if (cloned.nodes.find((item) => item.operationCode === 'OP-SHAKE')?.coolingDurationMinutes !== 120) throw new Error('路线克隆未保留落砂冷却时长')
+  if (cloned.productCodes.length) throw new Error('路线克隆不应复制已归属原路线的适用产品')
   if (cloned.defaultProductCodes.length) throw new Error('克隆路线不应复制默认关系')
+
+  await request(`/admin/modeling/routings/${v2.id}/disable`, { method: 'POST', headers })
+  const reassigned = await request(`/admin/modeling/routings/${cloned.id}/applicable-products`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ productCodes: [productA] }),
+  })
+  if (reassigned.productCodes.join(',') !== productA) throw new Error('原路线停用后产品未释放给新路线')
+
+  const recycled = await request(`/admin/modeling/routings/${v2.id}/recycle`, { method: 'POST', headers })
+  if (!recycled.recycledAt) throw new Error('停用路线未记录回收时间')
+  const normalAfterRecycle = await request(`/admin/modeling/routings?keyword=${encodeURIComponent(routeCode)}`, { headers })
+  if (normalAfterRecycle.some((item) => item.id === v2.id)) throw new Error('已回收路线仍出现在普通列表')
+  const recycleBin = await request(`/admin/modeling/routings?recycled=true&keyword=${encodeURIComponent(routeCode)}`, { headers })
+  if (!recycleBin.some((item) => item.id === v2.id)) throw new Error('已回收路线未出现在回收站')
+  await request(`/admin/modeling/routings/${v2.id}/new-version`, { method: 'POST', headers }, true)
+  await request(`/admin/modeling/routings/${v2.id}/clone`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ code: conflictCode, name: '回收路线复制' }),
+  }, true)
+  const restored = await request(`/admin/modeling/routings/${v2.id}/restore`, { method: 'POST', headers })
+  if (restored.recycledAt || restored.status !== 'DISABLED') throw new Error('路线恢复状态不正确')
 
   const list = await request(`/admin/modeling/routings?keyword=${encodeURIComponent(routeCode)}`, { headers })
   if (list.filter((item) => item.code === routeCode).length !== 2) throw new Error('路线列表未保留两个版本')

@@ -1,17 +1,134 @@
-<view wx:if="{{record}}" class="heat-detail-page">
-  <view class="detail-card">
-    <view class="detail-title"><text>{{record.code}}</text><text>{{record.materialGradeName}}</text></view>
-    <view class="detail-grid">
-      <view><text class="label">计划熔炉</text><text>{{record.furnaceName}}</text></view><view><text class="label">实际熔炉</text><text>{{record.actualFurnaceName || '-'}}</text></view>
-      <view><text class="label">目标重量</text><text>{{record.targetWeightKg}} kg</text></view><view><text class="label">计划开始</text><text>{{record.plannedStartText}}</text></view>
-      <view><text class="label">熔炼配方</text><text>{{record.recipeName}} / {{record.recipeVersion}}</text></view><view><text class="label">实际出炉</text><text>{{record.actualOutputWeightKg === null ? '-' : record.actualOutputWeightKg + ' kg'}}</text></view>
-      <view><text class="label">执行班组</text><text>{{record.teamName}}</text></view><view><text class="label">转运累计</text><text>{{record.transferTotalWeightKg}} kg</text></view>
+<view wx:if="{{record}}" class="page page-bottom-safe detail-page">
+  <!-- 摘要 -->
+  <view class="card summary-card">
+    <view class="summary-head">
+      <view class="summary-code-row">
+        <text class="summary-code">{{record.code}}</text>
+        <text class="badge badge-{{record.status === 'COMPLETED' ? 'done' : record.status === 'CANCELED' ? 'muted' : 'active'}}">{{record.statusText || record.status}}</text>
+      </view>
+      <view class="summary-material">{{record.materialGradeName}}</view>
+    </view>
+    <view class="info-grid">
+      <view class="info-cell">
+        <text class="field-label">计划熔炉</text>
+        <text class="field-value">{{record.furnaceName}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">实际熔炉</text>
+        <text class="field-value">{{record.actualFurnaceName || '-'}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">目标重量</text>
+        <text class="field-value">{{record.targetWeightKg}} kg</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">计划开始</text>
+        <text class="field-value">{{record.plannedStartText}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">熔炼配方</text>
+        <text class="field-value">{{record.recipeName}} / {{record.recipeVersion}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">实际出炉</text>
+        <text class="field-value">{{record.actualOutputWeightKg === null ? '-' : record.actualOutputWeightKg + ' kg'}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">执行班组</text>
+        <text class="field-value">{{record.teamName}}</text>
+      </view>
+      <view class="info-cell">
+        <text class="field-label">转运累计</text>
+        <text class="field-value">{{record.transferTotalWeightKg}} kg</text>
+      </view>
     </view>
   </view>
-  <view class="detail-card"><view class="section-title">关联工单</view><view class="allocation-row" wx:for="{{record.allocations}}" wx:key="id"><view><text class="row-main">{{item.workOrderCode}}</text><text class="row-sub">{{item.productName}}</text></view><view class="row-right"><text>{{item.allocatedQuantity}} 件</text><text class="row-sub">{{item.plannedWeightKg}} kg</text></view></view></view>
-  <view class="detail-card"><view class="section-title">标准配料提示</view><view class="allocation-row" wx:for="{{record.recipeItems}}" wx:key="itemCode"><view><text class="row-main">{{item.itemName}}</text><text class="row-sub">{{item.itemCode}}</text></view><view class="row-right"><text>{{item.ratio === null ? '-' : item.ratio + '%'}}</text><text class="row-sub">{{item.quantity === null ? '' : item.quantity + ' ' + item.unit}}</text></view></view></view>
-  <view class="detail-card"><view class="section-title">转运记录</view><view wx:if="{{!record.transfers.length}}" class="row-sub">暂无转运记录</view><view class="allocation-row" wx:for="{{record.transfers}}" wx:key="id"><view><text class="row-main">{{item.transferDeviceName}}</text><text class="row-sub">{{item.equipmentType}} · {{item.operatorName}}</text></view><view class="row-right"><text>{{item.weightKg}} kg</text><text class="row-sub">{{item.timeText}}</text></view></view></view>
-  <view class="detail-card"><view class="section-title">执行记录</view><view class="record-row" wx:for="{{record.records}}" wx:key="id"><view class="record-dot"></view><view><text class="row-main">{{item.actionText}}</text><text class="row-sub">{{item.operatorName}} · {{item.timeText}}</text><text wx:if="{{item.remark}}" class="row-sub">{{item.remark}}</text></view></view></view>
-  <view class="bottom-safe"></view>
-  <view wx:if="{{record.canStart || record.canTransfer || record.canComplete}}" class="fixed-actions"><button wx:if="{{record.canStart}}" class="primary-action" bindtap="startProduction">开始生产</button><button wx:if="{{record.canTransfer}}" class="primary-action" bindtap="transferProduction">转运出炉</button><button wx:if="{{record.canComplete}}" class="primary-action" bindtap="completeProduction">完成生产</button></view>
+
+  <!-- 关联工单 -->
+  <view class="card">
+    <view class="card-section-head">
+      <view class="section-bar"></view>
+      <text class="section-title">关联工单</text>
+    </view>
+    <view class="row-list">
+      <view class="row" wx:for="{{record.allocations}}" wx:key="id">
+        <view class="row-main">
+          <text class="row-title">{{item.workOrderCode}}</text>
+          <text class="row-sub">{{item.productName}}</text>
+        </view>
+        <view class="row-extra">
+          <text class="row-title">{{item.allocatedQuantity}} 件</text>
+          <text class="row-sub">{{item.plannedWeightKg}} kg</text>
+        </view>
+      </view>
+      <view wx:if="{{!record.allocations.length}}" class="empty-inline">暂无关联工单</view>
+    </view>
+  </view>
+
+  <!-- 配料提示 -->
+  <view class="card">
+    <view class="card-section-head">
+      <view class="section-bar"></view>
+      <text class="section-title">标准配料提示</text>
+    </view>
+    <view class="row-list">
+      <view class="row" wx:for="{{record.recipeItems}}" wx:key="itemCode">
+        <view class="row-main">
+          <text class="row-title">{{item.itemName}}</text>
+          <text class="row-sub">{{item.itemCode}}</text>
+        </view>
+        <view class="row-extra">
+          <text class="row-title">{{item.ratio === null ? '-' : item.ratio + '%'}}</text>
+          <text class="row-sub">{{item.quantity === null ? '' : item.quantity + ' ' + item.unit}}</text>
+        </view>
+      </view>
+      <view wx:if="{{!record.recipeItems.length}}" class="empty-inline">暂无配料提示</view>
+    </view>
+  </view>
+
+  <!-- 转运记录 -->
+  <view class="card">
+    <view class="card-section-head">
+      <view class="section-bar"></view>
+      <text class="section-title">转运记录</text>
+    </view>
+    <view class="row-list">
+      <view wx:if="{{!record.transfers.length}}" class="empty-inline">暂无转运记录</view>
+      <view class="row" wx:for="{{record.transfers}}" wx:key="id">
+        <view class="row-main">
+          <text class="row-title">{{item.transferDeviceName}}</text>
+          <text class="row-sub">{{item.equipmentType}} · {{item.operatorName}}</text>
+        </view>
+        <view class="row-extra">
+          <text class="row-title">{{item.weightKg}} kg</text>
+          <text class="row-sub">{{item.timeText}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 执行记录 -->
+  <view class="card">
+    <view class="card-section-head">
+      <view class="section-bar"></view>
+      <text class="section-title">执行记录</text>
+    </view>
+    <view class="timeline-list">
+      <view class="record-row" wx:for="{{record.records}}" wx:key="id">
+        <view class="record-dot"></view>
+        <view class="record-body">
+          <view class="record-title">{{item.actionText}}</view>
+          <view class="record-meta">{{item.operatorName}} · {{item.timeText}}</view>
+          <view wx:if="{{item.remark}}" class="record-remark">{{item.remark}}</view>
+        </view>
+      </view>
+      <view wx:if="{{!record.records.length}}" class="empty-inline">暂无执行记录</view>
+    </view>
+  </view>
+
+  <view wx:if="{{record.canStart || record.canTransfer || record.canComplete}}" class="fixed-bottom-bar">
+    <button wx:if="{{record.canStart}}" class="btn btn-primary" bindtap="startProduction">开始生产</button>
+    <button wx:if="{{record.canTransfer}}" class="btn btn-primary" bindtap="transferProduction">转运出炉</button>
+    <button wx:if="{{record.canComplete}}" class="btn btn-primary" bindtap="completeProduction">完成生产</button>
+  </view>
 </view>

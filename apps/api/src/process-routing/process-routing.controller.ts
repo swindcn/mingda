@@ -27,6 +27,7 @@ import type { NormalizedRoutingEdge, NormalizedRoutingNode, RoutingBody } from '
 
 const codePattern = /^[^\s\u4e00-\u9fff]+$/
 const allowedProductTypes = ['成品', '半成品']
+const postgresIntMax = 2_147_483_647
 
 type PreparedRouting = {
   name: string
@@ -84,6 +85,7 @@ export class ProcessRoutingController {
       createdByUserId: record.createdByUserId || undefined,
       createdByName: record.createdBy?.name || '',
       remark: record.remark || '',
+      recycledAt: record.recycledAt?.toISOString(),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
       productCodes: record.products.map((item) => item.productCode),
@@ -114,6 +116,7 @@ export class ProcessRoutingController {
         requireLadle: node.requireLadle,
         requireCoreBatch: node.requireCoreBatch,
         standardCycleSeconds: node.standardCycleSeconds ?? undefined,
+        coolingDurationMinutes: node.coolingDurationMinutes,
         positionX: Number(node.positionX),
         positionY: Number(node.positionY),
         equipmentCodes: node.equipmentLinks.map((item) => item.equipmentCode),
@@ -149,6 +152,10 @@ export class ProcessRoutingController {
     return this.findVersion(id)
   }
 
+  private assertNotRecycled(record: { recycledAt: Date | null }) {
+    if (record.recycledAt) throw new BadRequestException('该工艺路线已在回收站，请先恢复')
+  }
+
   private async prepare(body: RoutingBody, publishing: boolean): Promise<PreparedRouting> {
     const name = String(body.name || '').trim()
     if (!name) throw new BadRequestException('请输入路线名称')
@@ -175,6 +182,16 @@ export class ProcessRoutingController {
     const nodes = graph.nodes.map((node) => {
       const operation = operationByCode.get(node.operationCode)!
       const pouring = operation.pouringMergePoint
+      const rawCoolingDurationMinutes: unknown = node.coolingDurationMinutes
+      const coolingDurationMinutes = rawCoolingDurationMinutes === undefined ? 0 : rawCoolingDurationMinutes
+      if (
+        typeof coolingDurationMinutes !== 'number'
+        || !Number.isSafeInteger(coolingDurationMinutes)
+        || coolingDurationMinutes < 0
+        || coolingDurationMinutes > postgresIntMax
+      ) {
+        throw new BadRequestException(`节点 ${node.operationCode} 的要求冷却时长必须是非负整数`)
+      }
       return {
         ...node,
         routeType: pouring ? 'MERGE_POINT' : node.routeType,
@@ -184,6 +201,7 @@ export class ProcessRoutingController {
         requireFurnaceBatch: pouring || Boolean(node.requireFurnaceBatch),
         requireLadle: pouring || Boolean(node.requireLadle),
         requireCoreBatch: pouring || Boolean(node.requireCoreBatch),
+        coolingDurationMinutes: node.operationCode === 'OP-SHAKE' || operation.section === '清理' ? coolingDurationMinutes : 0,
         remark: String(node.remark || '').trim() || undefined,
       }
     })
@@ -199,6 +217,7 @@ export class ProcessRoutingController {
     createdByUserId: string,
     sourceVersionId?: string,
   ) {
+    await this.assertProductsAvailable(tx, prepared.productCodes, routingId)
     const versionRecord = await tx.processRoutingVersion.create({
       data: {
         routingId,
@@ -224,6 +243,7 @@ export class ProcessRoutingController {
           requireLadle: Boolean(node.requireLadle),
           requireCoreBatch: Boolean(node.requireCoreBatch),
           standardCycleSeconds: node.standardCycleSeconds,
+          coolingDurationMinutes: node.coolingDurationMinutes ?? 0,
           positionX: node.positionX,
           positionY: node.positionY,
           remark: node.remark || null,
@@ -244,6 +264,36 @@ export class ProcessRoutingController {
     return versionRecord.id
   }
 
+  private async assertProductsAvailable(
+    tx: Prisma.TransactionClient,
+    productCodes: string[],
+    routingId: string,
+  ) {
+    const codes = Array.from(new Set(productCodes)).sort()
+    for (const productCode of codes) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`process-routing-product:${productCode}`}))`
+    }
+    if (!codes.length) return
+
+    const conflicts = await tx.routingApplicableProduct.findMany({
+      where: {
+        productCode: { in: codes },
+        routingVersion: {
+          status: { in: ['DRAFT', 'ACTIVE'] },
+          routingId: { not: routingId },
+        },
+      },
+      include: { routingVersion: { include: { routing: true } } },
+      orderBy: { createdAt: 'asc' },
+    })
+    const conflict = conflicts[0]
+    if (conflict) {
+      throw new BadRequestException(
+        `产品 ${conflict.productCode} 已关联工艺路线 ${conflict.routingVersion.routing.code}（${conflict.routingVersion.routing.name}），一个产品只能对应一条工艺路线`,
+      )
+    }
+  }
+
   private preparedFromRecord(record: Awaited<ReturnType<ProcessRoutingController['findVersion']>>) {
     return {
       name: record.routing.name,
@@ -260,6 +310,7 @@ export class ProcessRoutingController {
         requireLadle: node.requireLadle,
         requireCoreBatch: node.requireCoreBatch,
         standardCycleSeconds: node.standardCycleSeconds ?? undefined,
+        coolingDurationMinutes: node.coolingDurationMinutes,
         positionX: Number(node.positionX),
         positionY: Number(node.positionY),
         equipmentCodes: node.equipmentLinks.map((item) => item.equipmentCode),
@@ -271,17 +322,37 @@ export class ProcessRoutingController {
 
   @Get('options')
   async options() {
-    const [products, operations, equipment] = await Promise.all([
+    const [products, assignments, operations, equipment] = await Promise.all([
       this.prisma.product.findMany({
         where: { OR: allowedProductTypes.map((type) => ({ type: { startsWith: type } })) },
         include: { materialGrade: true },
         orderBy: { code: 'asc' },
       }),
+      this.prisma.routingApplicableProduct.findMany({
+        where: { routingVersion: { status: { in: ['DRAFT', 'ACTIVE'] } } },
+        select: {
+          productCode: true,
+          routingVersion: { select: { routing: { select: { code: true, name: true } } } },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
       this.prisma.operationMaster.findMany({ where: { status: 'ENABLED' }, orderBy: [{ section: 'asc' }, { code: 'asc' }] }),
       this.prisma.furnace.findMany({ where: { status: '启用' }, include: { workshop: true }, orderBy: { code: 'asc' } }),
     ])
+    const assignmentByProduct = new Map(assignments.map((item) => [item.productCode, item.routingVersion.routing]))
     return {
-      products: products.map((product) => ({ code: product.code, name: product.name, type: product.type || '', materialGradeCode: product.materialGradeCode || '', materialGradeName: product.materialGrade?.name || '' })),
+      products: products.map((product) => {
+        const assignment = assignmentByProduct.get(product.code)
+        return {
+          code: product.code,
+          name: product.name,
+          type: product.type || '',
+          materialGradeCode: product.materialGradeCode || '',
+          materialGradeName: product.materialGrade?.name || '',
+          assignedRoutingCode: assignment?.code || '',
+          assignedRoutingName: assignment?.name || '',
+        }
+      }),
       operations,
       equipment: equipment.map((item) => ({ code: item.code, name: item.name, workshopCode: item.workshopCode || '', workshopName: item.workshop?.name || '' })),
     }
@@ -295,11 +366,13 @@ export class ProcessRoutingController {
     @Query('materialGradeCode') materialGradeCode?: string,
     @Query('version') version?: string,
     @Query('status') status?: string,
+    @Query('recycled') recycled?: string,
   ) {
     const visibleIds = await visibleOwnershipEntityIds(this.prisma, getAdminContext(request), 'modeling:routings')
     const where: Prisma.ProcessRoutingVersionWhereInput = {
       ...(visibleIds === null ? {} : { id: { in: visibleIds } }),
       ...(status ? { status } : {}),
+      ...(recycled === 'true' ? { recycledAt: { not: null } } : { recycledAt: null }),
       ...(version ? { version } : {}),
       ...(productCode ? { products: { some: { productCode } } } : {}),
       ...(materialGradeCode ? { products: { some: { product: { materialGradeCode } } } } : {}),
@@ -345,6 +418,7 @@ export class ProcessRoutingController {
     if (existing.status !== 'DRAFT') throw new BadRequestException('只有草稿路线可以编辑')
     const prepared = await this.prepare({ ...body, code: existing.routing.code }, false)
     await this.prisma.$transaction(async (tx) => {
+      await this.assertProductsAvailable(tx, prepared.productCodes, existing.routingId)
       await tx.processRouting.update({ where: { id: existing.routingId }, data: { name: prepared.name } })
       await tx.processRoutingEdge.deleteMany({ where: { routingVersionId: id } })
       await tx.processRoutingNode.deleteMany({ where: { routingVersionId: id } })
@@ -359,6 +433,7 @@ export class ProcessRoutingController {
             qualityRequirement: node.qualityRequirement || null, requireFurnaceBatch: Boolean(node.requireFurnaceBatch),
             requireLadle: Boolean(node.requireLadle), requireCoreBatch: Boolean(node.requireCoreBatch),
             standardCycleSeconds: node.standardCycleSeconds, positionX: node.positionX, positionY: node.positionY,
+            coolingDurationMinutes: node.coolingDurationMinutes ?? 0,
             remark: node.remark || null, equipmentLinks: { create: node.equipmentCodes.map((equipmentCode) => ({ equipmentCode })) },
           },
         })
@@ -381,7 +456,7 @@ export class ProcessRoutingController {
     await this.prisma.$transaction(async (tx) => {
       const version = await tx.processRoutingVersion.findUnique({
         where: { id },
-        select: { status: true, products: { select: { productCode: true } } },
+        select: { routingId: true, status: true, products: { select: { productCode: true } } },
       })
       if (!version) throw new NotFoundException('工艺路线版本不存在')
       if (version.status === 'DISABLED') throw new BadRequestException('已停用路线不能维护适用产品')
@@ -391,6 +466,7 @@ export class ProcessRoutingController {
       if (products.some((product) => !allowedProductTypes.some((type) => product.type === type || product.type?.startsWith(`${type}/`)))) {
         throw new BadRequestException('工艺路线只能关联成品或半成品')
       }
+      await this.assertProductsAvailable(tx, productCodes, version.routingId)
 
       const selected = new Set(productCodes)
       const removed = version.products.map((item) => item.productCode).filter((code) => !selected.has(code))
@@ -449,9 +525,28 @@ export class ProcessRoutingController {
     return this.dto(await this.findVersion(id))
   }
 
+  @Post(':id/recycle')
+  async recycle(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    const existing = await this.visibleVersion(request, id)
+    if (existing.status !== 'DISABLED') throw new BadRequestException('只有已停用路线可以移入回收站')
+    if (existing.recycledAt) throw new BadRequestException('该工艺路线已在回收站')
+    await this.prisma.processRoutingVersion.update({ where: { id }, data: { recycledAt: new Date() } })
+    return this.dto(await this.findVersion(id))
+  }
+
+  @Post(':id/restore')
+  async restore(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    const existing = await this.visibleVersion(request, id)
+    if (!existing.recycledAt) throw new BadRequestException('该工艺路线不在回收站')
+    if (existing.status !== 'DISABLED') throw new BadRequestException('只有已停用路线可以恢复')
+    await this.prisma.processRoutingVersion.update({ where: { id }, data: { recycledAt: null } })
+    return this.dto(await this.findVersion(id))
+  }
+
   @Post(':id/new-version')
   async newVersion(@Req() request: RequestWithAdmin, @Param('id') id: string) {
     const source = await this.visibleVersion(request, id)
+    this.assertNotRecycled(source)
     if (source.status === 'DRAFT') throw new BadRequestException('草稿路线不能创建新版本')
     const prepared = await this.prepare(this.preparedFromRecord(source), false)
     const newId = await this.prisma.$transaction(async (tx) => {
@@ -469,9 +564,14 @@ export class ProcessRoutingController {
   @Post(':id/clone')
   async clone(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: { code?: string; name?: string }) {
     const source = await this.visibleVersion(request, id)
+    this.assertNotRecycled(source)
     const code = String(body.code || '').trim()
     if (!code || !codePattern.test(code)) throw new BadRequestException('请输入有效的新路线编号')
-    const prepared = await this.prepare({ ...this.preparedFromRecord(source), name: String(body.name || `${source.routing.name}复制`) }, false)
+    const prepared = await this.prepare({
+      ...this.preparedFromRecord(source),
+      name: String(body.name || `${source.routing.name}复制`),
+      productCodes: [],
+    }, false)
     try {
       const newId = await this.prisma.$transaction(async (tx) => {
         const routing = await tx.processRouting.create({ data: { code, name: prepared.name } })

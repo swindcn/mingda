@@ -2,18 +2,43 @@
   <view class="label-sheet">
     <view class="label-head">
       <view class="label-title">砂芯批次标签</view>
-      <view class="task-code">{{label.taskCode}}</view>
+      <view class="task-code-text">{{label.taskCode}}</view>
     </view>
-    <view class="qr-wrap"><canvas type="2d" id="labelQr" class="qr-canvas"></canvas></view>
+    <view class="qr-wrap">
+      <canvas type="2d" id="labelQr" class="qr-canvas"></canvas>
+    </view>
     <view class="batch-code">{{label.code}}</view>
     <view class="label-grid">
-      <view class="field wide"><text class="field-name">批次</text><text class="field-value">{{label.code}}</text></view>
-      <view class="field"><text class="field-name">芯盒</text><text class="field-value">{{label.coreBoxName}}</text><text class="field-code">{{label.coreBoxCode}}</text></view>
-      <view class="field"><text class="field-name">产品</text><text class="field-value">{{label.productName}}</text><text class="field-code">{{label.productCode}}</text></view>
-      <view class="field"><text class="field-name">数量 当前 / 初始</text><text class="field-value">{{label.quantityText}}</text></view>
-      <view class="field"><text class="field-name">烘干状态</text><text class="field-value status">{{label.dryingText}}</text></view>
-      <view class="field wide"><text class="field-name">生产时间</text><text class="field-value">{{label.reportedAtText}}</text></view>
-      <view class="field wide"><text class="field-name">失效时间</text><text class="field-value">{{label.expiresAtText}}</text></view>
+      <view class="field wide">
+        <text class="field-name">批次</text>
+        <text class="field-value">{{label.code}}</text>
+      </view>
+      <view class="field">
+        <text class="field-name">芯盒</text>
+        <text class="field-value">{{label.coreBoxName}}</text>
+        <text class="field-code">{{label.coreBoxCode}}</text>
+      </view>
+      <view class="field">
+        <text class="field-name">产品</text>
+        <text class="field-value">{{label.productName}}</text>
+        <text class="field-code">{{label.productCode}}</text>
+      </view>
+      <view class="field">
+        <text class="field-name">数量 当前 / 初始</text>
+        <text class="field-value">{{label.quantityText}}</text>
+      </view>
+      <view class="field">
+        <text class="field-name">烘干状态</text>
+        <text class="field-value status">{{label.dryingText}}</text>
+      </view>
+      <view class="field wide">
+        <text class="field-name">生产时间</text>
+        <text class="field-value">{{label.reportedAtText}}</text>
+      </view>
+      <view class="field wide">
+        <text class="field-name">失效时间</text>
+        <text class="field-value">{{label.expiresAtText}}</text>
+      </view>
     </view>
   </view>
 </view>

@@ -50,12 +50,29 @@ test('registers all coremaking pages with pull-down refresh where data is loaded
 })
 
 test('uses only real mini coremaking APIs and exposes execution options', () => {
-  const api = read('services/api.js')
+  const api = readSource('services/api.ts')
   assert.match(api, /\/mini\/production\/core-tasks/)
   assert.match(api, /\/execution-options/)
   assert.match(api, /\/drying-batches/)
   assert.match(api, /\/mini\/production\/core-batches/)
   assert.doesNotMatch(api, /\/admin\/production\/core-tasks/)
+})
+
+test('core report exposes and submits the dispatched team', () => {
+  const logic = read('pages/core/report/index.js')
+  const view = read('pages/core/report/index.wxml')
+  const types = readSource('types/business.ts')
+  assert.match(types, /interface CoreExecutionOptions[\s\S]*teams:/)
+  assert.match(logic, /teamIndex/)
+  assert.match(logic, /teamCode/)
+  assert.match(logic, /请选择班组/)
+  assert.match(view, /班组/)
+  assert.match(view, /options\.teams/)
+})
+
+test('core report hides the unplanned sand batch field for phase one', () => {
+  const view = read('pages/core/report/index.wxml')
+  assert.doesNotMatch(view, /混砂批次/)
 })
 
 test('shows the coremaking home entry only from its mini permission', () => {
@@ -268,7 +285,6 @@ test('safely decodes scanned batch values without throwing on malformed escapes'
   assert.equal(extractScannedCode('https://example.test?a=1&code=SAND%20001'), 'SAND 001')
   assert.equal(extractScannedCode('https://example.test?batch=%E0%A4%A'), '%E0%A4%A')
   assert.equal(extractScannedCode('  SAND-002  '), 'SAND-002')
-  assert.match(read('pages/core/report/index.js'), /extractScannedCode/)
 })
 
 test('uses split mobile task DTOs and includes protected label fields on batches', () => {
@@ -283,27 +299,38 @@ test('uses split mobile task DTOs and includes protected label fields on batches
   assert.doesNotMatch(api, /\bMobileCoreTask\b/)
 })
 
-test('report uses current user, two quantity inputs, real shift and scannable sand batch', () => {
+test('report uses current user, two quantity inputs and the real shift', () => {
   const logic = read('pages/core/report/index.js')
   const view = read('pages/core/report/index.wxml')
+  const api = readSource('services/api.ts')
   assert.match(logic, /mingda_display_name/)
-  assert.match(logic, /scanCode/)
   assert.match(logic, /getCoreExecutionOptions/)
+  assert.match(logic, /defectRows/)
+  assert.match(logic, /chooseDefect/)
+  assert.match(logic, /defects:/)
+  assert.match(api, /defects:\s*Array/)
   assert.match(view, /合格数/)
   assert.match(view, /报废数/)
   assert.match(view, /废品原因/)
-  assert.match(view, /混砂批次/)
+  assert.match(view, /options\.defects/)
+  assert.match(view, /选择缺陷/)
+  assert.doesNotMatch(view, /混砂批次/)
   assert.match(view, /是否烘干/)
   assert.equal((view.match(/type="number"/g) || []).length, 2)
 })
 
-test('dry selects a real drying device and carries batch version', () => {
+test('dry supports selecting many batches and carries every batch version', () => {
   const logic = read('pages/core/dry/index.js')
   const view = read('pages/core/dry/index.wxml')
+  const api = read('services/api.js')
   assert.match(logic, /getCoreExecutionOptions/)
   assert.match(logic, /versionNo/)
-  assert.match(logic, /dryCoreBatch/)
+  assert.match(logic, /selectedBatchIds/)
+  assert.match(logic, /toggleBatch/)
+  assert.match(logic, /dryCoreBatches/)
+  assert.match(api, /\/mini\/production\/core-batches\/dry/)
   assert.match(view, /烘干设备/)
+  assert.match(view, /已选 \{\{selectedCount\}\}/)
   assert.match(view, /预计失效时间/)
 })
 

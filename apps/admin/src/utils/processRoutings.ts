@@ -19,6 +19,7 @@ export interface RoutingNodeRecord {
   requireLadle?: boolean
   requireCoreBatch?: boolean
   standardCycleSeconds?: number
+  coolingDurationMinutes?: number
   positionX: number
   positionY: number
   equipmentCodes: string[]
@@ -41,6 +42,7 @@ export interface ProcessRoutingRecord {
   sourceVersionId?: string
   createdByName?: string
   remark?: string
+  recycledAt?: string
   createdAt: string
   updatedAt: string
   productCodes: string[]
@@ -54,7 +56,15 @@ export interface ProcessRoutingRecord {
 }
 
 export interface RoutingOptions {
-  products: Array<{ code: string; name: string; type: string; materialGradeCode: string; materialGradeName: string }>
+  products: Array<{
+    code: string
+    name: string
+    type: string
+    materialGradeCode: string
+    materialGradeName: string
+    assignedRoutingCode?: string
+    assignedRoutingName?: string
+  }>
   operations: Array<{
     code: string
     name: string
@@ -85,6 +95,10 @@ export function fetchProcessRoutings(params: Record<string, string | undefined>)
   return apiRequest<ProcessRoutingRecord[]>(`/admin/modeling/routings${queryString(params)}`)
 }
 
+export function fetchRecycledProcessRoutings() {
+  return fetchProcessRoutings({ recycled: 'true' })
+}
+
 export function fetchProcessRoutingOptions() {
   return apiRequest<RoutingOptions>('/admin/modeling/routings/options')
 }
@@ -111,6 +125,14 @@ export function activateProcessRouting(id: string) {
 
 export function disableProcessRouting(id: string) {
   return apiRequest<ProcessRoutingRecord>(`/admin/modeling/routings/${id}/disable`, { method: 'POST' })
+}
+
+export function recycleProcessRouting(id: string) {
+  return apiRequest<ProcessRoutingRecord>(`/admin/modeling/routings/${id}/recycle`, { method: 'POST' })
+}
+
+export function restoreProcessRouting(id: string) {
+  return apiRequest<ProcessRoutingRecord>(`/admin/modeling/routings/${id}/restore`, { method: 'POST' })
 }
 
 export function createProcessRoutingVersion(id: string) {

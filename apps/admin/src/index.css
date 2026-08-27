@@ -80,15 +80,6 @@ a {
   width: 100%;
 }
 
-.core-inventory-query {
-  align-items: flex-start;
-}
-
-.core-inventory-query .ant-segmented {
-  max-width: 100%;
-  overflow-x: auto;
-}
-
 .core-inventory-ledger {
   margin-top: 16px;
 }
@@ -215,10 +206,6 @@ a {
 
 .production-status-filters .ant-btn {
   min-width: 64px;
-}
-
-.production-heat-filters {
-  margin-bottom: 16px;
 }
 
 .production-form-grid {

@@ -9,6 +9,7 @@ export interface RoutingNodeBody {
   requireLadle?: boolean
   requireCoreBatch?: boolean
   standardCycleSeconds?: number
+  coolingDurationMinutes?: number
   positionX?: number
   positionY?: number
   equipmentCodes?: string[]

@@ -31,7 +31,7 @@
 6. 如果该工单、芯盒从未产生来源批次，则禁止透支并返回“未找到可追溯的砂芯来源批次”。系统不得创建虚假生产批次。
 7. 批次余额小于等于 `0` 时状态保持 `CONSUMED`。
 
-每一段正常扣减或透支都创建 `MoldingCoreConsumption`，记录批次、芯盒、扣减数量、扣减前数量和扣减后数量；同时创建 `CoreInventoryLedger`，记录 `CONSUMED`、负数量变化、报工来源、操作人和报工单号。
+每个受影响批次创建一条 `MoldingCoreConsumption`；同一批次同时承担正常扣减和透支时合并数量，满足数据库 `reportId + coreInventoryBatchId` 唯一约束。明细记录批次、芯盒、合计扣减数量、扣减前数量和扣减后数量；同时创建一条 `CoreInventoryLedger`，记录 `CONSUMED`、负数量变化、报工来源、操作人和报工单号。
 
 ## 齐套与净库存
 

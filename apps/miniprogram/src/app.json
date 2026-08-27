@@ -16,7 +16,21 @@
     "pages/core/detail/index",
     "pages/core/report/index",
     "pages/core/dry/index",
-    "pages/core/label/index"
+    "pages/core/label/index",
+    "pages/molding/list/index",
+    "pages/molding/detail/index",
+    "pages/molding/report/index",
+    "pages/pouring/list/index",
+    "pages/pouring/detail/index",
+    "pages/pouring/report/index",
+    "pages/shake-clean/list/index",
+    "pages/shake-clean/detail/index",
+    "pages/shake-clean/shake-report/index",
+    "pages/shake-clean/clean-report/index",
+    "pages/inspection/list/index",
+    "pages/inspection/detail/index",
+    "pages/inspection/report/index",
+    "pages/inspection/rework-report/index"
   ],
   "window": {
     "navigationBarTitleText": "闽大铸件",
@@ -31,11 +45,15 @@
     "list": [
       {
         "pagePath": "pages/home/index",
-        "text": "首页"
+        "text": "首页",
+        "iconPath": "assets/tabbar/home.png",
+        "selectedIconPath": "assets/tabbar/home-active.png"
       },
       {
         "pagePath": "pages/profile/index",
-        "text": "我的"
+        "text": "我的",
+        "iconPath": "assets/tabbar/mine.png",
+        "selectedIconPath": "assets/tabbar/mine-active.png"
       }
     ]
   },

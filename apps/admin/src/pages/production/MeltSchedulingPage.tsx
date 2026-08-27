@@ -30,12 +30,17 @@ function isFinitePositive(value: number) {
   return Number.isFinite(value) && value > 0
 }
 
+function meltPoolOrderKey(order: WorkOrderRecord) {
+  return `${order.id}:${order.meltRoutingNodeId || 'legacy'}`
+}
+
 export function MeltSchedulingPage() {
   const [form] = Form.useForm<ScheduleForm>()
   const [groups, setGroups] = useState<MeltPoolGroup[]>([])
   const [materialCode, setMaterialCode] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [routingNodeIds, setRoutingNodeIds] = useState<Record<string, string>>({})
   const [options, setOptions] = useState<Awaited<ReturnType<typeof fetchMeltPoolOptions>> | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -109,6 +114,7 @@ export function MeltSchedulingPage() {
       setMaterialCode(nextMaterial)
       setSelectedIds([])
       setQuantities({})
+      setRoutingNodeIds({})
       setOptions(null)
       if (nextMaterial) await loadOptions(nextMaterial, requestId)
       else if (mountedRef.current && optionsRequestIdRef.current === requestId) {
@@ -163,6 +169,7 @@ export function MeltSchedulingPage() {
     setMaterialCode(code)
     setSelectedIds([])
     setQuantities({})
+    setRoutingNodeIds({})
     form.resetFields()
     setOptions(null)
     setLoading(true)
@@ -171,9 +178,13 @@ export function MeltSchedulingPage() {
     await loadOptions(code, requestId)
   }, [form, loadOptions])
 
-  const selectedOrders = useMemo(() => (currentGroup?.orders || []).filter((order) => selectedIds.includes(order.id)), [currentGroup, selectedIds])
+  const selectedOrders = useMemo(() => (currentGroup?.orders || []).filter((order) => selectedIds.includes(meltPoolOrderKey(order))), [currentGroup, selectedIds])
+  const routingNodeFor = (order: WorkOrderRecord) => {
+    const nodes = order.meltRoutingNodes || []
+    return order.meltRoutingNodeId || routingNodeIds[meltPoolOrderKey(order)] || (nodes.length === 1 ? nodes[0].id : '')
+  }
   const targetWeightKg = roundWeight(selectedOrders.reduce((sum, order) => {
-    const quantity = Number(quantities[order.id])
+    const quantity = Number(quantities[meltPoolOrderKey(order)])
     const unitGrossWeightKg = Number(order.unitGrossWeightKg)
     if (!isFinitePositive(quantity) || !isFinitePositive(unitGrossWeightKg)) return sum
     const allocationWeightKg = roundWeight(quantity * unitGrossWeightKg)
@@ -181,7 +192,7 @@ export function MeltSchedulingPage() {
     return isFinitePositive(allocationWeightKg) && Number.isFinite(nextTotal) ? nextTotal : sum
   }, 0))
   const totalQuantity = selectedOrders.reduce((sum, order) => {
-    const quantity = Number(quantities[order.id])
+    const quantity = Number(quantities[meltPoolOrderKey(order)])
     const nextTotal = sum + quantity
     return isFinitePositive(quantity) && Number.isFinite(nextTotal) ? nextTotal : sum
   }, 0)
@@ -216,7 +227,7 @@ export function MeltSchedulingPage() {
       if (!availableTeams.some((team) => team.code === values.teamCode)) throw new Error('所选班组不属于设备所在车间，请重新选择')
       if (isOverCapacity) throw new Error(`当前组合超出单炉容量 ${Math.abs(remainingCapacityKg).toFixed(2)} kg`)
       if (selectedOrders.some((order) => {
-        const quantity = Number(quantities[order.id])
+        const quantity = Number(quantities[meltPoolOrderKey(order)])
         const remainingQuantity = Number(order.remainingQuantity)
         return !Number.isInteger(quantity) || !isFinitePositive(quantity) || !isFinitePositive(remainingQuantity) || quantity > remainingQuantity
       })) {
@@ -225,7 +236,10 @@ export function MeltSchedulingPage() {
       if (selectedOrders.some((order) => !isFinitePositive(Number(order.unitGrossWeightKg)))) {
         throw new Error('选中工单的单件浇注毛重异常，请检查工单数据')
       }
-      if (selectedOrders.some((order) => !isFinitePositive(roundWeight(Number(quantities[order.id]) * Number(order.unitGrossWeightKg))))) {
+      if (selectedOrders.some((order) => (order.meltRoutingNodes || []).length > 1 && !routingNodeFor(order))) {
+        throw new Error('请选择每个工单对应的熔炼工序')
+      }
+      if (selectedOrders.some((order) => !isFinitePositive(roundWeight(Number(quantities[meltPoolOrderKey(order)]) * Number(order.unitGrossWeightKg))))) {
         throw new Error('选中工单的目标铁水重量超出有效数值范围，请调整分配件数')
       }
       const payload = {
@@ -236,7 +250,7 @@ export function MeltSchedulingPage() {
         teamCode: values.teamCode,
         plannedStartAt: values.plannedStartAt.toISOString(),
         plannedFinishAt: values.plannedFinishAt.toISOString(),
-        allocations: selectedOrders.map((order) => ({ workOrderId: order.id, quantity: quantities[order.id] })),
+        allocations: selectedOrders.map((order) => ({ workOrderId: order.id, quantity: quantities[meltPoolOrderKey(order)], routingNodeId: routingNodeFor(order) || undefined })),
       }
       setSubmitting(true)
       let heat
@@ -255,6 +269,7 @@ export function MeltSchedulingPage() {
       if (!mountedRef.current) return
       setSelectedIds([])
       setQuantities({})
+      setRoutingNodeIds({})
       form.resetFields()
       setOptions(null)
       setDataStale(true)
@@ -276,8 +291,16 @@ export function MeltSchedulingPage() {
     { title: '计划交期', dataIndex: 'plannedDeliveryDate', key: 'plannedDeliveryDate', width: 105 },
     { title: '优先级', dataIndex: 'priority', key: 'priority', width: 80, render: (value: string) => value === 'URGENT' ? <Tag color="red">紧急</Tag> : <Tag>普通</Tag> },
     {
+      title: '熔炼工序', key: 'routingNode', width: 145,
+      render: (_, order) => {
+        const nodes = order.meltRoutingNodes || []
+        if (nodes.length <= 1) return nodes[0]?.name || '-'
+        return <Select size="small" value={routingNodeFor(order) || undefined} disabled={!selectedIds.includes(meltPoolOrderKey(order))} placeholder="请选择工序" style={{ width: '100%' }} options={nodes.map((node) => ({ value: node.id, label: `${node.name}（${node.code}）` }))} onChange={(value) => setRoutingNodeIds((current) => ({ ...current, [meltPoolOrderKey(order)]: value }))} />
+      },
+    },
+    {
       title: '本炉分配', key: 'quantity', width: 115,
-      render: (_, order) => <InputNumber disabled={!selectedIds.includes(order.id)} min={1} max={order.remainingQuantity} precision={0} value={quantities[order.id]} placeholder="件数" onChange={(value) => setQuantities((current) => ({ ...current, [order.id]: Number(value || 0) }))} />,
+        render: (_, order) => <InputNumber disabled={!selectedIds.includes(meltPoolOrderKey(order))} min={1} max={order.remainingQuantity} precision={0} value={quantities[meltPoolOrderKey(order)]} placeholder="件数" onChange={(value) => setQuantities((current) => ({ ...current, [meltPoolOrderKey(order)]: Number(value || 0) }))} />,
     },
   ]
 
@@ -294,7 +317,7 @@ export function MeltSchedulingPage() {
           <Card className="melt-pool-panel">
             <ResizableTable
               storageKey="melt-pool-widths"
-              rowKey="id"
+              rowKey={meltPoolOrderKey}
               columns={columns}
               dataSource={currentGroup?.orders || []}
               loading={loading}
@@ -304,7 +327,7 @@ export function MeltSchedulingPage() {
                 onChange: (keys) => {
                   const ids = keys.map(String)
                   setSelectedIds(ids)
-                  setQuantities((current) => Object.fromEntries(ids.map((id) => [id, current[id] || currentGroup?.orders.find((order) => order.id === id)?.remainingQuantity || 0])))
+                  setQuantities((current) => Object.fromEntries(ids.map((id) => [id, current[id] || currentGroup?.orders.find((order) => meltPoolOrderKey(order) === id)?.remainingQuantity || 0])))
                 },
               }}
             />

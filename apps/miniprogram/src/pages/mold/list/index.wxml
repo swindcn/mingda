@@ -1,62 +1,61 @@
-<view class="mold-list-page">
-  <view class="list-content">
-    <view class="search-box">
-      <text class="search-icon">⌕</text>
-      <input value="{{keyword}}" placeholder="搜索需求编号、客户、产品、供应商或状态等" bindinput="onKeywordInput" />
-    </view>
+<view class="page">
+  <view class="search-box">
+    <image class="search-icon" src="/assets/icons/search.svg" />
+    <input value="{{keyword}}" placeholder="搜索需求编号、客户、产品、供应商或状态" placeholder-style="color:#98a2b3" bindinput="onKeywordInput" />
+  </view>
 
-    <view class="archive-tabs">
-      <view
-        wx:for="{{archiveTabs}}"
-        wx:key="key"
-        class="archive-tab {{archiveTab === item.key ? 'archive-tab-active' : ''}}"
-        data-key="{{item.key}}"
-        bindtap="onArchiveTabTap"
-      >
-        {{item.label}}
-      </view>
+  <view class="tab-bar cols-3">
+    <view
+      wx:for="{{archiveTabs}}"
+      wx:key="key"
+      class="tab {{archiveTab === item.key ? 'tab-active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="onArchiveTabTap"
+    >
+      {{item.label}}
     </view>
+  </view>
 
+  <view class="card-list">
     <view class="mold-card" wx:for="{{molds}}" wx:key="id" bindtap="openDetail" data-id="{{item.id}}">
       <view class="card-head">
         <text class="code">{{item.code}}</text>
-        <text class="status status-{{item.statusTone}}">{{item.status}}</text>
+        <text class="badge badge-{{item.statusTone === 'pending' ? 'pending' : item.statusTone === 'done' ? 'done' : 'active'}}">{{item.status}}</text>
       </view>
       <view wx:if="{{!isSupplierEmployee}}" class="customer">{{item.customerName}}</view>
-      <view wx:if="{{!isSupplierEmployee}}" class="field-row">
-        <text class="label">产品：</text>
-        <text class="value">{{item.productCode}} / {{item.productName}}</text>
-      </view>
-      <view wx:else class="field-row">
-        <text class="label">产品：</text>
-        <text class="value">{{item.productName}}</text>
+      <view class="field-row product-row">
+        <text class="field-label">产品</text>
+        <text class="field-value">{{isSupplierEmployee ? item.productName : item.productCode + ' / ' + item.productName}}</text>
       </view>
       <view class="field-grid">
-        <view class="field-row">
-          <text class="label">模具类型：</text>
-          <text class="value">{{item.moldType}}</text>
+        <view class="field-cell">
+          <text class="field-label">模具类型</text>
+          <text class="field-value text-ellipsis">{{item.moldType}}</text>
         </view>
-        <view class="field-row">
-          <text class="label">跟单人：</text>
-          <text class="value">{{item.followerName}}</text>
+        <view class="field-cell">
+          <text class="field-label">跟单人</text>
+          <text class="field-value text-ellipsis">{{item.followerName}}</text>
         </view>
-      </view>
-      <view class="field-row">
-        <text class="label">供应商：</text>
-        <text class="value">{{item.supplierName}}</text>
+        <view class="field-cell field-cell-wide">
+          <text class="field-label">供应商</text>
+          <text class="field-value text-ellipsis">{{item.supplierName}}</text>
+        </view>
       </view>
       <view class="date-row">
-        <view>
-          <text class="label">客户告知：</text>
-          <text>{{item.notifiedDate}}</text>
+        <view class="date-cell">
+          <text class="field-label">客户告知</text>
+          <text class="date-value">{{item.notifiedDate}}</text>
         </view>
-        <view>
-          <text class="label">期望完成：</text>
-          <text>{{item.expectedDate}}</text>
+        <view class="date-cell date-cell-right">
+          <text class="field-label">期望完成</text>
+          <text class="date-value">{{item.expectedDate}}</text>
         </view>
       </view>
     </view>
 
-    <view wx:if="{{!loading && !molds.length}}" class="empty-state">暂无模具开发任务</view>
+    <view wx:if="{{!loading && !molds.length}}" class="empty-state">
+      <image class="empty-img" src="/assets/icons/empty-box.svg" />
+      <view>暂无模具开发任务</view>
+    </view>
   </view>
 </view>

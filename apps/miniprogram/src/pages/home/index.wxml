@@ -1,8 +1,17 @@
 <view class="home-page">
   <view class="content">
+    <!-- 顶部问候 -->
+    <view class="greeting">
+      <view class="greeting-text">
+        <view class="greeting-title">您好，{{username}}</view>
+        <view class="greeting-sub">{{todoCount}} 个待办 · {{moldCount}} 项模具开发</view>
+      </view>
+    </view>
+
+    <!-- 待办区 -->
     <view class="section-head">
       <text class="section-title">待办事项</text>
-      <text class="more-link" bindtap="goTodos">更多 →</text>
+      <text class="more-link" bindtap="goTodos">查看全部 ›</text>
     </view>
 
     <scroll-view class="todo-scroll" scroll-y>
@@ -16,33 +25,74 @@
         <view class="todo-main">
           <view class="todo-line">
             <text class="todo-title">{{item.title}}</text>
-            <text class="priority priority-{{item.priorityTone}}">{{item.priority}}</text>
-            <text class="module-tag">{{item.moduleName}}</text>
+            <text class="priority-tag priority-tag-{{item.priorityTone}}">{{item.priority}}</text>
+            <text class="badge badge-muted module-tag">{{item.moduleName}}</text>
           </view>
           <view class="todo-meta">
-            <text class="clock">◷</text>
+            <image class="clock-icon" src="/assets/icons/clock.svg" />
             <text>{{item.stateText}}</text>
-            <text>·</text>
+            <text class="dot">·</text>
             <text>{{item.dueText}}</text>
           </view>
         </view>
-        <text class="chevron">›</text>
+        <image class="chevron-icon" src="/assets/icons/chevron-right.svg" />
+      </view>
+
+      <view wx:if="{{!loading && !todos.length}}" class="empty-inline">
+        <image class="empty-img" src="/assets/icons/empty-box.svg" />
+        <view class="empty-text">暂无待办事项</view>
       </view>
     </scroll-view>
 
-    <view class="section-title grid-title">功能入口</view>
+    <!-- 功能入口 -->
+    <view class="section-head section-head-spaced">
+      <text class="section-title">功能入口</text>
+    </view>
     <view class="feature-grid">
-      <view class="feature-card" bindtap="goMolds">
-        <view class="feature-icon">⌘</view>
+      <view wx:if="{{canViewMolds}}" class="feature-card feature-card-mold" bindtap="goMolds">
+        <view class="feature-icon feature-icon-mold">
+          <image src="/assets/icons/mold.svg" />
+        </view>
         <view class="feature-text">模具开发</view>
+        <view class="feature-extra">共 {{moldCount}} 项</view>
       </view>
-      <view wx:if="{{canViewHeats}}" class="feature-card" bindtap="goHeats">
-        <view class="feature-icon heat-feature-icon">火</view>
+      <view wx:if="{{canViewHeats}}" class="feature-card feature-card-heat" bindtap="goHeats">
+        <view class="feature-icon feature-icon-heat">
+          <image src="/assets/icons/heat.svg" />
+        </view>
         <view class="feature-text">熔炼任务</view>
+        <view class="feature-extra">工序执行</view>
       </view>
-      <view wx:if="{{canViewCoreTasks}}" class="feature-card" bindtap="goCoreTasks">
-        <view class="feature-icon core-feature-icon">芯</view>
+      <view wx:if="{{canViewCoreTasks}}" class="feature-card feature-card-core" bindtap="goCoreTasks">
+        <view class="feature-icon feature-icon-core">
+          <image src="/assets/icons/core.svg" />
+        </view>
         <view class="feature-text">制芯任务</view>
+        <view class="feature-extra">报工 / 烘干</view>
+      </view>
+      <view wx:if="{{canViewMoldingTasks}}" class="feature-card feature-card-molding" bindtap="goMoldingTasks">
+        <view class="feature-icon feature-icon-molding">
+          <image src="/assets/icons/molding.svg" />
+        </view>
+        <view class="feature-text">造型下芯</view>
+        <view class="feature-extra">开工 / 报工</view>
+      </view>
+      <view wx:if="{{canViewPouringTasks}}" class="feature-card feature-card-pouring" bindtap="goPouringTasks">
+        <view class="feature-icon feature-icon-pouring">
+          <image src="/assets/icons/pouring.svg" />
+        </view>
+        <view class="feature-text">合型浇注</view>
+        <view class="feature-extra">包次绑定 / 报工</view>
+      </view>
+      <view wx:if="{{canViewShakeCleanTasks}}" class="feature-card feature-card-shake" bindtap="goShakeCleanTasks">
+        <view class="feature-icon feature-icon-shake"><image src="/assets/icons/shake.svg" /></view>
+        <view class="feature-text">落砂清理</view>
+        <view class="feature-extra">落砂 / 清理报工</view>
+      </view>
+      <view wx:if="{{canViewInspectionTasks}}" class="feature-card feature-card-inspection" bindtap="goInspectionTasks">
+        <view class="feature-icon feature-icon-inspection"><image src="/assets/icons/shield-check.svg" /></view>
+        <view class="feature-text">成品终检</view>
+        <view class="feature-extra">质检 / 返修</view>
       </view>
     </view>
   </view>

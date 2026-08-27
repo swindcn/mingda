@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test:heat-execution": "node --test tests/heat-execution-concurrency.test.mjs",
     "test:heat-schedule-drag": "node --test tests/heat-schedule-drag.test.mjs",
+    "test:work-order-routing-execution-ui": "node --test tests/work-order-routing-execution-ui.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -3,12 +3,16 @@ import { AdminAuthGuard } from '../shared/admin-auth.guard'
 import type { RequestWithAdmin } from '../shared/admin-context'
 import { ProductionPermissionGuard } from './production-permission.guard'
 import { ProductionService } from './production.service'
+import { WorkOrderRoutingExecutionService } from './work-order-routing-execution.service'
 import type { WorkOrderBody } from './production.types'
 
 @Controller('admin/production/work-orders')
 @UseGuards(AdminAuthGuard, ProductionPermissionGuard)
 export class WorkOrderController {
-  constructor(private readonly production: ProductionService) {}
+  constructor(
+    private readonly production: ProductionService,
+    private readonly routingExecution: WorkOrderRoutingExecutionService,
+  ) {}
 
   @Get('options')
   options() {
@@ -27,6 +31,16 @@ export class WorkOrderController {
   @Get()
   list(@Req() request: RequestWithAdmin, @Query('keyword') keyword?: string, @Query('status') status?: string) {
     return this.production.listWorkOrders(request, keyword?.trim(), status)
+  }
+
+  @Get(':id/routing-execution')
+  routingExecutionSummary(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.routingExecution.getSummary(request, id)
+  }
+
+  @Post(':id/melt-release')
+  releaseMelt(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: { routingNodeId?: string }) {
+    return this.routingExecution.releaseMelt(request, id, body?.routingNodeId)
   }
 
   @Get(':id')

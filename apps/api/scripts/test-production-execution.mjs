@@ -300,6 +300,8 @@ try {
       products: { create: { productCode } },
     },
   })
+  const meltOperation = await prisma.operationMaster.create({ data: { code: `${prefix}-MELT`, name: '测试电炉熔炼', section: '熔炼', status: 'ENABLED' } })
+  await prisma.processRoutingNode.create({ data: { routingVersionId: routingVersion.id, operationCode: meltOperation.code, seqNo: 10, routeType: 'MELT_BRANCH' } })
   await prisma.productDefaultRouting.create({ data: { productCode, routingVersionId: routingVersion.id } })
   await prisma.meltRecipe.create({
     data: {
@@ -383,6 +385,8 @@ try {
   })
   if (!/^WO\d{11}$/.test(order.code)) throw new Error(`工单编号格式错误: ${order.code}`)
   if (order.scheduleStatus !== 'PENDING' || order.productionStatus !== 'RELEASED') throw new Error('新工单初始状态错误')
+  const pendingOrders = await request('/admin/production/work-orders?status=PENDING', { headers })
+  if (!pendingOrders.some((item) => item.id === order.id)) throw new Error('待排产状态筛选未返回新建工单')
   if (order.totalNetWeightKg !== 4500 || order.totalMeltWeightKg !== 6500 || order.expectedReturnWeightKg !== 2000) {
     throw new Error('工单重量计算错误')
   }
@@ -395,7 +399,13 @@ try {
 
   const pool = await request('/admin/production/melt-pool', { headers })
   const poolOrder = pool.groups.flatMap((group) => group.orders).find((item) => item.id === order.id)
-  if (!poolOrder || poolOrder.remainingQuantity !== 100 || poolOrder.remainingWeightKg !== 6500) throw new Error('工单未正确进入排产池')
+  if (poolOrder) throw new Error('未释放工单不应进入排产池')
+  const unreleasedOrder = await prisma.workOrder.findUnique({ where: { id: order.id }, select: { meltReleasedAt: true } })
+  if (unreleasedOrder?.meltReleasedAt !== null) throw new Error('新工单不应自动设置熔炼释放时间')
+  await prisma.workOrder.update({ where: { id: order.id }, data: { meltReleasedAt: new Date() } })
+  const releasedPool = await request('/admin/production/melt-pool', { headers })
+  const releasedPoolOrder = releasedPool.groups.flatMap((group) => group.orders).find((item) => item.id === order.id)
+  if (!releasedPoolOrder || releasedPoolOrder.remainingQuantity !== 100 || releasedPoolOrder.remainingWeightKg !== 6500) throw new Error('手动释放工单未正确进入排产池')
 
   const edited = await request(`/admin/production/work-orders/${order.id}`, {
     method: 'PUT',
@@ -582,6 +592,43 @@ try {
     body: JSON.stringify({ furnaceCode, plannedStartAt: '2026-08-30T10:45:00+08:00', plannedFinishAt: '2026-08-30T11:15:00+08:00' }),
   })
   if (adjacentConflicts.conflicts.length) throw new Error('首尾相邻区间不应被识别为冲突')
+  const historicalEnd = new Date(Date.now() - 70 * 60 * 60 * 1000)
+  const historicalStart = new Date(Date.now() - 72 * 60 * 60 * 1000)
+  const pastProbeStart = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  const pastProbeEnd = new Date(Date.now() - 23 * 60 * 60 * 1000)
+  const historicalActiveHeat = await prisma.heatOrder.create({
+    data: {
+      code: `${prefix}-HEAT-HISTORY`,
+      materialGradeCode: grade.code,
+      materialGradeNameSnapshot: grade.name,
+      furnaceCode,
+      furnaceNameSnapshot: '测试9.75吨中频炉',
+      furnaceCapacityKgSnapshot: 9750,
+      actualFurnaceCode: furnaceCode,
+      actualFurnaceNameSnapshot: '测试9.75吨中频炉',
+      workshopCodeSnapshot: workshopCode,
+      workshopNameSnapshot: '测试熔炼车间',
+      recipeCode,
+      recipeNameSnapshot: '测试材质标准配方',
+      recipeVersionSnapshot: 'V1.0',
+      teamCode,
+      teamNameSnapshot: '测试熔炼甲班',
+      plannedStartAt: historicalStart,
+      plannedOutputAt: historicalEnd,
+      plannedFinishAt: historicalEnd,
+      targetWeightKg: 100,
+      status: 'TRANSFERRING',
+      createdByUserId: admin.id,
+    },
+  })
+  const historicalActiveProbe = await request('/admin/production/heat-orders/check-conflicts', {
+    method: 'POST', headers,
+    body: JSON.stringify({ furnaceCode, plannedStartAt: pastProbeStart.toISOString(), plannedFinishAt: pastProbeEnd.toISOString() }),
+  })
+  if (historicalActiveProbe.conflicts.some((item) => item.id === historicalActiveHeat.id)) {
+    throw new Error('历史活动炉次错误占用了不重叠的补排时间段')
+  }
+  await prisma.heatOrder.update({ where: { id: historicalActiveHeat.id }, data: { status: 'COMPLETED' } })
   const unconfirmedConflict = await request('/admin/production/heat-orders', {
     method: 'POST', headers,
     body: JSON.stringify({

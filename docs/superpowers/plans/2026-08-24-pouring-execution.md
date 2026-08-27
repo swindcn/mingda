@@ -1,12 +1,14 @@
 # 合型浇注执行 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 将造型报工形成的待浇砂型批次与熔炼转运包次绑定，实现合型浇注队列、预警、报工扣减、缺陷、撤销和完整追溯。
 
 **Architecture:** 新增独立 `PouringService` 和显式 `PouringMoldBatch` 队列模型。造型报工事务生成待浇批次；浇注报工在可串行化事务内锁定具体转运记录和 FIFO 待浇批次，保存砂型消费、理论/实际重量、缺陷及警告快照。管理端和小程序共用领域服务，权限和数据范围由后端控制。
 
 **Tech Stack:** NestJS、Prisma、PostgreSQL、React、Ant Design、微信原生小程序、Node test scripts。
+
+**Implementation Status:** Completed and verified locally with Docker on 2026-08-24.
 
 ---
 
@@ -17,7 +19,7 @@
 - Create: `apps/api/scripts/test-pouring-calculations.mjs`
 - Modify: `apps/api/package.json`
 
-- [ ] **Step 1: 写计算失败测试**
+- [x] **Step 1: 写计算失败测试**
 
 覆盖以下规则：
 
@@ -37,13 +39,13 @@ assert.deepEqual(allocatePouringMoldBatches(12, [
 assert.throws(() => allocatePouringMoldBatches(16, candidates), /待浇箱数不足/)
 ```
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `npm --prefix apps/api run build && node apps/api/scripts/test-pouring-calculations.mjs`
 
 Expected: FAIL，计算模块不存在。
 
-- [ ] **Step 3: 实现纯计算函数**
+- [x] **Step 3: 实现纯计算函数**
 
 实现：
 
@@ -54,7 +56,7 @@ Expected: FAIL，计算模块不存在。
 - 按 `closingTime -> id` 排序的 FIFO 待浇批次分配。
 - 任务队列状态和浇注节点完成判断。
 
-- [ ] **Step 4: 注册并运行计算测试**
+- [x] **Step 4: 注册并运行计算测试**
 
 在 `package.json` 增加 `test:pouring-calculations`，运行后应输出：
 
@@ -68,7 +70,7 @@ Expected: FAIL，计算模块不存在。
 - Modify: `apps/api/prisma/schema.prisma`
 - Modify: `apps/api/src/production/pouring.types.ts`（若文件不存在则创建）
 
-- [ ] **Step 1: 增加枚举和模型**
+- [x] **Step 1: 增加枚举和模型**
 
 新增：
 
@@ -91,7 +93,7 @@ Expected: FAIL，计算模块不存在。
 - `DefectCode -> PouringReportDefect`。
 - `User -> PouringReport` 操作人与撤销人。
 
-- [ ] **Step 2: 增加唯一约束和索引**
+- [x] **Step 2: 增加唯一约束和索引**
 
 至少包含：
 
@@ -105,7 +107,7 @@ Expected: FAIL，计算模块不存在。
 
 `HeatOrderTransfer` 增加 `versionNo`，每次浇注报工和撤销都递增。
 
-- [ ] **Step 3: 生成 Prisma Client 并同步本地数据库**
+- [x] **Step 3: 生成 Prisma Client 并同步本地数据库**
 
 Run:
 
@@ -123,7 +125,7 @@ Expected: schema sync 完成且不删除已有数据。
 - Modify: `apps/api/src/production/molding.service.ts`
 - Modify: `apps/api/scripts/test-molding-execution.mjs`
 
-- [ ] **Step 1: 写造型到待浇队列失败测试**
+- [x] **Step 1: 写造型到待浇队列失败测试**
 
 新增断言：
 
@@ -134,23 +136,23 @@ Expected: schema sync 完成且不删除已有数据。
 - 零数量关闭不生成待浇批次。
 - 路线中没有可达浇注汇合节点时，造型报工仍成功但不生成待浇批次。
 
-- [ ] **Step 2: 实现可达浇注节点解析**
+- [x] **Step 2: 实现可达浇注节点解析**
 
 `pouring.queue.ts` 根据工单锁定 `routingVersionId` 和真实 `ProcessRoutingEdge`，从造型节点向后查找 `OperationMaster.pouringMergePoint = true` 的首个可达节点。检测循环并拒绝多个同层候选，防止批次进入错误浇注节点。
 
-- [ ] **Step 3: 在造型报工事务中生成批次**
+- [x] **Step 3: 在造型报工事务中生成批次**
 
 仅当 `goodQty > 0` 且存在可达汇合节点时生成。批次快照保存工单、产品、模具、造型节点和浇注节点信息。
 
-- [ ] **Step 4: 增加历史数据补建**
+- [x] **Step 4: 增加历史数据补建**
 
 实现幂等 `backfillPouringMoldBatches(tx)`：为已有 `ACTIVE`、`goodQty > 0` 且尚无批次的造型报工补建队列。浇注队列首次读取和部署回归脚本均可调用，唯一约束保证重复执行不会重复创建。
 
-- [ ] **Step 5: 增加造型撤销保护**
+- [x] **Step 5: 增加造型撤销保护**
 
 若来源 `PouringMoldBatch` 已有有效 `PouringMoldConsumption`，返回“该造型报工已进入浇注追溯，请先撤销浇注报工”。未被浇注时撤销造型报工，将对应待浇批次置为 `CANCELED`。
 
-- [ ] **Step 6: 运行造型接口回归**
+- [x] **Step 6: 运行造型接口回归**
 
 Run: `env DATABASE_URL='postgresql://mingda:mingda_dev_password@127.0.0.1:5433/mingda_casting?schema=public' API_BASE_URL='http://127.0.0.1:3001/api' npm --prefix apps/api run test:molding-execution`
 
@@ -169,7 +171,7 @@ Expected: PASS，测试清理新增待浇批次。
 - Modify: `apps/api/src/basic-data.controller.ts`
 - Modify: `apps/api/package.json`
 
-- [ ] **Step 1: 写接口失败测试**
+- [x] **Step 1: 写接口失败测试**
 
 覆盖：
 
@@ -185,11 +187,11 @@ Expected: PASS，测试清理新增待浇批次。
 - 撤销精确返还待浇批次，铁水包余额恢复。
 - 旧 `versionNo` 返回 `409`。
 
-- [ ] **Step 2: 实现队列、包次和详情查询**
+- [x] **Step 2: 实现队列、包次和详情查询**
 
 队列按造型任务聚合展示，内部保留具体批次。包次查询绑定所选队列工单并过滤真实 `HeatOrderAllocation`、材质和浇注节点。铁水余额从有效 `PouringReport.actualWeightKg` 汇总，不修改原始转运重量。
 
-- [ ] **Step 3: 实现检查接口**
+- [x] **Step 3: 实现检查接口**
 
 `POST /pouring/check` 输入：
 
@@ -206,7 +208,7 @@ Expected: PASS，测试清理新增待浇批次。
 
 返回理论重量、实际重量默认值、待浇余量、包次余额、提交后余额、超用重量、停留分钟和警告代码。
 
-- [ ] **Step 4: 实现浇注报工事务**
+- [x] **Step 4: 实现浇注报工事务**
 
 正式提交增加 `requestId`、`transferVersionNo`、缺陷和 `confirmedWarningCodes`。事务按以下顺序执行：
 
@@ -219,11 +221,11 @@ Expected: PASS，测试清理新增待浇批次。
 7. 扣减待浇余量并更新批次状态。
 8. 递增转运记录版本。
 
-- [ ] **Step 5: 实现撤销事务**
+- [x] **Step 5: 实现撤销事务**
 
 管理端撤销不删除报工，按消费明细返还原待浇批次并重新计算状态，递增转运记录版本，保存撤销人、时间和原因。预留后续工序引用校验入口。
 
-- [ ] **Step 6: 注册控制器和权限**
+- [x] **Step 6: 注册控制器和权限**
 
 管理端：
 
@@ -238,7 +240,7 @@ Expected: PASS，测试清理新增待浇批次。
 
 路由、控制器、默认管理员权限和角色权限树必须同时注册。
 
-- [ ] **Step 7: 运行后端测试**
+- [x] **Step 7: 运行后端测试**
 
 Run:
 
@@ -262,7 +264,7 @@ Expected: 全部 PASS，测试数据完整清理。
 - Modify: `apps/admin/src/layouts/AppLayout.tsx`
 - Modify: `apps/admin/src/utils/roles.ts`
 
-- [ ] **Step 1: 写管理端页面失败测试**
+- [x] **Step 1: 写管理端页面失败测试**
 
 断言：
 
@@ -274,19 +276,19 @@ Expected: 全部 PASS，测试数据完整清理。
 - 撤销按钮受 `production.pouring.reverse` 控制。
 - 页面调用真实 `/admin/production/pouring/*` 接口。
 
-- [ ] **Step 2: 实现 API 类型和调用封装**
+- [x] **Step 2: 实现 API 类型和调用封装**
 
 定义队列、包次、预检、报工、详情、缺陷和撤销类型。所有请求使用现有 `apiRequest`，不得使用本地状态假成功。
 
-- [ ] **Step 3: 实现队列与报工页面**
+- [x] **Step 3: 实现队列与报工页面**
 
 页面遵循 BOM/造型列表标准。报工表单分为铁水包、待浇任务、浇注成果三个区块；理论重量只读，实际重量可修改；超时和超重合并到一个确认框。
 
-- [ ] **Step 4: 实现详情和撤销**
+- [x] **Step 4: 实现详情和撤销**
 
 详情展示炉次、包次、造型批次分配、重量、缺陷、警告、操作人与时间。撤销填写原因，成功后刷新真实接口。
 
-- [ ] **Step 5: 运行管理端测试与构建**
+- [x] **Step 5: 运行管理端测试与构建**
 
 Run:
 
@@ -313,7 +315,7 @@ Expected: PASS；允许保留现有大包体积告警，不允许 TypeScript 错
 - Modify: `apps/miniprogram/src/services/api.ts`
 - Modify: `apps/miniprogram/src/types/business.ts`
 
-- [ ] **Step 1: 写小程序失败测试**
+- [x] **Step 1: 写小程序失败测试**
 
 断言：
 
@@ -326,19 +328,19 @@ Expected: PASS；允许保留现有大包体积告警，不允许 TypeScript 错
 - 超时和超重统一二次确认。
 - 接口使用真实 `/mini/production/pouring/*`。
 
-- [ ] **Step 2: 实现真实 API 和业务类型**
+- [x] **Step 2: 实现真实 API 和业务类型**
 
 复用现有请求层的超时、登录失效和 `409` 处理；图片功能不在本模块范围内。
 
-- [ ] **Step 3: 实现待浇列表**
+- [x] **Step 3: 实现待浇列表**
 
 卡片按最早合型时间排列，显示派工单、产品、剩余箱数、停留时长和颜色状态。支持扫码造型派工单、下拉刷新和状态标签页。
 
-- [ ] **Step 4: 实现报工页**
+- [x] **Step 4: 实现报工页**
 
 按步骤选择工位、具体包次和待浇任务；支持快捷数量、实际重量、缺陷明细、预检及统一确认。`requestId` 在页面实例内保持稳定，重复点击不产生重复报工。
 
-- [ ] **Step 5: 运行小程序测试和构建**
+- [x] **Step 5: 运行小程序测试和构建**
 
 Run: `npm --prefix apps/miniprogram test`
 
@@ -351,11 +353,11 @@ Expected: 全部 PASS，`apps/miniprogram/dist` 已同步。
 - Modify: `docs/product/modeling-context.md`
 - Modify: `docs/superpowers/plans/2026-08-24-pouring-execution.md`
 
-- [ ] **Step 1: 固化长期业务规则**
+- [x] **Step 1: 固化长期业务规则**
 
 记录待浇批次、同工单/材质/汇合节点匹配、重量超用、停留预警、工序缺陷、撤销顺序、幂等和并发锁规则，并链接设计文档。
 
-- [ ] **Step 2: 执行完整回归**
+- [x] **Step 2: 执行完整回归**
 
 Run:
 
@@ -370,7 +372,7 @@ npm --prefix apps/miniprogram test
 git diff --check
 ```
 
-- [ ] **Step 3: 重建并验证 Docker**
+- [x] **Step 3: 重建并验证 Docker**
 
 Run:
 

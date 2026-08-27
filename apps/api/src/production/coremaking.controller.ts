@@ -8,6 +8,7 @@ import type {
   CreateCoreTasksBody,
   DispatchCoreTaskBody,
   DryCoreBatchBody,
+  DryCoreBatchesBody,
   LockCoreBatchBody,
   ReportCoreTaskBody,
   ScrapCoreBatchBody,
@@ -57,6 +58,11 @@ export class CoremakingController {
     return this.coremaking.getCoreTaskOptions(request, id)
   }
 
+  @Get('core-tasks/:id/defect-options')
+  defectOptions(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.coremaking.getCoreDefectOptions(request, id)
+  }
+
   @Put('core-tasks/:id/dispatch')
   dispatch(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: DispatchCoreTaskBody) {
     return this.coremaking.dispatchTask(request, id, body)
@@ -90,6 +96,11 @@ export class CoremakingController {
   @Get('core-inventory/:id')
   inventoryDetail(@Req() request: RequestWithAdmin, @Param('id') id: string) {
     return this.coremaking.getInventoryBatch(request, id)
+  }
+
+  @Post('core-batches/dry')
+  dryMany(@Req() request: RequestWithAdmin, @Body() body: DryCoreBatchesBody) {
+    return this.coremaking.dryBatches(request, body)
   }
 
   @Post('core-batches/:id/dry')
@@ -133,6 +144,11 @@ export class MobileCoremakingController {
     return this.coremaking.getMobileCoreExecutionOptions(request, id)
   }
 
+  @Get('core-tasks/:id/defect-options')
+  defectOptions(@Req() request: RequestWithAdmin, @Param('id') id: string) {
+    return this.coremaking.getCoreDefectOptions(request, id, true)
+  }
+
   @Get('core-tasks/:id/drying-batches')
   dryingBatches(@Req() request: RequestWithAdmin, @Param('id') id: string) {
     return this.coremaking.listDryingBatches(request, id)
@@ -146,6 +162,11 @@ export class MobileCoremakingController {
   @Post('core-tasks/:id/report')
   report(@Req() request: RequestWithAdmin, @Param('id') id: string, @Body() body: ReportCoreTaskBody) {
     return this.coremaking.reportTask(request, id, body, true)
+  }
+
+  @Post('core-batches/dry')
+  dryMany(@Req() request: RequestWithAdmin, @Body() body: DryCoreBatchesBody) {
+    return this.coremaking.dryBatches(request, body, true)
   }
 
   @Post('core-batches/:id/dry')

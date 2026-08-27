@@ -8,6 +8,25 @@ import {
   MobileCoreTaskSummary,
   MobileHeatOrder,
   TodoItem,
+  MobileMoldingTask,
+  MoldingDefectOption,
+  MobilePouringTask,
+  MobilePouringOptions,
+  MobilePouringCheck,
+  MobilePouringReport,
+  PouringDefectOption,
+  MobileShakeCleanOptions,
+  ShakeCleanCheck,
+  ShakeCleanDefectOption,
+  ShakeCleanListResponse,
+  ShakeCleanReports,
+  ShakeCleanTrace,
+  InspectionTaskListResponse,
+  InspectionTaskDetail,
+  InspectionOptions,
+  InspectionDefectOption,
+  InspectionReportRecord,
+  CleaningReworkTask,
 } from '../types/business'
 import { request } from '../utils/request'
 import { uploadFile } from '../utils/request'
@@ -176,10 +195,12 @@ export function reportCoreTask(id: string, data: {
   versionNo: number
   qualifiedQuantity: number
   scrapQuantity: number
+  teamCode: string
   shiftCode: string
   sandBatchCode?: string
   dryingRequired: boolean
   defectReason?: string
+  defects?: Array<{ defectCode: string; quantity: number; remark?: string }>
   remark?: string
 }) {
   return request<CoreReportResult>({ url: `/mini/production/core-tasks/${encodeURIComponent(id)}/report`, method: 'POST', data })
@@ -191,4 +212,96 @@ export function getCoreDryingBatches(id: string) {
 
 export function dryCoreBatch(id: string, data: { versionNo: number; equipmentCode: string }) {
   return request<CoreInventoryBatch>({ url: `/mini/production/core-batches/${encodeURIComponent(id)}/dry`, method: 'POST', data })
+}
+
+export function dryCoreBatches(data: { equipmentCode: string; batches: Array<{ id: string; versionNo: number }> }) {
+  return request<CoreInventoryBatch[]>({ url: '/mini/production/core-batches/dry', method: 'POST', data })
+}
+
+export function getMoldingTasks(status?: string) {
+  return request<MobileMoldingTask[]>({ url: `/mini/production/molding-tasks${status ? `?status=${encodeURIComponent(status)}` : ''}` })
+}
+
+export function getMoldingTaskDetail(id: string) {
+  return request<MobileMoldingTask>({ url: `/mini/production/molding-tasks/${encodeURIComponent(id)}` })
+}
+
+export function getMoldingTaskByCode(code: string) {
+  return request<MobileMoldingTask>({ url: `/mini/production/molding-tasks/by-code/${encodeURIComponent(code)}` })
+}
+
+export function getMoldingDefects(id: string) {
+  return request<MoldingDefectOption[]>({ url: `/mini/production/molding-tasks/${encodeURIComponent(id)}/defect-options` })
+}
+
+export function startMoldingTask(id: string, versionNo: number) {
+  return request<MobileMoldingTask>({ url: `/mini/production/molding-tasks/${encodeURIComponent(id)}/start`, method: 'POST', data: { versionNo } })
+}
+
+export function reportMoldingTask(id: string, data: {
+  versionNo: number
+  requestId: string
+  goodQty: number
+  scrapQty: number
+  finishTask: boolean
+  earlyCompletionReason?: string
+  defects: Array<{ defectCode: string; quantity: number; remark?: string }>
+  remark?: string
+}) {
+  return request<MobileMoldingTask>({ url: `/mini/production/molding-tasks/${encodeURIComponent(id)}/report`, method: 'POST', data })
+}
+
+export function getPouringTasks(status?: string) {
+  return request<MobilePouringTask[]>({ url: `/mini/production/pouring-tasks${status ? `?status=${encodeURIComponent(status)}` : ''}` })
+}
+
+export function getPouringOptions(id: string) {
+  return request<MobilePouringOptions>({ url: `/mini/production/pouring-tasks/${encodeURIComponent(id)}/options` })
+}
+
+export function getPouringReports(id: string) {
+  return request<MobilePouringReport[]>({ url: `/mini/production/pouring-tasks/${encodeURIComponent(id)}/reports` })
+}
+
+export function getPouringDefects(id: string) {
+  return request<PouringDefectOption[]>({ url: `/mini/production/pouring-tasks/${encodeURIComponent(id)}/defect-options` })
+}
+
+export interface PouringInput { moldingTaskId: string; heatOrderTransferId: string; stationEquipmentCode: string; goodQty: number; scrapQty: number; actualWeightKg?: number }
+
+export function checkPouring(data: PouringInput) {
+  return request<MobilePouringCheck>({ url: '/mini/production/pouring/check', method: 'POST', data })
+}
+
+export function reportPouring(data: PouringInput & { requestId: string; transferVersionNo: number; confirmedWarningCodes: string[]; defects: Array<{ defectCode: string; quantity: number; remark?: string }>; remark?: string }) {
+  return request<MobilePouringReport>({ url: '/mini/production/pouring/reports', method: 'POST', data })
+}
+
+export function getShakeCleanTasks(params: { keyword?: string; status?: string; page?: number; pageSize?: number; cursor?: string }) {
+  const query = Object.entries(params).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`).join('&')
+  return request<ShakeCleanListResponse>({ url: `/mini/production/shake-clean-tasks${query ? `?${query}` : ''}` })
+}
+export function getShakeCleanOptions(id: string) { return request<MobileShakeCleanOptions>({ url: `/mini/production/shake-clean-tasks/${encodeURIComponent(id)}/options` }) }
+export function getShakeCleanReports(id: string) { return request<ShakeCleanReports>({ url: `/mini/production/shake-clean-tasks/${encodeURIComponent(id)}/reports` }) }
+export function getShakeCleanTrace(id: string) { return request<ShakeCleanTrace>({ url: `/mini/production/shake-clean-tasks/${encodeURIComponent(id)}/trace` }) }
+export function getShakeCleanDefects(id: string) { return request<ShakeCleanDefectOption[]>({ url: `/mini/production/shake-clean-tasks/${encodeURIComponent(id)}/defect-options` }) }
+export function checkShakeClean(data: { moldingTaskId: string; quantity: number }) { return request<ShakeCleanCheck>({ url: '/mini/production/shake-clean/shake/check', method: 'POST', data }) }
+export interface ShakeCleanReportInput { moldingTaskId: string; requestId: string; stationEquipmentCode: string; goodQty: number; scrapQty: number; batchVersions: Array<{ id: string; versionNo: number }>; defects: Array<{ defectCode: string; quantity: number; remark?: string }>; remark?: string }
+export function reportShakeClean(data: ShakeCleanReportInput & { confirmedEarlyShake: boolean }) { return request<Record<string, unknown>>({ url: '/mini/production/shake-clean/shake/reports', method: 'POST', data }) }
+export function reportCleaning(data: ShakeCleanReportInput & { riseringScrapWeightKg?: number }) { return request<Record<string, unknown>>({ url: '/mini/production/shake-clean/cleaning/reports', method: 'POST', data }) }
+
+export function getInspectionTasks(params: { keyword?: string; status?: string; page?: number; pageSize?: number }) {
+  const query = Object.entries(params).filter(([, value]) => value !== undefined && value !== '' && value !== 'ALL').map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`).join('&')
+  return request<InspectionTaskListResponse>({ url: `/mini/production/inspection-tasks${query ? `?${query}` : ''}` })
+}
+export function getInspectionTask(id: string) { return request<InspectionTaskDetail>({ url: `/mini/production/inspection-tasks/${encodeURIComponent(id)}` }) }
+export function getInspectionOptions(id: string) { return request<InspectionOptions>({ url: `/mini/production/inspection-tasks/${encodeURIComponent(id)}/options` }) }
+export function getInspectionDefects(id: string) { return request<InspectionDefectOption[]>({ url: `/mini/production/inspection-tasks/${encodeURIComponent(id)}/defect-options` }) }
+export function reportFinalInspection(data: {
+  workOrderId: string; requestId: string; goodQty: number; reworkQty: number; scrapQty: number; scrapWeightKg?: number
+  batchVersions: Array<{ id: string; versionNo: number }>; defects: Array<{ defectCode: string; quantity: number; remark?: string }>; imageUrl?: string; remark?: string
+}) { return request<InspectionReportRecord>({ url: '/mini/production/inspection/reports', method: 'POST', data }) }
+export function getCleaningReworkTask(id: string) { return request<CleaningReworkTask>({ url: `/mini/production/cleaning-rework-tasks/${encodeURIComponent(id)}` }) }
+export function reportCleaningRework(data: { taskId: string; requestId: string; goodQty: number; scrapQty: number; scrapWeightKg?: number; equipmentCode: string; versionNo: number; remark?: string }) {
+  return request<Record<string, unknown>>({ url: '/mini/production/cleaning-rework/reports', method: 'POST', data })
 }

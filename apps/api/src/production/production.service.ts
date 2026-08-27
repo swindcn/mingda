@@ -20,9 +20,19 @@ import {
   recipeOccupancyMinutes,
 } from './production.calculations'
 import type { AdjustHeatScheduleBody, CompleteHeatOrderBody, HeatConflictBody, HeatOrderBody, StartHeatOrderBody, TransferHeatOrderBody, VersionedActionBody, WorkOrderBody } from './production.types'
+import { releasedMeltRoutingNodeIds } from './work-order-routing-execution.service'
 
 const enabledProductTypes = ['成品', '半成品']
+const workOrderScheduleStatuses = new Set<WorkOrderScheduleStatus>(['PENDING', 'PARTIAL', 'FULL'])
+const workOrderProductionStatuses = new Set<WorkOrderProductionStatus>(['RELEASED', 'IN_PRODUCTION', 'MELT_COMPLETED', 'COMPLETED', 'CLOSED'])
 type ProductionDatabaseClient = PrismaService | Prisma.TransactionClient
+
+function workOrderStatusWhere(status?: string): Prisma.WorkOrderWhereInput {
+  if (!status || status === 'ALL') return {}
+  if (workOrderScheduleStatuses.has(status as WorkOrderScheduleStatus)) return { scheduleStatus: status as WorkOrderScheduleStatus }
+  if (workOrderProductionStatuses.has(status as WorkOrderProductionStatus)) return { productionStatus: status as WorkOrderProductionStatus }
+  throw new BadRequestException('工单状态不正确')
+}
 
 type WorkOrderMasterSnapshot = {
   productCode: string
@@ -123,7 +133,9 @@ export class ProductionService {
         include: { heatOrder: { include: { actualFurnace: true, transfers: true, startedBy: true, completedBy: true } } },
         orderBy: { createdAt: 'asc' as const },
       },
+      meltReleases: { select: { routingNodeId: true, releasedAt: true, releasedByUserId: true } },
       coreTasks: { select: { id: true, status: true, coreBoxCode: true } },
+      moldingTasks: { select: { id: true, code: true, status: true, routingNodeId: true } },
     }
   }
 
@@ -244,7 +256,7 @@ export class ProductionService {
     }
   }
 
-  private workOrderDto(record: any) {
+  private workOrderDto(record: any, meltRoutingNodeId = '') {
     const remainingQuantity = Math.max(0, record.plannedQuantity - record.scheduledQuantity)
     const requiresCoremaking = Boolean(record.routingVersion?.nodes?.some((node: any) => node.operation.section === '制芯'))
     const coreTasks = record.coreTasks || []
@@ -257,6 +269,8 @@ export class ProductionService {
       completed: coreTasks.filter((task: any) => task.status === 'COMPLETED').length,
       canceled: coreTasks.filter((task: any) => task.status === 'CANCELED').length,
     }
+    const requiresMolding = Boolean(record.routingVersion?.nodes?.some((node: any) => node.operation.section === '造型'))
+    const moldingTasks = record.moldingTasks || []
     return {
       id: record.id,
       code: record.code,
@@ -310,11 +324,24 @@ export class ProductionService {
         && (coreBoxCount === 0 || coreTasks.length < coreBoxCount),
       coreTaskCount: coreTasks.length,
       coreTaskSummary,
+      requiresMolding,
+      canGenerateMoldingTask: requiresMolding
+        && !['COMPLETED', 'CLOSED'].includes(record.productionStatus)
+        && moldingTasks.length === 0,
+      moldingTaskCount: moldingTasks.length,
+      moldingTask: moldingTasks[0] || null,
+      meltRoutingNodeId,
+      meltRoutingNodes: record.routingVersion?.nodes?.filter((node: any) => node.operationCode === 'OP-MELT' || node.operation?.section === '熔炼').map((node: any) => ({
+        id: node.id,
+        code: node.operationCode,
+        name: node.operation?.name || node.operationCode,
+      })) || [],
       routingNodes: record.routingVersion?.nodes?.map((node: any) => ({
         id: node.id,
         seqNo: node.seqNo,
         operationCode: node.operationCode,
         operationName: node.operation.name,
+        section: node.operation.section,
         standardCycleSeconds: node.standardCycleSeconds ?? undefined,
         equipment: node.equipmentLinks.map((link: any) => ({ code: link.equipmentCode, name: link.equipment.name })),
       })) || [],
@@ -325,6 +352,7 @@ export class ProductionService {
       heatOrders: record.allocations?.map((allocation: any) => ({
         allocationId: allocation.id,
         heatOrderId: allocation.heatOrderId,
+        routingNodeId: allocation.routingNodeId || '',
         heatOrderCode: allocation.heatOrder.code,
         status: allocation.heatOrder.status,
         allocatedQuantity: allocation.allocatedQuantity,
@@ -540,7 +568,7 @@ export class ProductionService {
       where: {
         ...(ids ? { id: { in: ids } } : {}),
         ...(keyword ? { OR: [{ code: { contains: keyword, mode: 'insensitive' } }, { productCodeSnapshot: { contains: keyword, mode: 'insensitive' } }, { productNameSnapshot: { contains: keyword, mode: 'insensitive' } }] } : {}),
-        ...(status && status !== 'ALL' ? { OR: [{ scheduleStatus: status as WorkOrderScheduleStatus }, { productionStatus: status as WorkOrderProductionStatus }] } : {}),
+        ...workOrderStatusWhere(status),
       },
       include: this.workOrderInclude(),
       orderBy: { createdAt: 'desc' },
@@ -661,10 +689,23 @@ export class ProductionService {
     return this.workOrderDto(await this.findWorkOrder(id))
   }
 
-  async meltPool(request: RequestWithAdmin) {
-    const records = (await this.listWorkOrders(request)).filter((order) => order.productionStatus !== 'CLOSED' && order.remainingQuantity > 0)
+  async meltPool(request: RequestWithAdmin, workOrderId?: string) {
+    const ids = await visibleOwnershipEntityIds(this.prisma, getAdminContext(request), 'production:work-orders')
+    if (ids?.length === 0) return { groups: [] }
+    const records = await this.prisma.workOrder.findMany({
+      where: {
+        ...(ids ? { id: { in: ids } } : {}),
+        ...(workOrderId ? { AND: [{ id: workOrderId }] } : {}),
+        OR: [{ meltReleasedAt: { not: null } }, { meltReleases: { some: {} } }],
+        productionStatus: { not: 'CLOSED' },
+      },
+      include: this.workOrderInclude(),
+      orderBy: { createdAt: 'desc' },
+    })
+    const pendingRecords = records.flatMap((record) => releasedMeltRoutingNodeIds(record).map((routingNodeId) => this.workOrderDto(record, routingNodeId)))
+      .filter((order) => order.scheduledQuantity < order.plannedQuantity)
     const groups = new Map<string, { materialGradeCode: string; materialGradeName: string; remainingWeightKg: number; orders: any[] }>()
-    for (const order of records) {
+    for (const order of pendingRecords) {
       const group: { materialGradeCode: string; materialGradeName: string; remainingWeightKg: number; orders: any[] } = groups.get(order.materialGradeCode) || {
         materialGradeCode: order.materialGradeCode,
         materialGradeName: order.materialGradeName,
@@ -672,7 +713,7 @@ export class ProductionService {
         orders: [],
       }
       group.orders.push(order)
-      group.remainingWeightKg = roundWeight(group.remainingWeightKg + order.remainingWeightKg)
+      if (group.orders.filter((item) => item.id === order.id).length === 1) group.remainingWeightKg = roundWeight(group.remainingWeightKg + order.remainingWeightKg)
       groups.set(order.materialGradeCode, group)
     }
     return { groups: Array.from(groups.values()).sort((a, b) => a.materialGradeCode.localeCompare(b.materialGradeCode)) }
@@ -743,13 +784,6 @@ export class ProductionService {
     const plannedFinishAt = dateTime(body.plannedFinishAt, '预计完成时间')
     if (!furnaceCode) throw new BadRequestException('请选择目标熔炼设备')
     if (plannedFinishAt <= plannedStartAt) throw new BadRequestException('预计完成时间必须晚于计划开始时间')
-    const timeFilters: Prisma.HeatOrderWhereInput[] = [
-      { plannedStartAt: { lt: plannedFinishAt }, plannedFinishAt: { gt: plannedStartAt } },
-    ]
-    const now = new Date()
-    if (plannedStartAt < now) {
-      timeFilters.push({ status: { in: ['IN_PROGRESS', 'TRANSFERRING'] }, plannedStartAt: { lt: plannedFinishAt }, plannedFinishAt: { lte: now } })
-    }
     const records = await client.heatOrder.findMany({
       where: {
         id: excludeHeatOrderId ? { not: excludeHeatOrderId } : undefined,
@@ -760,7 +794,7 @@ export class ProductionService {
               { status: { in: ['IN_PROGRESS', 'TRANSFERRING'] }, OR: [{ actualFurnaceCode: furnaceCode }, { actualFurnaceCode: null, furnaceCode }] },
             ],
           },
-          { OR: timeFilters },
+          { plannedStartAt: { lt: plannedFinishAt }, plannedFinishAt: { gt: plannedStartAt } },
         ],
       },
       orderBy: [{ plannedStartAt: 'asc' }, { code: 'asc' }],
@@ -1102,13 +1136,59 @@ export class ProductionService {
         _sum: { allocatedQuantity: true },
       })
       const scheduledByOrder = new Map(activeAllocations.map((row) => [row.workOrderId, row._sum.allocatedQuantity || 0]))
+      const meltNodes = await tx.processRoutingNode.findMany({
+        where: {
+          routingVersionId: { in: orders.map((order) => order.routingVersionId) },
+          OR: [{ operationCode: 'OP-MELT' }, { operation: { section: '熔炼' } }],
+        },
+        select: { id: true, routingVersionId: true },
+      })
+      const meltNodesByVersion = new Map<string, Array<{ id: string; routingVersionId: string }>>()
+      for (const node of meltNodes) {
+        const nodes = meltNodesByVersion.get(node.routingVersionId) || []
+        nodes.push(node)
+        meltNodesByVersion.set(node.routingVersionId, nodes)
+      }
+      const historicalAllocations = await tx.heatOrderAllocation.findMany({
+        where: { workOrderId: { in: workOrderIds }, heatOrder: { status: { not: 'CANCELED' } } },
+        select: { workOrderId: true, routingNodeId: true },
+      })
+      const historicalRoutingNodeIds = new Map<string, Array<string | null>>()
+      for (const allocation of historicalAllocations) {
+        const values = historicalRoutingNodeIds.get(allocation.workOrderId) || []
+        values.push(allocation.routingNodeId)
+        historicalRoutingNodeIds.set(allocation.workOrderId, values)
+      }
+      const resolvedRoutingNodeIds = new Map<string, string>()
+      for (const allocation of allocations) {
+        const order = orderById.get(String(allocation.workOrderId))!
+        const nodes = meltNodesByVersion.get(order.routingVersionId) || []
+        if (!nodes.length) throw new BadRequestException(`${order.code} 锁定的工艺路线不包含熔炼工序`)
+        const requestedRoutingNodeId = String(allocation.routingNodeId || '').trim()
+        if (requestedRoutingNodeId) {
+          if (!nodes.some((node) => node.id === requestedRoutingNodeId)) throw new BadRequestException(`${order.code} 选择的熔炼工序不属于工单锁定路线`)
+          resolvedRoutingNodeIds.set(order.id, requestedRoutingNodeId)
+          continue
+        }
+        if (nodes.length === 1) {
+          resolvedRoutingNodeIds.set(order.id, nodes[0].id)
+          continue
+        }
+        const history = historicalRoutingNodeIds.get(order.id) || []
+        const historyIds = Array.from(new Set(history.filter((value): value is string => Boolean(value))))
+        if (!history.some((value) => !value) && historyIds.length === 1 && nodes.some((node) => node.id === historyIds[0])) {
+          resolvedRoutingNodeIds.set(order.id, historyIds[0])
+          continue
+        }
+        throw new BadRequestException(`${order.code} 包含多个熔炼工序，请选择具体熔炼工序`)
+      }
       const preparedAllocations = allocations.map((allocation) => {
         const order = orderById.get(String(allocation.workOrderId))!
         const quantity = Number(allocation.quantity)
         const remaining = order.plannedQuantity - (scheduledByOrder.get(order.id) || 0)
         if (!Number.isInteger(quantity) || quantity <= 0) throw new BadRequestException('本炉分配件数必须为大于 0 的整数')
         if (quantity > remaining) throw new ConflictException(`${order.code} 分配件数超过剩余件数，请刷新排产池后重试`)
-        return { workOrderId: order.id, allocatedQuantity: quantity, plannedWeightKg: allocationWeightKg(quantity, decimal(order.unitGrossWeightKg)) }
+        return { workOrderId: order.id, routingNodeId: resolvedRoutingNodeIds.get(order.id)!, allocatedQuantity: quantity, plannedWeightKg: allocationWeightKg(quantity, decimal(order.unitGrossWeightKg)) }
       })
       const targetWeightKg = roundWeight(preparedAllocations.reduce((sum, item) => sum + item.plannedWeightKg, 0))
       const workshopCode = String(body.workshopCode || '').trim()
@@ -1232,7 +1312,7 @@ export class ProductionService {
     if (ids !== null && !ids.includes(id)) throw new NotFoundException('熔炼任务不存在')
   }
 
-  async listHeatOrders(request: RequestWithAdmin, status?: string, mobile = false) {
+  async listHeatOrders(request: RequestWithAdmin, status?: string, workOrderId?: string, mobile = false) {
     const user = getAdminContext(request)
     const visibleIds = mobile
       ? null
@@ -1243,6 +1323,7 @@ export class ProductionService {
         ...(status && status !== 'ALL' ? { status: status as any } : {}),
         ...(mobile && user.username !== 'admin' && user.userType !== 'SUPER_ADMIN' ? { team: { members: { some: { userId: user.id } } } } : {}),
         ...(!mobile && visibleIds ? { id: { in: visibleIds } } : {}),
+        ...(workOrderId ? { allocations: { some: { workOrderId } } } : {}),
       },
       include: this.heatOrderInclude(),
       orderBy: [{ plannedOutputAt: 'desc' }, { createdAt: 'desc' }],

@@ -38,13 +38,15 @@ export function CoreReadinessPanel({ workOrderId }: { workOrderId: string }) {
       {!loading && !error && record && <>
         <div className="core-readiness-summary">
           <Progress percent={record.readinessRate} status={record.totalShortageQuantity > 0 ? 'exception' : 'success'} />
-          <Typography.Text type="secondary">需求 {record.totalRequiredQuantity}，可用 {record.totalAvailableQuantity}，待烘干 {record.totalUndriedQuantity}，缺口 {record.totalShortageQuantity}</Typography.Text>
+          <Typography.Text type="secondary">需求 {record.totalRequiredQuantity}，已使用 {record.totalConsumedQuantity}，可用 {record.totalAvailableQuantity}，待烘干 {record.totalUndriedQuantity}，缺口 {record.totalShortageQuantity}</Typography.Text>
         </div>
         {record.rows.length ? <Table rowKey="coreBoxCode" size="small" pagination={false} dataSource={record.rows} columns={[
           { title: '芯盒编码', dataIndex: 'coreBoxCode', width: 150 },
           { title: '芯盒名称', dataIndex: 'coreBoxName' },
           { title: '单件用芯', dataIndex: 'quantityPerProduct', width: 100 },
-          { title: '需求量', dataIndex: 'requiredQuantity', width: 100 },
+          { title: '总需求', dataIndex: 'requiredQuantity', width: 100 },
+          { title: '已使用', dataIndex: 'consumedQuantity', width: 100 },
+          { title: '剩余需求', dataIndex: 'remainingRequiredQuantity', width: 100 },
           { title: '可用量', dataIndex: 'availableQuantity', width: 100 },
           { title: '待烘干', dataIndex: 'undriedQuantity', width: 100 },
           { title: '缺口', dataIndex: 'shortageQuantity', width: 90 },

@@ -7,8 +7,13 @@ Page({
     todos: [] as TodoItem[],
     todoCount: 0,
     moldCount: 0,
+    canViewMolds: false,
     canViewHeats: false,
     canViewCoreTasks: false,
+    canViewMoldingTasks: false,
+    canViewPouringTasks: false,
+    canViewShakeCleanTasks: false,
+    canViewInspectionTasks: false,
     loading: false,
   },
 
@@ -22,8 +27,13 @@ Page({
     getApp<IAppOption>().globalData.token = token
     this.setData({
       username: wx.getStorageSync('mingda_display_name') || wx.getStorageSync('mingda_login_account') || '1',
+      canViewMolds: (wx.getStorageSync('mingda_permissions') || []).includes('mini.mold.development.view'),
       canViewHeats: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.heat.view'),
       canViewCoreTasks: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.core.view'),
+      canViewMoldingTasks: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.molding.view'),
+      canViewPouringTasks: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.pouring.view'),
+      canViewShakeCleanTasks: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.shake_clean.view'),
+      canViewInspectionTasks: (wx.getStorageSync('mingda_permissions') || []).includes('mini.production.inspection.view'),
     })
     void this.loadHome()
   },
@@ -43,8 +53,13 @@ Page({
         todos: result.todos,
         todoCount: result.todoCount,
         moldCount: result.moldCount,
+        canViewMolds: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.mold.development.view'),
         canViewHeats: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.production.heat.view'),
         canViewCoreTasks: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.production.core.view'),
+        canViewMoldingTasks: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.production.molding.view'),
+        canViewPouringTasks: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.production.pouring.view'),
+        canViewShakeCleanTasks: permissions.includes('mini.production.shake_clean.view'),
+        canViewInspectionTasks: user.userType === 'SUPER_ADMIN' || user.username === 'admin' || permissions.includes('mini.production.inspection.view'),
       })
     } catch (error) {
       wx.showToast({
@@ -77,6 +92,22 @@ Page({
 
   goCoreTasks() {
     wx.navigateTo({ url: '/pages/core/list/index' })
+  },
+
+  goMoldingTasks() {
+    wx.navigateTo({ url: '/pages/molding/list/index' })
+  },
+
+  goPouringTasks() {
+    wx.navigateTo({ url: '/pages/pouring/list/index' })
+  },
+
+  goShakeCleanTasks() {
+    wx.navigateTo({ url: '/pages/shake-clean/list/index' })
+  },
+
+  goInspectionTasks() {
+    wx.navigateTo({ url: '/pages/inspection/list/index' })
   },
 
   logout() {

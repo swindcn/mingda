@@ -224,7 +224,7 @@ export class ModelingController {
 
   @Get('options')
   async options(@Req() request: RequestWithAdmin) {
-    const [workshops, lines, teams, items, materials, molds, shifts, suppliers, employees] = await Promise.all([
+    const [workshops, lines, teams, items, materials, molds, shifts, suppliers, employees, operations] = await Promise.all([
       this.prisma.workshop.findMany({ orderBy: { createdAt: 'desc' } }),
       this.prisma.productionLine.findMany({ orderBy: { createdAt: 'desc' } }),
       this.prisma.team.findMany({ orderBy: { createdAt: 'desc' }, include: { members: true } }),
@@ -237,6 +237,10 @@ export class ModelingController {
         where: { userType: 'EMPLOYEE', status: 'ENABLED', lockStatus: 'NORMAL', deletedAt: null },
         orderBy: { createdAt: 'asc' },
         select: { id: true, name: true, phone: true, department: { select: { name: true } } },
+      }),
+      this.prisma.operationMaster.findMany({
+        where: { status: 'ENABLED' },
+        orderBy: [{ section: 'asc' }, { code: 'asc' }],
       }),
     ])
     const usedDevelopmentCodes = new Set(
@@ -296,6 +300,12 @@ export class ModelingController {
           department: record.department?.name || '',
         }),
       ),
+      operations: operations.map((record) => ({
+        id: record.code,
+        code: record.code,
+        name: record.name,
+        section: record.section,
+      })),
     }
   }
 
@@ -567,11 +577,7 @@ export class ModelingController {
       throw new BadRequestException('请选择日期范围、车间、班次和班组')
     }
     if (startDate > endDate) throw new BadRequestException('开始日期不能晚于结束日期')
-    await this.assertRelations('schedules', {
-      workshopCode: body.workshopCode,
-      shiftCode: body.shiftCodes[0],
-      teamCode: body.teamCodes[0],
-    })
+    await this.assertScheduleRelations(body.workshopCode, body.shiftCodes, body.teamCodes)
 
     const operations: Prisma.PrismaPromise<unknown>[] = []
     let cursor = new Date(startDate)
@@ -1107,6 +1113,13 @@ export class ModelingController {
   }
 
   private async assertRelations(resource: ResourceName, body: Record<string, unknown>) {
+    if (resource === 'schedules') {
+      await this.assertScheduleRelations(
+        stringValue(body.workshopCode) || '',
+        [stringValue(body.shiftCode) || ''],
+        [stringValue(body.teamCode) || ''],
+      )
+    }
     const checks: Array<[unknown, string, (code: string) => Promise<unknown | null>]> = [
       [body.workshopCode, '车间不存在', (code) => this.prisma.workshop.findUnique({ where: { code } })],
       [body.materialGradeCode, '材质牌号不存在', (code) => this.prisma.materialGrade.findUnique({ where: { code } })],
@@ -1152,9 +1165,40 @@ export class ModelingController {
       const shift = await this.prisma.shiftMaster.findUnique({ where: { code: shiftCode } })
       if (!shift) throw new BadRequestException('启用班次不存在')
     }
+    const operationCodes = Array.from(new Set(toStringArray(body.operationCodes)))
+    if (resource === 'defects' && operationCodes.length) {
+      const operations = await this.prisma.operationMaster.findMany({
+        where: { code: { in: operationCodes }, status: 'ENABLED' },
+        select: { code: true },
+      })
+      if (operations.length !== operationCodes.length) throw new BadRequestException('适用工序不存在或已停用')
+    }
     for (const item of toRecipeItems(body.items)) {
       const material = await this.prisma.product.findUnique({ where: { code: item.itemCode } })
       if (!material) throw new BadRequestException('配料物料不存在')
+    }
+  }
+
+  private async assertScheduleRelations(workshopCode: string, shiftCodes: string[], teamCodes: string[]) {
+    const normalizedShiftCodes = Array.from(new Set(shiftCodes.map((code) => String(code || '').trim()).filter(Boolean)))
+    const normalizedTeamCodes = Array.from(new Set(teamCodes.map((code) => String(code || '').trim()).filter(Boolean)))
+    if (!workshopCode || !normalizedShiftCodes.length || !normalizedTeamCodes.length) {
+      throw new BadRequestException('请选择有效的车间、班次和班组')
+    }
+    const [workshop, shifts, teams] = await Promise.all([
+      this.prisma.workshop.findUnique({ where: { code: workshopCode } }),
+      this.prisma.shiftMaster.findMany({ where: { code: { in: normalizedShiftCodes } } }),
+      this.prisma.team.findMany({ where: { code: { in: normalizedTeamCodes } } }),
+    ])
+    if (!workshop) throw new BadRequestException('车间不存在')
+    if (shifts.length !== normalizedShiftCodes.length || shifts.some((shift) => shift.status !== '启用')) {
+      throw new BadRequestException('班次不存在或已停用')
+    }
+    if (teams.length !== normalizedTeamCodes.length || teams.some((team) => team.status !== '启用')) {
+      throw new BadRequestException('班组不存在或已停用')
+    }
+    if (teams.some((team) => team.workshopCode !== workshopCode)) {
+      throw new BadRequestException('班组必须属于所选车间')
     }
   }
 
@@ -1301,6 +1345,17 @@ export class ModelingController {
           : toStringArray(value.shiftCodes),
       }
     }
+    if (resource === 'defects') {
+      const operations = Array.isArray(value.operations) ? value.operations : []
+      return {
+        ...base,
+        operationCodes: operations.map((item) => String((item as { operationCode?: unknown }).operationCode || '')).filter(Boolean),
+        operationNames: operations.map((item) => {
+          const operation = (item as { operation?: { name?: unknown } }).operation
+          return String(operation?.name || '')
+        }).filter(Boolean),
+      }
+    }
     if (resource === 'molds') {
       return {
         ...base,
@@ -1330,6 +1385,7 @@ export class ModelingController {
     if (resource === 'calendars') return { shifts: true }
     if (resource === 'molds') return { supplier: true, coreBoxes: true }
     if (resource === 'materials') return this.materialGradeInclude()
+    if (resource === 'defects') return { operations: { include: { operation: true } } }
     return undefined
   }
 
@@ -1341,7 +1397,7 @@ export class ModelingController {
   }
 
   private hasMultiRelations(resource: ResourceName) {
-    return resource === 'teams' || resource === 'equipment' || resource === 'recipes' || resource === 'calendars'
+    return resource === 'teams' || resource === 'equipment' || resource === 'recipes' || resource === 'calendars' || resource === 'defects'
   }
 
   private async syncMultiRelations(resource: ResourceName, code: string, body: Record<string, unknown>) {
@@ -1388,6 +1444,18 @@ export class ModelingController {
       if (date && shiftCodes.length) {
         await this.prisma.factoryCalendarShift.createMany({
           data: shiftCodes.map((shiftCode) => ({ date, shiftCode })),
+          skipDuplicates: true,
+        })
+      }
+    }
+    if (resource === 'defects') {
+      await this.prisma.defectOperation.deleteMany({ where: { defectCode: { code } } })
+      const operationCodes = toStringArray(body.operationCodes)
+      if (operationCodes.length) {
+        const defect = await this.prisma.defectCode.findUnique({ where: { code }, select: { id: true } })
+        if (!defect) throw new NotFoundException('缺陷代码不存在')
+        await this.prisma.defectOperation.createMany({
+          data: operationCodes.map((operationCode) => ({ defectCodeId: defect.id, operationCode })),
           skipDuplicates: true,
         })
       }

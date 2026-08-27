@@ -1,0 +1,83 @@
+<view class="page" wx:if="{{options}}">
+  <view wx:if="{{!options.allowedActions.report}}" class="permission-block">当前账号无终检报工权限</view>
+  <block wx:if="{{options.allowedActions.report}}">
+    <view class="task-card">
+      <view class="head">
+        <text class="code">{{options.workOrderCode}}</text>
+        <text class="task-state">待检 {{options.remainingQuantity}} 件</text>
+      </view>
+      <view class="product">{{options.productName}}（{{options.productCode}}）</view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">质检结果</view>
+      <view class="result-grid">
+        <view>
+          <text class="cell-label">合格件数</text>
+          <view class="qty-stepper">
+            <view class="qty-btn" data-field="goodQty" data-delta="-1" bindtap="adjustQty">−</view>
+            <input class="qty-input" type="number" value="{{goodQty}}" data-field="goodQty" bindinput="inputQty" />
+            <view class="qty-btn qty-btn-primary" data-field="goodQty" data-delta="1" bindtap="adjustQty">+</view>
+          </view>
+        </view>
+        <view>
+          <text class="cell-label">返修件数</text>
+          <view class="qty-stepper">
+            <view class="qty-btn" data-field="reworkQty" data-delta="-1" bindtap="adjustQty">−</view>
+            <input class="qty-input" type="number" value="{{reworkQty}}" data-field="reworkQty" bindinput="inputQty" />
+            <view class="qty-btn qty-btn-primary" data-field="reworkQty" data-delta="1" bindtap="adjustQty">+</view>
+          </view>
+        </view>
+        <view>
+          <text class="cell-label">报废件数</text>
+          <view class="qty-stepper">
+            <view class="qty-btn" data-field="scrapQty" data-delta="-1" bindtap="adjustQty">−</view>
+            <input class="qty-input" type="number" value="{{scrapQty}}" data-field="scrapQty" bindinput="inputQty" />
+            <view class="qty-btn qty-btn-primary" data-field="scrapQty" data-delta="1" bindtap="adjustQty">+</view>
+          </view>
+        </view>
+      </view>
+      <view class="fill-btn" hover-class="fill-btn-hover" bindtap="fillAll">一键全部合格（{{options.remainingQuantity}}件）</view>
+
+      <view class="field-block" wx:if="{{scrapQty > 0}}">
+        <text>实际回炉重量（kg）</text>
+        <input class="input" type="digit" value="{{scrapWeightKg}}" placeholder="留空按 {{defaultScrapWeightKg}} kg 计算" bindinput="inputWeight" />
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{reworkQty + scrapQty > 0}}">
+      <view class="section-head">
+        <text class="section-title">缺陷原因</text>
+        <view class="add-btn" hover-class="add-btn-hover" bindtap="addDefect">+ 新增</view>
+      </view>
+      <view class="defect" wx:for="{{defectRows}}" wx:key="index">
+        <picker range="{{defects}}" range-key="name" data-index="{{index}}" bindchange="chooseDefect">
+          <view class="picker-value">{{item.defectName || '选择终检缺陷'}}</view>
+        </picker>
+        <view class="defect-row">
+          <input class="input" type="number" value="{{item.quantity}}" data-index="{{index}}" bindinput="inputDefectQty" />
+          <input class="input" placeholder="备注" value="{{item.remark}}" data-index="{{index}}" bindinput="inputDefectRemark" />
+          <text class="defect-remove" data-index="{{index}}" bindtap="removeDefect">删除</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">缺陷图片（最多一张）</view>
+      <view wx:if="{{imageUrl}}" class="image-wrap">
+        <image mode="aspectFill" src="{{imageUrl}}" bindtap="previewImage" />
+        <text class="image-remove" bindtap="removeImage">删除</text>
+      </view>
+      <view wx:else class="upload-btn" hover-class="upload-btn-hover" bindtap="chooseImage">选择照片或拍照</view>
+      <view class="field-block">
+        <text>备注</text>
+        <textarea class="textarea" value="{{remark}}" placeholder="选填" bindinput="inputRemark" />
+      </view>
+    </view>
+
+    <view class="bottom-space"></view>
+    <view class="bottom">
+      <view class="submit-inline {{submitting ? 'is-disabled' : ''}}" hover-class="submit-inline-hover" bindtap="submit">{{submitting ? '提交中...' : '提交质检结果'}}</view>
+    </view>
+  </block>
+</view>

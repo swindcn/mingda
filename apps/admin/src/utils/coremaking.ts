@@ -239,6 +239,8 @@ export interface CoreReadinessRow {
   coreBoxName: string
   quantityPerProduct: number
   requiredQuantity: number
+  consumedQuantity: number
+  remainingRequiredQuantity: number
   availableQuantity: number
   undriedQuantity: number
   shortageQuantity: number
@@ -251,6 +253,8 @@ export interface CoreReadiness {
   workOrderCode: string
   rows: CoreReadinessRow[]
   totalRequiredQuantity: number
+  totalConsumedQuantity: number
+  totalCoveredQuantity: number
   totalAvailableQuantity: number
   totalUndriedQuantity: number
   totalShortageQuantity: number

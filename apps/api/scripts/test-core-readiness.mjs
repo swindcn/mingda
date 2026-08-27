@@ -326,6 +326,48 @@ try {
   if (readiness.totalRequiredQuantity !== 30 || readiness.totalAvailableQuantity !== 34 || readiness.totalShortageQuantity !== 1 || readiness.readinessRate !== 96.67) {
     throw new Error(`总齐套率或汇总错误: ${JSON.stringify(readiness)}`)
   }
+  const moldingLine = await prisma.productionLine.create({
+    data: { code: `${prefix}-MOLD-LINE`, name: '造型测试线', workshopCode: workshop.code, status: '启用' },
+  })
+  const consumedCoverBatch = await createBatch({ code: `${prefix}-A-CONSUMED-COVER`, coreBox: coreA, status: 'CONSUMED', quantity: 1 })
+  await prisma.coreInventoryBatch.update({ where: { id: consumedCoverBatch.id }, data: { currentQuantity: 0, status: 'CONSUMED' } })
+  const moldingTask = await prisma.moldingTask.create({
+    data: {
+      code: `${prefix}-MOLDING-TASK`, workOrderId: targetWorkOrder.id, bomVersionId: bomVersion.id,
+      routingVersionId: routingVersion.id, routingNodeId: routingVersion.nodes[0].id,
+      moldCode: mold.code, productionLineCode: moldingLine.code,
+      productCodeSnapshot: product.code, productNameSnapshot: product.name, workOrderCodeSnapshot: targetWorkOrder.code,
+      bomCodeSnapshot: bom.code, bomVersionSnapshot: bomVersion.version,
+      routingCodeSnapshot: routing.code, routingNameSnapshot: routing.name, routingVersionSnapshot: routingVersion.version,
+      operationCodeSnapshot: operation.code, operationNameSnapshot: operation.name,
+      moldNameSnapshot: mold.name,
+      productionLineNameSnapshot: moldingLine.name,
+      workshopCodeSnapshot: workshop.code, workshopNameSnapshot: workshop.name,
+      coreRequirementsSnapshot: [{ coreBoxCode: coreA.code, coreBoxName: coreA.name, quantityPerBox: 1 }],
+      planPieceQty: 1, planBoxQty: 1, cavityCountSnapshot: 1,
+      status: 'COMPLETED', completedGoodQty: 1, createdByUserId: admin.id,
+    },
+  })
+  const moldingReport = await prisma.moldingReport.create({
+    data: {
+      taskId: moldingTask.id, reportCode: `${prefix}-MRP-001`, requestId: `${prefix}-MRP-REQ-001`,
+      goodQty: 1, scrapQty: 0, finishTask: true, operatorUserId: admin.id, operatorNameSnapshot: admin.name,
+    },
+  })
+  await prisma.moldingCoreConsumption.create({
+    data: {
+      reportId: moldingReport.id, coreInventoryBatchId: consumedCoverBatch.id, workOrderId: targetWorkOrder.id,
+      coreBoxCodeSnapshot: coreA.code, quantity: 1, quantityBefore: 1, quantityAfter: 0,
+    },
+  })
+  const consumedReadiness = await request(baseUrl, `/admin/production/work-orders/${targetWorkOrder.id}/core-readiness`, { headers })
+  const consumedRowA = consumedReadiness.rows.find((row) => row.coreBoxCode === coreA.code)
+  if (!consumedRowA || consumedRowA.consumedQuantity !== 1 || consumedRowA.remainingRequiredQuantity !== 9 || consumedRowA.shortageQuantity !== 0 || consumedRowA.readinessStatus !== 'READY') {
+    throw new Error(`已消耗砂芯未抵扣齐套缺口: ${JSON.stringify(consumedRowA)}`)
+  }
+  if (consumedReadiness.totalConsumedQuantity !== 1 || consumedReadiness.totalShortageQuantity !== 0 || consumedReadiness.readinessRate !== 100) {
+    throw new Error(`已消耗砂芯未计入总齐套率: ${JSON.stringify(consumedReadiness)}`)
+  }
   await prisma.workOrder.update({ where: { id: targetWorkOrder.id }, data: { plannedQuantity: 1 } })
   await prisma.castingBomVersionCoreBox.update({
     where: { bomVersionId_coreBoxCode: { bomVersionId: bomVersion.id, coreBoxCode: coreA.code } },

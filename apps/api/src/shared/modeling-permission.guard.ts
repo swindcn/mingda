@@ -53,6 +53,7 @@ function actionFromRequest(request: Request) {
   if (/\/admin\/modeling\/routings\/[^/]+\/clone$/.test(request.path)) return 'clone'
   if (/\/admin\/modeling\/routings\/[^/]+\/activate$/.test(request.path)) return 'activate'
   if (/\/admin\/modeling\/routings\/[^/]+\/disable$/.test(request.path)) return 'disable'
+  if (/\/admin\/modeling\/routings\/[^/]+\/(recycle|restore)$/.test(request.path)) return 'recycle'
   if (/\/admin\/modeling\/routings\/[^/]+\/default-products$/.test(request.path)) return 'default'
   if (/\/admin\/modeling\/routings\/[^/]+\/applicable-products$/.test(request.path)) return 'edit'
   if (request.method === 'GET') return 'view'

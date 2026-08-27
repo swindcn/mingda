@@ -1,0 +1,86 @@
+/* 返修报工 · 已迁移至全局 Form UI（2 列返修结果用紧凑步进器） */
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 12rpx;
+}
+.code { font-size: 31rpx; font-weight: 700; }
+.task-state { color: var(--color-text-secondary); font-size: 26rpx; }
+.product { margin: 8rpx 0; color: var(--color-text-secondary); font-size: 26rpx; }
+
+/* 两列返修结果 */
+.result-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+}
+.cell-label {
+  display: block;
+  margin-bottom: 10rpx;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* 紧凑步进器（与终检报工一致） */
+.qty-stepper {
+  display: grid;
+  grid-template-columns: 64rpx minmax(0, 1fr) 64rpx;
+  gap: 8rpx;
+}
+.qty-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 84rpx;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  border-radius: var(--r-md);
+  font-size: 40rpx;
+  font-weight: 700;
+}
+.qty-btn-primary { color: #fff; background: var(--color-primary); }
+.qty-input {
+  height: 84rpx;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: var(--color-text);
+  background: #fff;
+  border: 1rpx solid var(--color-divider);
+  border-radius: var(--r-md);
+  box-sizing: border-box;
+}
+
+/* 附加字段块 */
+.field-block { margin-top: 22rpx; }
+.field-block > text {
+  display: block;
+  margin-bottom: 10rpx;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* 固定底部提交栏 */
+.bottom-space { height: 160rpx; }
+.bottom {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 18rpx 28rpx calc(18rpx + env(safe-area-inset-bottom));
+  background: var(--color-surface);
+  box-shadow: 0 -6rpx 18rpx rgba(15, 23, 42, 0.06);
+}
+
+.permission-block {
+  padding: 80rpx 24rpx;
+  text-align: center;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border-radius: var(--r-lg);
+}

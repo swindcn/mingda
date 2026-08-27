@@ -1,6 +1,6 @@
 # 生产工单与熔炼执行开发记录
 
-更新时间：2026-08-14
+更新时间：2026-08-26
 
 ## 功能范围
 
@@ -11,7 +11,7 @@
 - `/dashboard/production/heat-orders`：熔炼执行。
 - 小程序 `pages/heat/*`：班组熔炼任务列表、详情和完成填报。
 
-生产工单不提供草稿。提交时后端锁定已生效 BOM 和适用的已生效工艺路线版本，按 BOM 单件重量计算总净重、铁水需求和回料重量，并立即进入排产池。
+生产工单不提供草稿。提交时后端锁定已生效 BOM 和适用的已生效工艺路线版本，按 BOM 单件重量计算总净重、铁水需求和回料重量；熔炼工序需在工单详情中手动释放后才进入合炉排产池。
 
 ## 阶段开发总结
 
@@ -20,6 +20,7 @@
 ```text
 物料 + 已生效 BOM + 默认工艺路线 + 材质牌号
   -> 提交生产工单并锁定业务快照
+  -> 在工单详情手动释放熔炼
   -> 按材质进入待排池
   -> 按整数件拆分或合并生成炉次
   -> 锁定车间、计划熔炉、配方、班组和设备占用时间
@@ -173,3 +174,115 @@ npm --prefix apps/miniprogram run test
 - 调整成功更新计划/计算完成时间、设备快照并递增 `versionNo`，同时写入 `HeatOrderRecord.SCHEDULE_ADJUSTED`，记录调整前后设备、时间、操作人和已确认冲突。
 
 数据库迁移：`20260814150000_heat_schedule_adjustment`。
+
+## 落砂清理双阶段执行（2026-08-24）
+
+落砂清理沿生产工单锁定路线运行，一个路线节点对应两个内部阶段：
+
+1. 浇注有效报工按 `goodQty × cavityCountSnapshot` 生成 `ShakeBatch`，浇注废品不进入队列。
+2. 落砂报工按浇注时间 FIFO 消费待落砂批次，并生成等于落砂合格数的 `CleaningBatch`。
+3. 清理打磨按可用时间 FIFO 消费待清理批次，清理合格数生成 `BlankOutputBatch`，废品和浇冒口重量保留在报工追溯中。
+4. `BlankOutputBatch` 是后续热处理、机加工、检验或毛坯入库的唯一标准输入；后续模块应创建自己的消费明细和撤销保护。
+
+冷却时长来自锁定路线节点，仅提醒、不做硬卡控。提前落砂必须显式确认，系统保存要求分钟、实际分钟和提前标志。报工设备必须通过设备类型字典、启用状态和路线节点绑定三重校验；缺陷只能来自绑定 `OP-SHAKE` 的启用缺陷代码。
+
+节点状态不等于单次队列状态：上游浇注未结束而当前队列为空时为 `WAITING_POURING`；只有浇注上游结束且待落砂、待清理均清零时才为 `COMPLETED`。当前节点没有后继时毛坯为 `WAITING_WAREHOUSE`，一个后继时保存目标节点，多个后继时拒绝提交并要求修正路线。
+
+一致性规则：
+
+- 客户端每次提交稳定 `requestId`，重试不重复生成报工、消费或毛坯。
+- 批次提交最新 `versionNo`；旧页面收到 `409` 后必须原地刷新。
+- 报工和撤销使用 `Serializable` 事务，锁顺序为 `MoldingTask -> FIFO 批次`。
+- 浇注报工以 `shakeQueueResolution` 持久化待落砂队列解析结果：`PENDING` 为待解析，创建或发现已有批次后为 `CREATED`，撤销、无有效合格数或锁定路线无可达落砂节点时为 `NOT_APPLICABLE`。只有 `PENDING` 属于历史缺口，`NOT_APPLICABLE` 不得阻断详情和报工，也不得因未来路线变化重新入队。
+- 历史浇注到待落砂批次的解析只能通过 `npm --prefix apps/api run backfill:shake-batches` 运维命令执行。命令逐页独立提交且可幂等重跑；正常列表保持只读，详情或报工检测到 `PENDING` 历史缺口时返回明确升级提示。
+- 撤销必须从下游向上游：先清理、后落砂、再浇注；有有效下游消费时上游撤销接口拒绝。
+- 管理端按 `production.shake_clean.*` 权限控制，小程序按 `mini.production.shake_clean.*` 控制，统一叠加 `production:molding_tasks` 数据范围。
+- 管理端列表后端分页；小程序列表稳定 cursor。页面动作只根据服务端 `allowedActions` 展示。
+
+主要实现：
+
+- 后端：`apps/api/src/production/shake-clean.queue.ts`、`shake-clean.service.ts`、`shake-clean.controller.ts`。
+- 管理端：`apps/admin/src/pages/production/ShakeCleanTaskListPage.tsx`、`ShakeCleanTaskDetailPage.tsx`。
+- 小程序：`apps/miniprogram/src/pages/shake-clean/`，修改后必须构建同步到 `dist`。
+- 设计文档：`docs/superpowers/specs/2026-08-24-shake-cleaning-execution-design.md`。
+
+## 成品终检执行（2026-08-26）
+
+终检的标准输入为清理阶段生成的有效 `BlankOutputBatch`。`final-inspection.queue.ts` 在清理事务内解析工单锁定路线的下一节点，只有该节点为 `OP-INSP` 时才幂等创建 `InspectionBatch`；历史数据由 `backfill:inspection-batches` 显式回填，列表查询不得写数据。
+
+1. `InspectionReport.goodQty` 生成毛坯入库单、库存批次和 `RECEIPT` 流水。
+2. `InspectionReport.reworkQty` 生成清理返修任务；返修合格数生成新 `InspectionBatch`，返修报废数写回炉料流水。
+3. `InspectionReport.scrapQty` 生成报废单和回炉料流水。重量默认按工单 BOM 净重计算，客户端未填写时必须省略字段，不能传 `0` 覆盖默认值。
+4. 完成条件是待检和返修全部清零、上游执行队列全部完成；工单完成数量以有效毛坯入库单汇总为准。
+
+一致性规则：终检与返修按工单串行锁定，待检批次 FIFO 消费；客户端提交当前批次版本，版本变化返回 `409`。同一工单或返修任务内的 `requestId` 唯一。撤销前检查返修下游和毛坯出库，采用反向库存流水恢复余额，原报告保留审计状态。
+
+系统仓库由 `seed:final-inspection-warehouses` 初始化，编码固定为 `BLANK_WAREHOUSE` 和 `RETURN_MELT_WAREHOUSE`。管理端、小程序共用 `FinalInspectionService` 状态机；页面动作使用服务端 `allowedActions`，API 权限守卫和 `production:work-orders` 数据范围是最终边界。
+
+主要入口：后端 `final-inspection.service.ts/controller.ts/queue.ts/calculations.ts`；管理端 `FinalInspectionTaskListPage.tsx`、`FinalInspectionTaskDetailPage.tsx`；小程序 `pages/inspection/`。
+
+## 工单工艺路线统一执行入口（2026-08-26）
+
+生产工单详情页的“绑定工艺路线预览”已升级为“工艺路线执行”，工单锁定的 `routingVersionId` 是后续生产执行的统一入口。该入口只读取锁定路线和各业务模块已有的真实任务/队列数据，不复制制芯、熔炼、造型、浇注、落砂清理或终检的写入逻辑。
+
+### 工序执行摘要
+
+每一个锁定路线节点返回一行实时摘要，至少包含：
+
+- 工序顺序、工序编码、工序名称。
+- 工序状态：`待下达`、`部分下达`、`已下达`、`等待上游`、`未接入`。
+- 工序进度：真实任务状态、累计完成量/计划量及业务单位，例如件、箱、公斤；落砂清理在同一节点内展示落砂与清理两个阶段。
+- 设备、班组：只展示已经实际下达、排产或执行任务绑定的设备和班组；不能用工艺路线中的“适用设备”冒充已排设备，未产生任务时显示 `-`。
+- 操作：根据服务端返回的动作和权限展示“下达任务”“查看任务”或禁用态原因。
+
+工序与执行模块的映射使用明确编码/工段约定：`OP-CORE` 为制芯、`OP-MELT` 为熔炼、`OP-MOLD` 为造型、`OP-POUR` 为浇注、`OP-SHAKE` 为落砂清理、`OP-INSP` 为成品终检。其他工序显示“暂未接入”，不得仅通过相似中文名称推断模块。
+
+### 工序下达和上游驱动
+
+- 制芯和造型下芯继续复用各自已有任务生成接口；一个工序存在多张任务单时显示“部分下达”，全部覆盖后显示“已下达”。
+- 电炉熔炼改为工单详情中手动“下达熔炼”。工单新建成功时不会自动进入合炉排产池，也不会自动生成炉次；释放后由调度员继续完成凑吨、设备、配方、班组和开始时间排产。
+- 制芯未完成或仍有待烘干数量时只返回软提示，页面需要二次确认，但后端不因该提示阻止熔炼释放。软提示必须展示服务端返回的实际风险内容，不能用固定文案代替。
+- 浇注、落砂清理和成品终检由上游报工生成队列，队列未生成时显示“等待上游”，生成后提供“查看任务”，不显示虚假的下达按钮。
+- 工序专属任务按钮不再放在工单详情右上角；工单级操作保留在右上角，工序任务的下达与查看统一从路线表格进入。
+
+### 多任务查看与筛选
+
+同一工序可能对应多张制芯任务、多个熔炼炉次或多个下游报工批次。点击“查看任务”统一跳转到对应模块列表，并携带 `workOrderId`：
+
+```text
+/dashboard/production/core-tasks?workOrderId=...
+/dashboard/production/heat-orders?workOrderId=...
+/dashboard/production/molding-tasks?workOrderId=...
+/dashboard/production/pouring-tasks?workOrderId=...
+/dashboard/production/shake-clean-tasks?workOrderId=...
+/dashboard/production/inspection-tasks?workOrderId=...
+```
+
+列表后端必须在数据库查询边界按 `workOrderId` 过滤，同时继续叠加当前用户的数据范围；不能先查全量数据再由前端过滤。进入详情后返回列表，应保留工单筛选、状态、关键词和分页上下文。
+
+### 熔炼释放与取消任务语义
+
+熔炼释放使用独立字段 `WorkOrder.meltReleasedAt` 和 `meltReleasedByUserId`：
+
+- 未释放工单不进入合炉排产池；已释放且未关闭、仍有剩余量的工单才进入排产池。
+- `production.schedule.release` 仅控制“释放工单进入排产池”，与 `production.schedule.create` 的生成炉次权限分离。
+- 释放接口按工单行锁执行，重复点击或重复请求返回当前已释放结果，不重复生成数据、不重复改变时间和操作人。
+- 已关闭工单禁止释放；无工单数据范围时不能读取执行摘要或释放熔炼。
+- 任务取消不等于从执行历史中删除。已取消的制芯任务和熔炼炉次仍表明该工序曾经下达，摘要状态保持“已下达”，进度显示“已取消”，设备/班组等历史信息可查看但不能被计入当前有效数量或活动设备汇总。
+- 是否允许取消后重新生成由对应业务模块的现有唯一约束和状态机决定；本入口不绕过约束、不伪造重新下达。
+
+### 并发、权限和接口约束
+
+- `GET /api/admin/production/work-orders/:id/routing-execution` 返回工单锁定路线的执行摘要。
+- `POST /api/admin/production/work-orders/:id/melt-release` 执行熔炼手动释放。
+- 摘要读取使用 `production.work_order.view`；节点动作必须再满足对应模块权限，熔炼释放必须满足 `production.schedule.release`。
+- 前端隐藏按钮只改善操作体验，后端权限守卫、数据范围和事务校验是最终安全边界。
+- 摘要读取只反映提交时数据库状态。页面操作前后都必须重新读取数据；下达、派工和报工继续使用各模块的乐观锁/状态条件更新，旧页面不能覆盖移动端或其他管理端的新状态。
+- 事务内的行锁和幂等判断必须覆盖并发双击、网络重试和两个终端同时释放的场景；所有状态、数量、设备、班组和操作记录以服务端为准。
+
+### 数据库迁移与历史回填
+
+- 熔炼释放字段的正式迁移为 `apps/api/prisma/migrations/20260826195000_work_order_melt_release/migration.sql`。受管环境使用 `prisma migrate deploy`；最初通过 `prisma db push` 建库且没有迁移历史的本地环境，按项目现有流程使用同版本 Prisma CLI 执行 `prisma db push`。
+- 历史工单需要回填到排产池时，必须显式指定截止时间：`npm --prefix apps/api run backfill:work-order-melt-release -- --before=<ISO timestamp>`，或使用环境变量 `MELT_RELEASE_BACKFILL_BEFORE`。裸执行不得全量释放。
+- 回填条件必须包含 `meltReleasedAt IS NULL` 且 `createdAt < cutoff`，输出截止时间和更新数量；按明确截止时间重跑应幂等，避免将回填命令误释放新建工单。
+- 上线前先备份数据库并在测试库演练迁移、回填和回滚检查；迁移完成后验证新建工单不进池、历史工单按截止时间进入池、权限和数据范围仍有效。

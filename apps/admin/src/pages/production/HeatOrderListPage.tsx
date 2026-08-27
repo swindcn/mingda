@@ -2,7 +2,7 @@ import { CloseCircleOutlined, EyeOutlined, FireOutlined, SearchOutlined, SwapOut
 import { Button, Card, Input, Modal, Tag, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { ResizableTable } from '../../components/ResizableTable'
 import { TableActions } from '../../components/TableActions'
 import { cancelHeatOrder, fetchHeatOrders, heatStatusColors, heatStatusLabels, type HeatOrderRecord, type HeatOrderStatus } from '../../utils/production'
@@ -13,10 +13,23 @@ const statusOptions: Array<{ label: string; value?: HeatOrderStatus }> = [
   { label: '全部' }, { label: '待生产', value: 'WAITING' }, { label: '熔炼中', value: 'IN_PROGRESS' }, { label: '转运中', value: 'TRANSFERRING' }, { label: '已完成', value: 'COMPLETED' }, { label: '已撤销', value: 'CANCELED' },
 ]
 
+const readPageParam = (value: string | null, fallback: number) => {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
 export function HeatOrderListPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlStateKey = searchParams.toString()
+  const workOrderId = searchParams.get('workOrderId') || undefined
+  const urlStatus = (searchParams.get('status') as HeatOrderStatus) || undefined
+  const urlPage = readPageParam(searchParams.get('page'), 1)
+  const urlPageSize = readPageParam(searchParams.get('pageSize'), 10)
   const [records, setRecords] = useState<HeatOrderRecord[]>([])
-  const [status, setStatus] = useState<HeatOrderStatus>()
+  const [status, setStatus] = useState<HeatOrderStatus | undefined>(urlStatus)
+  const [page, setPage] = useState(urlPage)
+  const [pageSize, setPageSize] = useState(urlPageSize)
   const [loading, setLoading] = useState(false)
   const canStart = hasPermission('production.heat.start')
   const canTransfer = hasPermission('production.heat.transfer')
@@ -25,9 +38,43 @@ export function HeatOrderListPage() {
 
   const refresh = async (nextStatus = status) => {
     setLoading(true)
-    try { setRecords(await fetchHeatOrders(nextStatus)) } catch (error) { message.error(error instanceof Error ? error.message : '熔炼任务加载失败') } finally { setLoading(false) }
+    try { setRecords(await fetchHeatOrders(nextStatus, workOrderId)) } catch (error) { message.error(error instanceof Error ? error.message : '熔炼任务加载失败') } finally { setLoading(false) }
   }
-  useEffect(() => { void refresh() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  const updateQuery = (nextStatus = status, nextPage = page, nextPageSize = pageSize) => setSearchParams((current) => {
+    const next = new URLSearchParams(current)
+    if (nextStatus) next.set('status', nextStatus)
+    else next.delete('status')
+    if (nextPage === 1) next.delete('page')
+    else next.set('page', String(nextPage))
+    if (nextPageSize === 10) next.delete('pageSize')
+    else next.set('pageSize', String(nextPageSize))
+    return next
+  }, { replace: true })
+  const clearWorkOrderFilter = () => setSearchParams((current) => {
+    const next = new URLSearchParams(current)
+    next.delete('workOrderId')
+    return next
+  }, { replace: true })
+  const detailQuery = () => {
+    const next = new URLSearchParams(searchParams)
+    if (workOrderId) {
+      next.delete('workOrderId')
+      next.set('fromWorkOrderId', workOrderId)
+    }
+    const currentPage = next.get('page')
+    const currentPageSize = next.get('pageSize')
+    if (currentPage) { next.delete('page'); next.set('fromPage', currentPage) }
+    if (currentPageSize) { next.delete('pageSize'); next.set('fromPageSize', currentPageSize) }
+    return next.toString()
+  }
+  useEffect(() => {
+    setStatus(urlStatus)
+    setPage(urlPage)
+    setPageSize(urlPageSize)
+    queueMicrotask(() => void refresh(urlStatus))
+    // URL is the source of truth, including browser back/forward navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlStateKey])
 
   const runCancel = (record: HeatOrderRecord) => {
     let reason = ''
@@ -57,7 +104,7 @@ export function HeatOrderListPage() {
     {
       title: '操作', key: 'actions', fixed: 'right', width: 210,
       render: (_, record) => <TableActions actions={[
-        { key: 'view', label: '查看', icon: <EyeOutlined />, onClick: () => navigate(`/dashboard/production/heat-orders/${record.id}`) },
+        { key: 'view', label: '查看', icon: <EyeOutlined />, onClick: () => navigate(`/dashboard/production/heat-orders/${record.id}${detailQuery() ? `?${detailQuery()}` : ''}`) },
         ...(record.canStart && canStart ? [{ key: 'start', label: '开始', icon: <FireOutlined />, onClick: () => reportActionError(openHeatStart(record, refresh)) }] : []),
         ...(record.canTransfer && canTransfer ? [{ key: 'transfer', label: '转运', icon: <SwapOutlined />, onClick: () => reportActionError(openHeatTransfer(record, refresh)) }] : []),
         ...(record.canComplete && canComplete ? [{ key: 'complete', label: '完成', icon: <FireOutlined />, onClick: () => reportActionError(openHeatComplete(record, refresh)) }] : []),
@@ -69,13 +116,16 @@ export function HeatOrderListPage() {
   return <>
     <div className="page-header">
       <div><h1 className="page-title">熔炼执行</h1><p className="page-description">监控已下发炉次，查看班组执行和实际出炉结果。</p></div>
-      <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={() => void refresh()}>查询</Button>
+      <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={() => updateQuery(status, 1, pageSize)}>查询</Button>
     </div>
     <Card>
-      <div className="production-status-filters production-heat-filters">
-        {statusOptions.map((item) => <Button key={item.value || 'ALL'} type={status === item.value ? 'primary' : 'default'} onClick={() => { setStatus(item.value); void refresh(item.value) }}>{item.label}</Button>)}
+      <div className="production-query-row">
+        {workOrderId && <Tag closable onClose={clearWorkOrderFilter}>当前生产工单</Tag>}
+        <div className="production-status-filters">
+          {statusOptions.map((item) => <Button key={item.value || 'ALL'} type={status === item.value ? 'primary' : 'default'} onClick={() => { setStatus(item.value); updateQuery(item.value, 1, pageSize) }}>{item.label}</Button>)}
+        </div>
       </div>
-      <ResizableTable storageKey="production-heat-order-widths" rowKey="id" columns={columns} dataSource={records} loading={loading} pagination={{ pageSize: 10 }} />
+      <ResizableTable storageKey="production-heat-order-widths" rowKey="id" columns={columns} dataSource={records} loading={loading} pagination={{ current: page, pageSize, total: records.length, showSizeChanger: true, onChange: (nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); updateQuery(status, nextPage, nextPageSize) } }} />
     </Card>
   </>
 }

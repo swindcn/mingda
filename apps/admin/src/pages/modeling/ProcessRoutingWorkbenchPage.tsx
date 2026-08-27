@@ -1,6 +1,6 @@
 import { CheckOutlined, CloudUploadOutlined, SearchOutlined } from '@ant-design/icons'
 import { Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Switch, Tabs, Tag, message } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import { SubPageHeader } from '../../components/SubPageHeader'
 import { hasPermission } from '../../utils/roles'
@@ -42,6 +42,7 @@ export function ProcessRoutingWorkbenchPage() {
   const { id } = useParams()
   const [basicForm] = Form.useForm<BasicValues>()
   const [nodeForm] = Form.useForm<RoutingNodeRecord>()
+  const lastInitializedNodeId = useRef<string | undefined>(undefined)
   const [options, setOptions] = useState<RoutingOptions>({ products: [], operations: [], equipment: [] })
   const [record, setRecord] = useState<ProcessRoutingRecord>()
   const [productCodes, setProductCodes] = useState<string[]>([])
@@ -79,9 +80,18 @@ export function ProcessRoutingWorkbenchPage() {
   }, [basicForm, id])
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId)
+  const isShakeCleaningNode = Boolean(selectedNode && (selectedNode.operationCode === 'OP-SHAKE' || selectedNode.section === '清理'))
   useEffect(() => {
-    if (selectedNode) nodeForm.setFieldsValue(selectedNode)
-  }, [nodeForm, selectedNode])
+    if (lastInitializedNodeId.current === selectedNodeId) return
+    lastInitializedNodeId.current = selectedNodeId
+    nodeForm.resetFields()
+    if (selectedNode) {
+      nodeForm.setFieldsValue({
+        ...selectedNode,
+        coolingDurationMinutes: selectedNode.coolingDurationMinutes ?? 0,
+      })
+    }
+  }, [nodeForm, nodes, selectedNodeId])
 
   const operations = useMemo(() => {
     const key = operationKeyword.trim().toLowerCase()
@@ -124,7 +134,7 @@ export function ProcessRoutingWorkbenchPage() {
         if (!record) navigate(`/dashboard/model/routing/${saved.id}/edit`, { replace: true, state: location.state })
       }
     } catch (error) {
-      if (error instanceof Error) message.error(error.message)
+      message.error(error instanceof Error ? error.message : '工艺路线保存失败，请检查必填项和路线配置')
     } finally {
       setSaving(false)
     }
@@ -211,6 +221,7 @@ export function ProcessRoutingWorkbenchPage() {
         children: <RoutingApplicableProducts
           products={options.products}
           selectedCodes={productCodes}
+          currentRoutingCode={record?.code}
           defaultProductCodes={record?.defaultProductCodes || []}
           editable={productEditable}
           saved={Boolean(record)}
@@ -232,6 +243,7 @@ export function ProcessRoutingWorkbenchPage() {
         <Form.Item name="qualityRequirement" label="质检要求"><Input placeholder="如：光谱首检、温度/球化、100%全检" /></Form.Item>
         <Form.Item name="equipmentCodes" label="适用设备"><Select mode="multiple" showSearch optionFilterProp="label" options={options.equipment.map((item) => ({ label: `${item.name}（${item.code}）${item.workshopName ? ` · ${item.workshopName}` : ''}`, value: item.code }))} /></Form.Item>
         <Form.Item name="standardCycleSeconds" label="标准节拍（秒）"><InputNumber min={0} precision={0} style={{ width: '100%' }} /></Form.Item>
+        {isShakeCleaningNode && <Form.Item name="coolingDurationMinutes" label="要求冷却时长（分钟）"><InputNumber min={0} precision={0} style={{ width: '100%' }} /></Form.Item>}
         <div className="routing-binding-title">生产绑定规则 {selectedNode.pouringMergePoint && <Tag color="orange" icon={<CheckOutlined />}>浇注强制</Tag>}</div>
         <div className="routing-drawer-switches routing-binding-switches">
           <Form.Item name="requireFurnaceBatch" label="炉批次" valuePropName="checked"><Switch disabled={Boolean(selectedNode.pouringMergePoint) || !editable} /></Form.Item>

@@ -24,7 +24,7 @@ export interface HeatOrderBody {
   plannedStartAt?: string
   plannedFinishAt?: string
   confirmScheduleConflict?: boolean
-  allocations?: Array<{ workOrderId?: string; quantity?: number }>
+  allocations?: Array<{ workOrderId?: string; quantity?: number; routingNodeId?: string }>
 }
 
 export interface HeatConflictBody {

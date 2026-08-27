@@ -433,6 +433,16 @@ npm run build:miniprogram
 - 数据结构：`apps/api/prisma/schema.prisma`
 - 接口回归：`apps/api/scripts/test-mold-coreboxes.mjs`、`apps/api/scripts/test-casting-boms.mjs`
 
+## 工艺路线产品归属（2026-08-15）
+
+- 一条工艺路线可绑定多个成品或半成品，但一个产品物料编码只能归属一个当前工艺路线主档。同一主档的 V1.0、V2.0 等历史版本可保留相同产品，不视为冲突。
+- 草稿和已生效版本都会占用产品；已停用路线释放产品归属。新增路线、编辑草稿、维护适用产品和路线升版均由 `apps/api/src/process-routing/process-routing.controller.ts` 在事务内校验。
+- 后端按产品编码排序后获取 PostgreSQL advisory lock，再检查其他路线主档的 `DRAFT/ACTIVE` 关系，防止并发请求重复分配。冲突响应包含产品编码、已关联路线编码和名称。
+- 路线克隆只复制工序节点、设备和有向边，不复制适用产品。管理端的适用产品选择器过滤已归属其他路线的产品，但后端校验仍是安全边界。
+- 工艺路线保存必须处理 Ant Design 表单校验的非 `Error` 拒绝对象并显示统一提示，禁止再次出现点击保存无反馈。
+- 工艺路线回收站是版本级软归档：只有 `DISABLED` 版本可以回收，普通列表隐藏 `recycledAt` 非空记录，右上角回收站支持查看和恢复，不提供永久删除。回收不改变产品归属和历史工单数据，权限为 `model.routing.recycle`。
+- 工艺路线与材质牌号无直接关系，主列表不显示或筛选材质牌号；列表中的“关联产品数”取当前版本实际关联产品数量。产品材质继续由物料、BOM、配方和生产模块负责。
+
 ## 制芯计划、报工与砂芯库存（2026-08-15）
 
 完整业务关系：
@@ -460,7 +470,7 @@ npm run build:miniprogram
 - 剩余时间 `<= 24h` 为 `WARNING`，到期为 `EXPIRED`；过期、待烘干、冻结、报废和耗尽批次不可领用。保质期为空表示长期有效，但需烘干批次仍要先完成烘干。
 - `CoreInventoryScheduler` 每 10 分钟批量刷新临期/过期状态；库存读取、齐套和领用校验还会实时刷新，不能只依赖定时任务。
 - 批次可 `LOCKED / UNLOCKED / SCRAPPED / CONSUMED`；入库、冻结、解冻、报废和未来领用都写 `CoreInventoryLedger`。报废清零，领用扣减到零后转 `CONSUMED`。
-- 齐套按目标工单锁定 BOM 的芯盒逐行计算，只统计同产品、同芯盒、状态为 `AVAILABLE/WARNING` 且数量大于 `0` 的库存。同产品的旧/新 BOM 或其他工单若包含同一芯盒，可以共用有效批次；不同产品即使芯盒相同也不兼容。
+- 制芯模块原有工单齐套查询按产品与芯盒统计库存；造型下芯执行不得复用这个跨工单口径。造型开工与报工只允许使用 `CoreInventoryBatch -> CoreProductionReport -> CoreProductionTask.workOrderId` 与当前生产工单完全一致的砂芯批次。
 
 页面、路由与真实接口：
 
@@ -484,4 +494,162 @@ npm run build:miniprogram
 - 生产工单已完成或已关闭时，后端返回 `canGenerateCoreTasks=false`；制芯任务详情返回批次前实时刷新临期和过期状态，不能只依赖定时任务。
 - 任务生成锁工单，开始/报工锁任务，烘干/库存动作/未来消费锁批次；任务与批次编码通过事务序列生成，报工、批次和流水整体成功或整体回滚。
 - `apps/api/src/production/coremaking.service.ts` 已预留无页面依赖的 `validateCoreConsumption(...)` 和 `consumeCoreBatch(...)`，包含产品、目标锁定 BOM 芯盒、状态、数量、行锁、乐观锁和 `CONSUMED` 流水校验。
-- 一期只有 `GET /admin/production/work-orders/:id/core-readiness` 暴露为 HTTP；`validateCoreConsumption`、`consumeCoreBatch` 尚未挂控制器。当前不做造型任务、造型排产或下芯领用页面，后续造型模块应复用这两个领域方法，不能绕过库存流水直接改数量。
+- `GET /admin/production/work-orders/:id/core-readiness` 继续服务制芯库存概览；造型下芯已使用独立的任务齐套和事务倒冲逻辑。后续模块不得绕过 `CoreInventoryLedger` 直接修改砂芯库存。
+
+## 造型下芯任务与报工（2026-08-18）
+
+业务关系：
+
+```text
+生产工单锁定生效 BOM / 生效工艺路线
+  -> 手动选择 BOM 模具、造型工序节点、造型生产线和班组
+  -> MoldingTask（工单 + 路线节点唯一）
+  -> 同工单 CoreProductionTask 完成 + 同工单砂芯库存至少支持一箱
+  -> 开工
+  -> 多次 MoldingReport
+  -> MoldingReportDefect + MoldingCoreConsumption
+  -> CoreInventoryLedger 倒冲或撤销返还
+```
+
+任务生成与数量：
+
+- 工单锁定路线存在 `OperationMaster.section = 造型` 时才显示“生成造型下芯任务”。任务不自动生成，生成入口位于生产工单详情。
+- 版本锁定是生产执行依据：新建工单时只能选择当时已生效的 BOM 和工艺路线；工单一旦保存 `bomVersionId` / `routingVersionId` 及快照，后续制芯、造型、熔炼等执行模块必须继续使用该锁定版本，不得因主数据版本后续停用而拦截历史工单。工单已完成或已关闭仍按工单状态禁止生成新任务。
+- 同一生产工单与同一路线节点只能存在一条任务，约束为 `MoldingTask.@@unique([workOrderId, routingNodeId])`。取消任务保留审计数据，不通过重复生成绕过唯一性。
+- BOM 有多个启用模具时必须选择；单模具默认带入。任务保存产品、BOM、路线、工序、模具、型腔、产线、车间、班组和砂芯需求快照。
+- 计划箱数为 `ceil(工单计划件数 / 模具型腔数)`；每箱砂芯需求为 `BOM 单件芯件比 × 模具型腔数`；每次报工倒冲为 `(合格箱数 + 废品箱数) × 每箱砂芯需求`。
+- 执行资源使用 `ProductionLine`，只能选择启用的造型类型车间产线；班组必须启用且与产线同车间。
+
+齐套、报工和库存：
+
+- 任务主状态与砂芯齐套必须分离。当前生成表单必填产线和班组，生成或再次派工后持久化 `DISPATCHED（已派工）`；砂芯齐套仍使用 `READY / WAITING_CORE_TASK / INSUFFICIENT_CORE` 实时计算，不得覆盖主状态。`ready` 表示是否满足整单计划量，`startable` 表示是否具备最低开工条件，两者不能混用。
+- 任务状态流转为 `PENDING -> DISPATCHED -> IN_PROGRESS -> COMPLETED`，`PENDING / DISPATCHED` 允许取消。只有 `DISPATCHED`、所需同工单制芯任务全部完成，且每种砂芯现有可用量至少支持生产一箱时才能开工；不要求库存覆盖整张造型任务。
+- 开工前实时计算 `maxProducibleBoxQty = min(floor(各砂芯可用量 / 对应每箱需求量))`。完整齐套显示“已齐套”；不足计划量但可开工显示“部分齐套 · 可生产 X 箱”；制芯未完成或任一必需砂芯不足一箱时禁止开工并显示具体原因。
+- 禁止跨生产工单借用砂芯。库存查询通过批次来源报工和制芯任务追溯到 `workOrderId`，不能只按产品或芯盒匹配。
+- 同工单批次按 `WARNING 优先 -> 最早过期 -> 最早生产` 分配，可跨多个批次。正常批次不足时，造型报工允许把差额透支到本次最后使用的来源批次；没有正库存时使用同工单、同芯盒最近产生且可追溯的来源批次。若完全不存在来源批次则禁止报工，不能生成无来源负库存。
+- 砂芯透支后的 `CoreInventoryBatch.currentQuantity` 允许为负并保持 `CONSUMED`，消费明细和 `CoreInventoryLedger` 必须记录透支前后数量。后续齐套按同工单、同芯盒全部批次的正负余额净额计算，接口展示的可用量最低为 `0`，负数只参与内部欠账抵扣；新生产入库应先抵消该欠账语义。
+- 非零报工、缺陷、消费明细、库存数量、库存流水和任务汇总在同一个可串行化事务内提交。零数量报工不生成砂芯消费和缺陷明细，只允许用于结束任务，并强制填写结束原因；零数量继续生产由前端和后端同时拦截。
+- 报工废品数大于 `0` 时必须填写一个或多个缺陷明细，缺陷数量之和必须等于废品箱数。可选缺陷仅来自已启用且通过 `DefectOperation` 绑定当前标准工序的 `DefectCode`。
+- `requestId` 在同一任务内唯一，小程序重试同一请求不会重复报工或重复扣料；任务动作同时使用 `versionNo` 防止管理端与小程序旧页面覆盖新数据。
+- 允许超产并记录 `overproductionQty`；低于计划提前结束必须填写原因，任务记录 `completionType = SHORT` 和计划差额语义。
+- 撤销只在管理端提供。报工不物理删除，按原 `MoldingCoreConsumption` 精确返还原批次并写 `ADJUSTED` 台账；透支消费也必须返还到原透支批次，恢复撤销前的来源追溯。原批次已报废时禁止直接撤销；后续浇注模块引用造型产出后也必须禁止撤销。
+- 造型完成只更新造型工序进度，不直接增加生产工单最终完工数量。最终工单完成由后续路线执行引擎在最后工序报工后判断。
+
+页面、接口与权限：
+
+- 管理端：`/dashboard/production/molding-tasks`、`/dashboard/production/molding-tasks/:id`。主要实现为 `MoldingTaskGenerationModal.tsx`、`MoldingTaskListPage.tsx`、`MoldingTaskDetailPage.tsx` 和 `apps/admin/src/utils/molding.ts`。
+- 小程序：`pages/molding/list/index`、`detail/index`、`report/index`。支持扫码/手输派工单、下拉刷新、开工、快捷数量、缺陷多行和分批报工；不提供撤销。
+- 后端：`apps/api/src/production/molding.service.ts`、`molding.controller.ts`、`molding.types.ts`、`molding.calculations.ts`。
+- 管理端权限：`production.molding.view/create/dispatch/start/report/cancel/reverse`。
+- 小程序权限：`mini.production.molding.view/start/report`。小程序普通员工还必须属于任务执行班组，超级管理员例外。
+- 小程序模具开发入口使用独立权限 `mini.mold.development.view`。无此权限时首页九宫格、模具待办与数量均不显示，`/mobile/todos`、`/mobile/molds*` 及模具动作接口也必须由后端拒绝；具备权限后仍按供应商归属、跟单人和角色数据范围过滤，不能用菜单权限替代数据权限。
+- 缺陷代码管理的“适用工序”是 `DefectCode` 与 `OperationMaster` 的真实多对多关系，不再使用自由文本判断。
+- 零数量关单与负库存详细设计见 `docs/superpowers/specs/2026-08-19-molding-zero-report-negative-core-inventory-design.md`。
+
+验证命令：
+
+```bash
+npm --prefix apps/api run test:molding-calculations
+DATABASE_URL='postgresql://mingda:mingda_dev_password@127.0.0.1:5433/mingda_casting?schema=public' npm --prefix apps/api run test:defect-operations
+DATABASE_URL='postgresql://mingda:mingda_dev_password@127.0.0.1:5433/mingda_casting?schema=public' npm --prefix apps/api run test:molding-execution
+npm --prefix apps/miniprogram test
+```
+
+## 合型浇注执行（2026-08-24）
+
+业务追溯关系：
+
+```text
+MoldingReport（合格箱数）
+  -> PouringMoldBatch（待浇砂型批次，按合型时间 FIFO）
+HeatOrderAllocation -> HeatOrder -> HeatOrderTransfer（具体炉次/包次）
+  -> PouringReport
+       -> PouringMoldConsumption（精确扣减砂型批次）
+       -> PouringReportDefect（绑定 OP-POUR 的缺陷）
+```
+
+- 每笔有效造型报工只按 `goodQty` 生成一条待浇批次；造型废品和零数量关闭不进入队列。浇注节点从工单锁定路线的真实有向边向后查找首个 `pouringMergePoint`，历史路线即使后来停用仍按工单锁定版本执行。
+- 浇注报工一次绑定一个具体 `HeatOrderTransfer`、一个造型任务和一个路线浇注节点设备。包次必须来自包含当前工单分配、材质一致且处于转运中或已完成的炉次；页面不能只保存可复用的包设备编码。
+- 一次浇注可跨同一造型任务的多笔待浇批次，固定按 `closingTime -> id` FIFO 扣减。扣减箱数为 `goodQty + scrapQty`；理论重量为 `(合格箱 + 废品箱) × 模具穴数 × 工单单件浇注毛重`，实际重量默认理论值并允许修改。
+- 铁水余额由转运重量减去全部有效浇注报工实际重量动态计算。允许超出余额和保存负数，但必须先确认 `TRANSFER_OVERDRAW`；合型超过 120 分钟必须确认 `CRITICAL_HOLD`，90 至 120 分钟显示优先浇注提示。本期不做双人或质检放行。
+- 浇注废品必须选择通过 `DefectOperation` 绑定当前浇注工序的缺陷，缺陷数量合计必须等于废品箱数。本地标准缺陷包含跑火、浇不足、冷隔、夹渣，统一绑定 `OP-POUR`。
+- 浇注报工使用 `requestId` 防重复、`HeatOrderTransfer.versionNo` 防止管理端和小程序旧页面覆盖新数据，并在可串行化事务中锁定包次和砂型批次。撤销只在管理端提供，按消费明细精确返还砂型并使包次动态余额恢复；造型报工已有有效浇注引用时必须先撤销浇注报工。
+- 浇注节点完成条件为造型任务已经完成且全部有效待浇批次余量为零。队列暂时清空但造型任务仍在生产时显示“等待后续造型”，不能提前判定工序完成，也不能直接更新生产工单最终完成数量。
+
+实现入口：
+
+- 后端：`apps/api/src/production/pouring.service.ts`、`pouring.controller.ts`、`pouring.queue.ts`、`pouring.calculations.ts`。
+- 管理端：`/dashboard/production/pouring-tasks`、`/dashboard/production/pouring-tasks/:id`。
+- 小程序：`pages/pouring/list/index`、`detail/index`、`report/index`；首页入口受 `mini.production.pouring.view` 控制。
+- 权限：管理端 `production.pouring.view/report/reverse`；小程序 `mini.production.pouring.view/report`。前端按钮隐藏只负责交互，API 的 `ProductionPermissionGuard` 是最终边界。
+
+验证命令：
+
+```bash
+npm --prefix apps/api run test:pouring-calculations
+DATABASE_URL='postgresql://mingda:mingda_dev_password@127.0.0.1:5433/mingda_casting?schema=public' API_BASE_URL='http://127.0.0.1:3001/api' npm --prefix apps/api run test:pouring-execution
+node --test apps/admin/tests/pouring-ui.test.mjs
+npm --prefix apps/miniprogram test
+```
+
+## 落砂清理执行（2026-08-24）
+
+业务链路固定为一个工艺节点、两个执行阶段：
+
+```text
+PouringReport.goodQty（浇注合格箱数）
+  × MoldingTask.cavityCountSnapshot（任务锁定穴数）
+  -> ShakeBatch（待落砂件数）
+  -> ShakeReport（落砂报工）
+  -> CleaningBatch（待清理件数）
+  -> CleaningReport（清理打磨报工）
+  -> BlankOutputBatch（合格毛坯产出）
+```
+
+- 工艺路线只配置一个 `OP-SHAKE / 落砂清理` 节点，节点内部依次执行“落砂”和“清理打磨”，不能把两个阶段分别推进两次路线进度。
+- 待落砂数量只取有效浇注报工的 `goodQty × 穴数快照`；浇注废品不进入落砂。穴数来自工单/造型任务锁定快照，不读取后来修改的 BOM 或模具档案。
+- 冷却分钟数配置在路线节点并快照到落砂批次。未达到冷却时长只显示风险和要求单人二次确认，本期允许提前落砂，并记录要求时长、实际时长和 `earlyShake`。
+- 落砂和清理分别维护独立 FIFO 队列。落砂按 `pouredAt -> id`，清理按 `availableAt -> id` 消费；一次报工可跨多个批次，必须保存精确消费明细以支持追溯和撤销。
+- 报工设备必须已启用、绑定当前路线节点，并通过“设备类型配置”判断。落砂阶段仅接受“落砂”类型；清理阶段接受“清理、抛丸、打磨、切割”类型。不能通过设备名称模糊猜测用途。
+- 两阶段废品均只能选择已启用且通过 `DefectOperation` 绑定标准工序 `OP-SHAKE` 的缺陷，缺陷数量合计必须等于废品数。
+- 清理合格数量生成 `BlankOutputBatch`。当前节点没有后继时状态为 `WAITING_WAREHOUSE`；恰有一个后继时保存 `nextRoutingNodeId` 供后续工序消费；存在多个直接后继时按路线配置错误拦截，不能自行猜测分支。
+- 任务队列暂时为空但上游浇注尚未结束时为 `WAITING_POURING`；只有上游浇注完成、待落砂和待清理余量均为零时，落砂清理节点才为 `COMPLETED`。本节点完成不直接改写生产工单最终合格数量。
+- 撤销顺序必须从下游向上游：先撤销清理，再撤销落砂，最后才可撤销浇注。所有撤销保留原记录、操作人姓名快照、时间和原因，不物理删除。
+- 报工使用任务内唯一 `requestId` 幂等，批次使用 `versionNo` 乐观锁，数量与状态变更在 `Serializable` 事务内执行。报工和撤销统一先锁 `MoldingTask`，再按 FIFO 锁批次。
+- 浇注报工使用 `shakeQueueResolution` 区分 `PENDING`（待解析）、`CREATED`（已生成或已有待落砂批次）、`NOT_APPLICABLE`（撤销、无有效合格数或锁定路线无可达落砂节点）。只有 `PENDING` 是历史缺口；`NOT_APPLICABLE` 不得误拦截，也不会因后续路线变化重新入队。
+- 历史待落砂数据不允许在列表、详情或报工请求内自动补建。部署或升级必须运行 `npm --prefix apps/api run backfill:shake-batches`；该命令只处理 `PENDING`、分页独立提交、失败可重跑且幂等。在线服务检测到历史缺口时只返回明确运维提示。
+- 管理端权限为 `production.shake_clean.view/shake_report/clean_report/reverse`；小程序权限为 `mini.production.shake_clean.view/shake_report/clean_report`。按钮由后端 `allowedActions` 控制，API 权限守卫和 `production:molding_tasks` 数据范围是最终边界。
+- 管理端列表使用后端分页；小程序使用稳定 cursor，并在追加时按任务 ID 去重。小程序源码修改后必须执行 `npm --prefix apps/miniprogram run build` 同步 `src` 到 `dist`。
+- 后续热处理、机加工、检验或入库模块应消费有效 `BlankOutputBatch`，保存来源批次和消费明细；不得直接使用 `CleaningReport.goodQty` 或重复汇总任务累计数。
+
+设计与实施入口：
+
+- 设计：`docs/superpowers/specs/2026-08-24-shake-cleaning-execution-design.md`
+- 实施：`docs/superpowers/plans/2026-08-24-shake-cleaning-execution.md`
+- 后端：`apps/api/src/production/shake-clean.*`
+- 管理端：`/dashboard/production/shake-clean-tasks`
+- 小程序：`pages/shake-clean/`
+
+## 成品终检、清理返修与毛坯入库（2026-08-26）
+
+```text
+BlankOutputBatch（清理合格毛坯，唯一上游）
+  -> InspectionBatch（待检批次，按 availableAt -> id FIFO）
+  -> InspectionReport（合格 / 返修 / 报废）
+       ├─ 合格 -> BlankWarehouseReceipt -> BlankInventoryBatch -> BlankInventoryLedger
+       ├─ 返修 -> CleaningReworkTask -> CleaningReworkReport -> 新 InspectionBatch
+       └─ 报废 -> ScrapWriteOff -> ReturnMeltInventoryLedger
+```
+
+- 终检只消费工单锁定路线中 `OP-INSP / 成品终检` 节点对应的有效 `BlankOutputBatch`，不能直接汇总 `CleaningReport.goodQty`。历史路线停用不影响已锁定工单继续执行。
+- 一张工单可多次终检；一次报工可跨多个待检批次，保存 `InspectionBatchConsumption` 并固定按 FIFO 扣减。
+- 分流仅包含合格、清理返修、报废，一期不提供让步接收。三项合计必须大于零且不超过当前剩余待检数。
+- 合格进入系统仓库 `BLANK_WAREHOUSE / 铸件毛坯库`；报废进入 `RETURN_MELT_WAREHOUSE / 回炉料仓`。报废重量留空时按 `报废件数 × 工单锁定 BOM 单件净重` 计算，允许人工修改。
+- 返修使用工单锁定路线中终检之前最近的 `OP-SHAKE` 节点及其清理设备。返修合格数生成新待检批次；返修报废数进入回炉料仓，不通过路线反向边修改主流程。
+- 缺陷只允许选择已启用且绑定 `OP-INSP` 的缺陷代码；终检最多上传一张缺陷图片。
+- 工单仅在存在有效终检报告、待检和返修余量均为零且上游执行队列全部结束时进入 `COMPLETED`；最终完成数量取有效毛坯入库数量。
+- 终检和返修使用稳定 `requestId`、`versionNo` 和 `Serializable` 事务。旧页面提交返回 `409` 并刷新，不能覆盖其他终端新数据。
+- 撤销只在管理端提供。已有返修报工或合格毛坯发生下游出库时禁止撤销；可撤销时恢复待检批次并用反向库存流水冲销。
+- 权限：管理端 `production.inspection.view/report/reverse`、`production.cleaning_rework.view/report`；小程序 `mini.production.inspection.view/report`、`mini.production.cleaning_rework.view/report`。
+- 实现：后端 `apps/api/src/production/final-inspection.*`；管理端 `/dashboard/production/inspection-tasks`；小程序 `pages/inspection/`。
+- 设计与计划：`docs/superpowers/specs/2026-08-26-final-inspection-design.md`、`docs/superpowers/plans/2026-08-26-final-inspection-execution.md`。

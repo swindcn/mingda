@@ -17,9 +17,18 @@ import { HeatExecutionController, MobileHeatExecutionController } from './produc
 import { ProductionPermissionGuard } from './production/production-permission.guard'
 import { ProductionService } from './production/production.service'
 import { WorkOrderController } from './production/work-order.controller'
+import { WorkOrderRoutingExecutionService } from './production/work-order-routing-execution.service'
 import { CoremakingController, MobileCoremakingController } from './production/coremaking.controller'
 import { CoremakingService } from './production/coremaking.service'
 import { CoreInventoryScheduler } from './production/core-inventory.scheduler'
+import { MobileMoldingController, MoldingController } from './production/molding.controller'
+import { MoldingService } from './production/molding.service'
+import { MobilePouringController, PouringController } from './production/pouring.controller'
+import { PouringService } from './production/pouring.service'
+import { MobileShakeCleanController, ShakeCleanController } from './production/shake-clean.controller'
+import { ShakeCleanService } from './production/shake-clean.service'
+import { FinalInspectionController, MobileFinalInspectionController } from './production/final-inspection.controller'
+import { FinalInspectionService } from './production/final-inspection.service'
 
 @Module({
   imports: [
@@ -48,7 +57,15 @@ import { CoreInventoryScheduler } from './production/core-inventory.scheduler'
     MobileHeatExecutionController,
     CoremakingController,
     MobileCoremakingController,
+    MoldingController,
+    MobileMoldingController,
+    PouringController,
+    MobilePouringController,
+    ShakeCleanController,
+    MobileShakeCleanController,
+    FinalInspectionController,
+    MobileFinalInspectionController,
   ],
-  providers: [ResourceParserService, ProductionService, CoremakingService, CoreInventoryScheduler, ProductionPermissionGuard],
+  providers: [ResourceParserService, ProductionService, WorkOrderRoutingExecutionService, CoremakingService, MoldingService, PouringService, ShakeCleanService, FinalInspectionService, CoreInventoryScheduler, ProductionPermissionGuard],
 })
 export class AppModule {}

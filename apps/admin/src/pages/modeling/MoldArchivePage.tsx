@@ -20,7 +20,7 @@ import { hasPermission } from '../../utils/roles'
 import { MoldCoreBoxEditor } from './MoldCoreBoxEditor'
 
 const emptyOptions: ModelingOptions = {
-  workshops: [], lines: [], teams: [], items: [], materials: [], molds: [], moldDevelopments: [], shifts: [], suppliers: [], employees: [],
+  workshops: [], lines: [], teams: [], items: [], materials: [], molds: [], moldDevelopments: [], shifts: [], suppliers: [], employees: [], operations: [],
 }
 
 function optionLabel(record: ModelingRecord) {

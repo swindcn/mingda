@@ -1,10 +1,29 @@
 <view class="page">
-  <view class="todo-card card" wx:for="{{todos}}" wx:key="id" bindtap="openTodo" data-id="{{item.moldId}}">
-    <view class="todo-header">
-      <text class="todo-title">{{item.title}}</text>
-      <text class="todo-type">{{item.moduleName}}</text>
+  <view class="todo-list">
+    <view
+      class="todo-card"
+      wx:for="{{todos}}"
+      wx:key="id"
+      bindtap="openTodo"
+      data-id="{{item.moldId}}"
+    >
+      <view class="todo-line">
+        <view class="todo-title">{{item.title}}</view>
+        <text class="priority-tag priority-tag-{{item.priorityTone}}">{{item.priority}}</text>
+      </view>
+      <view class="todo-row">
+        <text class="badge badge-muted">{{item.moduleName}}</text>
+        <text class="todo-state">{{item.stateText}}</text>
+      </view>
+      <view class="todo-due">
+        <image class="clock-icon" src="/assets/icons/clock.svg" />
+        <text>{{item.dueText}}</text>
+      </view>
     </view>
-    <view class="todo-meta">{{item.moldId}} · {{item.stateText}}</view>
-    <view class="todo-due">{{item.dueText}}</view>
+
+    <view wx:if="{{!todos.length}}" class="empty-state">
+      <image class="empty-img" src="/assets/icons/empty-box.svg" />
+      <view>暂无待办事项</view>
+    </view>
   </view>
 </view>

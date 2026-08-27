@@ -1,0 +1,54 @@
+<view class="page" wx:if="{{task}}">
+  <view wx:if="{{!task.allowedActions.report}}" class="permission-block">当前账号无返修报工权限</view>
+  <block wx:if="{{task.allowedActions.report}}">
+    <view class="card">
+      <view class="head">
+        <text class="code">{{task.code}}</text>
+        <text class="task-state">剩余 {{task.remainingQuantity}} 件</text>
+      </view>
+      <view class="product">{{task.productNameSnapshot}}（{{task.productCodeSnapshot}}）</view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">清理设备</view>
+      <picker range="{{task.equipment}}" range-key="name" bindchange="chooseEquipment">
+        <view class="picker-value">{{equipmentText || '请选择路线绑定的清理设备'}}</view>
+      </picker>
+    </view>
+
+    <view class="card">
+      <view class="section-title">返修结果</view>
+      <view class="result-grid">
+        <view>
+          <text class="cell-label">返修合格数</text>
+          <view class="qty-stepper">
+            <view class="qty-btn" data-field="goodQty" data-delta="-1" bindtap="adjustQty">−</view>
+            <input class="qty-input" type="number" value="{{goodQty}}" data-field="goodQty" bindinput="inputQty" />
+            <view class="qty-btn qty-btn-primary" data-field="goodQty" data-delta="1" bindtap="adjustQty">+</view>
+          </view>
+        </view>
+        <view>
+          <text class="cell-label">报废数</text>
+          <view class="qty-stepper">
+            <view class="qty-btn" data-field="scrapQty" data-delta="-1" bindtap="adjustQty">−</view>
+            <input class="qty-input" type="number" value="{{scrapQty}}" data-field="scrapQty" bindinput="inputQty" />
+            <view class="qty-btn qty-btn-primary" data-field="scrapQty" data-delta="1" bindtap="adjustQty">+</view>
+          </view>
+        </view>
+      </view>
+      <view class="field-block" wx:if="{{scrapQty > 0}}">
+        <text>实际回炉重量（kg）</text>
+        <input class="input" type="digit" value="{{scrapWeightKg}}" placeholder="留空按BOM净重计算" bindinput="inputWeight" />
+      </view>
+      <view class="field-block">
+        <text>备注</text>
+        <textarea class="textarea" value="{{remark}}" placeholder="选填" bindinput="inputRemark" />
+      </view>
+    </view>
+
+    <view class="bottom-space"></view>
+    <view class="bottom">
+      <view class="submit-inline {{submitting ? 'is-disabled' : ''}}" hover-class="submit-inline-hover" bindtap="submit">{{submitting ? '提交中...' : '提交返修结果'}}</view>
+    </view>
+  </block>
+</view>

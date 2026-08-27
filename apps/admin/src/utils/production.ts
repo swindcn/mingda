@@ -9,6 +9,7 @@ export interface RoutingNodePreview {
   seqNo: number
   operationCode: string
   operationName: string
+  section?: string
   standardCycleSeconds?: number
   equipment: Array<{ code: string; name: string }>
 }
@@ -64,8 +65,55 @@ export interface WorkOrderRecord {
     completed: number
     canceled: number
   }
+  requiresMolding: boolean
+  canGenerateMoldingTask: boolean
+  moldingTaskCount: number
+  moldingTask: { id: string; code: string; status: string; routingNodeId: string } | null
+  meltRoutingNodeId: string
+  meltRoutingNodes: Array<{ id: string; code: string; name: string }>
   routingNodes: RoutingNodePreview[]
-  heatOrders: Array<{ allocationId: string; heatOrderId: string; heatOrderCode: string; status: HeatOrderStatus; allocatedQuantity: number; plannedWeightKg: number; actualWeightKg: number | null; furnaceCode: string; furnaceName: string; actualFurnaceCode: string; actualFurnaceName: string; transferTotalWeightKg: number; startedByName: string; startedAt: string; completedByName: string; completedAt: string }>
+  heatOrders: Array<{ allocationId: string; heatOrderId: string; routingNodeId: string; heatOrderCode: string; status: HeatOrderStatus; allocatedQuantity: number; plannedWeightKg: number; actualWeightKg: number | null; furnaceCode: string; furnaceName: string; actualFurnaceCode: string; actualFurnaceName: string; transferTotalWeightKg: number; startedByName: string; startedAt: string; completedByName: string; completedAt: string }>
+}
+
+export type WorkOrderExecutionModule = 'CORE' | 'MELT' | 'MOLDING' | 'POURING' | 'SHAKE_CLEAN' | 'INSPECTION' | 'UNSUPPORTED'
+export type WorkOrderExecutionAction = 'CREATE' | 'RELEASE_MELT' | 'VIEW' | 'WAIT' | 'NONE'
+
+export interface WorkOrderRoutingExecutionWarning {
+  code: string
+  message: string
+}
+
+export interface WorkOrderRoutingExecutionNode {
+  nodeId: string
+  seqNo: number
+  operationCode: string
+  operationName: string
+  module: WorkOrderExecutionModule
+  dispatchStatus: 'PENDING' | 'PARTIAL' | 'RELEASED' | 'WAITING_UPSTREAM' | 'UNSUPPORTED'
+  dispatchLabel: string
+  progressStatus: string
+  progressLabel: string
+  progressText: string
+  progressCurrent: number | null
+  progressTotal: number | null
+  progressUnit: string
+  equipmentNames: string[]
+  teamNames: string[]
+  taskCount: number
+  action: WorkOrderExecutionAction
+  actionEnabled: boolean
+  actionPermission: string
+  actionHint: string
+}
+
+export interface MeltReleaseResult {
+  released: boolean
+  alreadyReleased: boolean
+  routingNodeId: string
+  meltReleasedAt: string
+  meltReleasedByUserId: string
+  warnings: WorkOrderRoutingExecutionWarning[]
+  nodes: WorkOrderRoutingExecutionNode[]
 }
 
 export interface WorkOrderPreview {
@@ -199,6 +247,17 @@ export function fetchWorkOrder(id: string) {
   return apiRequest<WorkOrderRecord>(`/admin/production/work-orders/${id}`)
 }
 
+export function fetchWorkOrderRoutingExecution(id: string) {
+  return apiRequest<WorkOrderRoutingExecutionNode[]>(`/admin/production/work-orders/${encodeURIComponent(id)}/routing-execution`)
+}
+
+export function releaseWorkOrderMelt(id: string, routingNodeId?: string) {
+  return apiRequest<MeltReleaseResult>(`/admin/production/work-orders/${encodeURIComponent(id)}/melt-release`, {
+    method: 'POST',
+    body: JSON.stringify(routingNodeId ? { routingNodeId } : {}),
+  })
+}
+
 export function createWorkOrder(payload: WorkOrderPayload) {
   return apiRequest<WorkOrderRecord>('/admin/production/work-orders', { method: 'POST', body: JSON.stringify(payload) })
 }
@@ -211,8 +270,9 @@ export function closeWorkOrder(id: string, versionNo: number, reason: string) {
   return apiRequest<WorkOrderRecord>(`/admin/production/work-orders/${id}/close`, { method: 'POST', body: JSON.stringify({ versionNo, reason }) })
 }
 
-export function fetchMeltPool() {
-  return apiRequest<{ groups: MeltPoolGroup[] }>('/admin/production/melt-pool')
+export function fetchMeltPool(workOrderId?: string) {
+  const query = workOrderId ? `?workOrderId=${encodeURIComponent(workOrderId)}` : ''
+  return apiRequest<{ groups: MeltPoolGroup[] }>(`/admin/production/melt-pool${query}`)
 }
 
 export function fetchMeltPoolOptions(materialGradeCode: string) {
@@ -237,7 +297,7 @@ export function checkHeatOrderConflicts(payload: { furnaceCode: string; plannedS
   return apiRequest<{ conflicts: HeatScheduleConflict[] }>('/admin/production/heat-orders/check-conflicts', { method: 'POST', body: JSON.stringify(payload) })
 }
 
-export function createHeatOrder(payload: { materialGradeCode: string; workshopCode: string; furnaceCode: string; recipeCode: string; teamCode: string; plannedStartAt: string; plannedFinishAt: string; confirmScheduleConflict?: boolean; allocations: Array<{ workOrderId: string; quantity: number }> }) {
+export function createHeatOrder(payload: { materialGradeCode: string; workshopCode: string; furnaceCode: string; recipeCode: string; teamCode: string; plannedStartAt: string; plannedFinishAt: string; confirmScheduleConflict?: boolean; allocations: Array<{ workOrderId: string; quantity: number; routingNodeId?: string }> }) {
   return apiRequest<HeatOrderRecord>('/admin/production/heat-orders', { method: 'POST', body: JSON.stringify(payload) })
 }
 
@@ -305,8 +365,11 @@ export function fetchEquipmentScheduleWorkshops() {
   return apiRequest<Array<{ code: string; name: string }>>('/admin/production/equipment-schedule/workshops')
 }
 
-export function fetchHeatOrders(status?: HeatOrderStatus) {
-  return apiRequest<HeatOrderRecord[]>(`/admin/production/heat-orders${status ? `?status=${status}` : ''}`)
+export function fetchHeatOrders(status?: HeatOrderStatus, workOrderId?: string) {
+  const query = new URLSearchParams()
+  if (status) query.set('status', status)
+  if (workOrderId) query.set('workOrderId', workOrderId)
+  return apiRequest<HeatOrderRecord[]>(`/admin/production/heat-orders${query.size ? `?${query}` : ''}`)
 }
 
 export function fetchHeatOrder(id: string) {

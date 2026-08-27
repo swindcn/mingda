@@ -1,16 +1,64 @@
 import { EyeOutlined, SendOutlined, ToolOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Select, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tag, Tooltip, message } from 'antd'
+import type { TableColumnsType } from 'antd'
 import dayjs from 'dayjs'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import { SubPageHeader } from '../../components/SubPageHeader'
+import { ResizableTable } from '../../components/ResizableTable'
+import { TableActions } from '../../components/TableActions'
 import { resolveCoreTaskEntry } from '../../utils/coremaking'
-import { createWorkOrder, fetchWorkOrder, fetchWorkOrderOptions, fetchWorkOrderPreview, updateWorkOrder, workOrderRecordToPreview, type WorkOrderPayload, type WorkOrderPreview, type WorkOrderRecord } from '../../utils/production'
+import { createWorkOrder, fetchWorkOrder, fetchWorkOrderOptions, fetchWorkOrderPreview, fetchWorkOrderRoutingExecution, releaseWorkOrderMelt, updateWorkOrder, workOrderRecordToPreview, type WorkOrderPayload, type WorkOrderPreview, type WorkOrderRecord, type WorkOrderRoutingExecutionNode } from '../../utils/production'
 import { hasPermission } from '../../utils/roles'
 import { CoreReadinessPanel } from './CoreReadinessPanel'
 import { CoreTaskGenerationModal } from './CoreTaskGenerationModal'
+import { MoldingTaskGenerationModal } from './MoldingTaskGenerationModal'
 
 type FormValues = Omit<WorkOrderPayload, 'plannedStartDate' | 'plannedDeliveryDate'> & { plannedStartDate?: dayjs.Dayjs; plannedDeliveryDate: dayjs.Dayjs }
+
+const executionStatusColors: Record<WorkOrderRoutingExecutionNode['dispatchStatus'], string> = {
+  PENDING: 'default', PARTIAL: 'gold', RELEASED: 'blue', WAITING_UPSTREAM: 'default', UNSUPPORTED: 'default',
+}
+
+const executionRoutePaths: Partial<Record<WorkOrderRoutingExecutionNode['module'], string>> = {
+  CORE: '/dashboard/production/core-tasks',
+  MELT: '/dashboard/production/heat-orders',
+  MOLDING: '/dashboard/production/molding-tasks',
+  POURING: '/dashboard/production/pouring-tasks',
+  SHAKE_CLEAN: '/dashboard/production/shake-clean-tasks',
+  INSPECTION: '/dashboard/production/inspection-tasks',
+}
+
+function renderCompactNames(values: string[] | undefined) {
+  if (!values?.length) return <span>-</span>
+  const compact = values.length <= 2 ? values.join('、') : `${values.slice(0, 2).join('、')} 等 ${values.length - 2} 项`
+  return <Tooltip title={values.join('、')}>{compact}</Tooltip>
+}
+
+function previewToExecutionNodes(nodes: WorkOrderPreview['routingNodes']): WorkOrderRoutingExecutionNode[] {
+  return nodes.map((node) => ({
+    nodeId: node.id,
+    seqNo: node.seqNo,
+    operationCode: node.operationCode,
+    operationName: node.operationName,
+    module: 'UNSUPPORTED',
+    dispatchStatus: 'UNSUPPORTED',
+    dispatchLabel: '-',
+    progressStatus: 'NOT_STARTED',
+    progressLabel: '-',
+    progressText: '-',
+    progressCurrent: null,
+    progressTotal: null,
+    progressUnit: '件',
+    equipmentNames: [],
+    teamNames: [],
+    taskCount: 0,
+    action: 'NONE',
+    actionEnabled: false,
+    actionPermission: '',
+    actionHint: '',
+  }))
+}
 
 export function WorkOrderWorkbenchPage() {
   const { id } = useParams()
@@ -21,11 +69,23 @@ export function WorkOrderWorkbenchPage() {
   const [preview, setPreview] = useState<WorkOrderPreview | null>(null)
   const [record, setRecord] = useState<WorkOrderRecord | null>(null)
   const [loading, setLoading] = useState(false)
+  const [executionNodes, setExecutionNodes] = useState<WorkOrderRoutingExecutionNode[]>([])
   const [generationOpen, setGenerationOpen] = useState(false)
+  const [moldingGenerationOpen, setMoldingGenerationOpen] = useState(false)
   const viewing = Boolean(id && !location.pathname.endsWith('/edit'))
   const canCreateCoreTask = hasPermission('production.core_task.create')
   const canViewCoreTask = hasPermission('production.core_task.view')
   const canSave = hasPermission(id ? 'production.work_order.edit' : 'production.work_order.create')
+  const canViewMolding = hasPermission('production.molding.view')
+
+  const loadExecutionSummary = async (workOrderId: string) => {
+    try {
+      setExecutionNodes(await fetchWorkOrderRoutingExecution(workOrderId))
+    } catch (error) {
+      setExecutionNodes([])
+      message.error(error instanceof Error ? error.message : '工序执行摘要加载失败')
+    }
+  }
 
   useEffect(() => {
     void (async () => {
@@ -37,6 +97,7 @@ export function WorkOrderWorkbenchPage() {
           const detail = await fetchWorkOrder(id)
           setRecord(detail)
           setPreview(workOrderRecordToPreview(detail))
+          await loadExecutionSummary(id)
           form.setFieldsValue({
             productCode: detail.productCode,
             bomVersionId: detail.bomVersionId,
@@ -49,6 +110,7 @@ export function WorkOrderWorkbenchPage() {
             versionNo: detail.versionNo,
           })
         } else {
+          setExecutionNodes([])
           form.setFieldsValue({ priority: 'NORMAL' })
         }
       } catch (error) {
@@ -106,6 +168,7 @@ export function WorkOrderWorkbenchPage() {
       const detail = await fetchWorkOrder(id)
       setRecord(detail)
       setPreview(workOrderRecordToPreview(detail))
+      await loadExecutionSummary(id)
     } catch (error) {
       message.error(error instanceof Error ? error.message : '工单信息刷新失败')
     } finally {
@@ -113,17 +176,103 @@ export function WorkOrderWorkbenchPage() {
     }
   }
 
+  const routingRows = viewing ? executionNodes : previewToExecutionNodes(preview?.routingNodes || [])
+
+  const loadMeltReleaseWarnings = async (workOrderId: string) => {
+    const latestNodes = await fetchWorkOrderRoutingExecution(workOrderId)
+    setExecutionNodes(latestNodes)
+    const meltNode = latestNodes.find((item) => item.module === 'MELT')
+    if (meltNode?.actionHint) return meltNode.actionHint.split('；').filter(Boolean)
+    const coreNode = latestNodes.find((item) => item.module === 'CORE')
+    if (!coreNode || coreNode.progressStatus === 'COMPLETED') return []
+    return [`制芯工序当前为“${coreNode.progressLabel || '未完成'}”，仍可下达熔炼排产`]
+  }
+
+  const openExecutionAction = async (node: WorkOrderRoutingExecutionNode) => {
+    if (!record || !node.actionEnabled || !node.actionPermission || !hasPermission(node.actionPermission)) return
+    if (node.action === 'CREATE' && node.module === 'CORE') {
+      setGenerationOpen(true)
+      return
+    }
+    if (node.action === 'CREATE' && node.module === 'MOLDING') {
+      setMoldingGenerationOpen(true)
+      return
+    }
+    if (node.action === 'RELEASE_MELT') {
+      try {
+        setLoading(true)
+        const preflightWarnings = await loadMeltReleaseWarnings(record.id)
+        Modal.confirm({
+          title: '下达熔炼排产',
+          content: preflightWarnings.length
+            ? <Space direction="vertical" size={4}>{preflightWarnings.map((warning) => <span key={warning}>{warning}</span>)}<span>确认仍要下达至合炉排产池吗？</span></Space>
+            : '当前未检测到可识别的上游风险，确认下达至合炉排产池吗？',
+          okText: '确认下达',
+          cancelText: '取消',
+          onOk: async () => {
+            try {
+              setLoading(true)
+              const result = await releaseWorkOrderMelt(record.id, node.nodeId)
+              if (result.warnings.length) {
+                Modal.warning({
+                  title: '熔炼排产已下达，请关注以下风险',
+                  content: <Space direction="vertical" size={4}>{result.warnings.map((warning) => <span key={warning.code}>{warning.message}</span>)}</Space>,
+                })
+              } else {
+                message.success(result.alreadyReleased ? '熔炼排产已下达，无需重复操作' : '熔炼任务已下达')
+              }
+              await refreshRecord()
+            } catch (error) {
+              message.error(error instanceof Error ? error.message : '熔炼任务下达失败')
+            } finally {
+              setLoading(false)
+            }
+          },
+        })
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '熔炼风险检查失败，请刷新后重试')
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+    if (node.action === 'VIEW') {
+      const path = executionRoutePaths[node.module]
+      if (path) navigate(`${path}?workOrderId=${encodeURIComponent(record.id)}`)
+    }
+  }
+
+  const routingColumns: TableColumnsType<WorkOrderRoutingExecutionNode> = [
+    { title: '顺序', dataIndex: 'seqNo', key: 'seqNo', width: 78 },
+    { title: '工序编码', dataIndex: 'operationCode', key: 'operationCode', width: 135 },
+    { title: '工序名称', dataIndex: 'operationName', key: 'operationName', width: 150 },
+    { title: '工序状态', dataIndex: 'dispatchLabel', key: 'dispatchLabel', width: 105, render: (value: string, node) => <Tag color={executionStatusColors[node.dispatchStatus]}>{value}</Tag> },
+    {
+      title: '工序进度', key: 'progress', width: 190,
+      render: (_, node) => node.progressCurrent !== null && node.progressTotal !== null
+        ? <Space size={8}><Progress percent={node.progressTotal ? Math.min(100, Number((node.progressCurrent / node.progressTotal * 100).toFixed(1))) : 0} size="small" style={{ width: 90 }} showInfo={false} /><span>{node.progressText || `${node.progressCurrent}/${node.progressTotal} ${node.progressUnit}`}</span></Space>
+        : <span>{node.progressText || node.progressLabel || '-'}</span>,
+    },
+    { title: '设备', dataIndex: 'equipmentNames', key: 'equipmentNames', width: 180, render: (values: string[]) => renderCompactNames(values) },
+    { title: '班组', dataIndex: 'teamNames', key: 'teamNames', width: 150, render: (values: string[]) => renderCompactNames(values) },
+    {
+      title: '操作', key: 'actions', fixed: 'right', width: 110,
+      render: (_, node) => {
+        if (['WAIT', 'NONE'].includes(node.action)) return <span aria-disabled="true">{node.action === 'WAIT' ? '等待上游' : '暂未接入'}</span>
+        if (!node.actionEnabled || !node.actionPermission || !hasPermission(node.actionPermission)) return null
+        const label = node.action === 'VIEW' ? '查看' : node.action === 'RELEASE_MELT' ? '下达' : '生成'
+        return <TableActions actions={[{ key: node.action, label, shortLabel: label, icon: node.action === 'VIEW' ? <EyeOutlined /> : node.action === 'RELEASE_MELT' ? <SendOutlined /> : <ToolOutlined />, onClick: () => void openExecutionAction(node) }]} />
+      },
+    },
+  ]
+
   return (
     <>
       <SubPageHeader
         title={viewing ? '生产工单详情' : id ? '编辑生产工单' : '新建生产工单'}
-        description="工单提交后立即进入待合炉排产池，产生有效炉次分配后关键字段将锁定。"
+        description="按工艺路线手动下达各工序任务，任务产生有效分配后关键字段将锁定。"
         onBack={() => navigate('/dashboard/production/work-orders')}
-        extra={<Space>
-          {viewing && (record?.coreTaskCount || 0) > 0 && canViewCoreTask && <Button icon={<EyeOutlined />} onClick={() => navigate(`/dashboard/production/core-tasks?workOrderId=${record?.id}`)}>制芯任务</Button>}
-          {viewing && coreTaskEntry === 'GENERATE' && <Button type="primary" icon={<ToolOutlined />} onClick={() => setGenerationOpen(true)}>生成制芯任务</Button>}
-          {!viewing && canSave && <Button type="primary" icon={<SendOutlined />} loading={loading} onClick={() => void save()}>提交排产</Button>}
-        </Space>}
+        extra={!viewing && canSave ? <Button type="primary" icon={<SendOutlined />} loading={loading} onClick={() => void save()}>提交排产</Button> : undefined}
       />
       <Form form={form} layout="vertical" disabled={viewing}>
         <Card title="工单基本信息" loading={loading}>
@@ -154,14 +303,8 @@ export function WorkOrderWorkbenchPage() {
           <Descriptions.Item label="当前状态">{record ? <Tag color="blue">{record.displayStatus}</Tag> : '提交后进入待排产'}</Descriptions.Item>
         </Descriptions>
       </Card>
-      <Card title="绑定工艺路线预览" className="production-section-card">
-        <Table rowKey="id" size="small" pagination={false} dataSource={preview?.routingNodes || []} columns={[
-          { title: '顺序', dataIndex: 'seqNo', width: 80 },
-          { title: '工序编码', dataIndex: 'operationCode', width: 150 },
-          { title: '工序名称', dataIndex: 'operationName' },
-          { title: '默认设备', dataIndex: 'equipment', render: (items: Array<{ name: string }>) => items.map((item) => item.name).join('、') || '-' },
-          { title: '标准节拍', dataIndex: 'standardCycleSeconds', width: 120, render: (value?: number) => value ? `${value} 秒` : '-' },
-        ]} />
+      <Card title="工艺路线执行" className="production-section-card">
+        <ResizableTable<WorkOrderRoutingExecutionNode> storageKey="production-work-order-routing-execution-widths" rowKey="nodeId" size="small" pagination={false} dataSource={routingRows} columns={routingColumns} scroll={{ x: 1100 }} locale={{ emptyText: '暂无工艺路线' }} />
       </Card>
       {record && <Card title="关联熔炼任务" className="production-section-card">
         <Table rowKey="allocationId" size="small" pagination={false} dataSource={record.heatOrders} columns={[
@@ -182,6 +325,7 @@ export function WorkOrderWorkbenchPage() {
       </Card>}
       {viewing && record && hasPermission('production.work_order.view') && <CoreReadinessPanel workOrderId={record.id} />}
       {viewing && record && <CoreTaskGenerationModal open={generationOpen} workOrderId={record.id} workOrderQuantity={record.plannedQuantity} onClose={() => setGenerationOpen(false)} onSuccess={refreshRecord} />}
+      {viewing && record && <MoldingTaskGenerationModal open={moldingGenerationOpen} workOrderId={record.id} onClose={() => setMoldingGenerationOpen(false)} onSuccess={async (taskId) => { await refreshRecord(); if (canViewMolding) navigate(`/dashboard/production/molding-tasks/${taskId}`) }} />}
     </>
   )
 }

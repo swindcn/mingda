@@ -1,67 +1,91 @@
-<view class="page">
+<view class="page page-bottom-safe">
   <view class="card">
     <view class="form-title">{{title}}</view>
 
     <view wx:if="{{type === 'shipping'}}">
-      <text class="label">快递单号</text>
-      <view class="input-with-icon">
-        <input class="form-input" value="{{trackingNumber}}" placeholder="请输入快递单号" bindinput="onTrackingInput" />
-        <button class="scan-button" bindtap="scanTrackingNumber">⌗</button>
+      <view class="form-field">
+        <text class="form-label">快递单号</text>
+        <view class="input-with-icon">
+          <input class="form-input" value="{{trackingNumber}}" placeholder="请输入快递单号" placeholder-style="color:#98a2b3" bindinput="onTrackingInput" />
+          <view class="scan-button" hover-class="scan-button-hover" bindtap="scanTrackingNumber">
+            <image class="icon icon-32 icon-primary" src="/assets/icons/scan.svg" />
+          </view>
+        </view>
       </view>
-      <text class="label">发货图片</text>
-      <view class="upload-row">
-        <button class="upload-button" bindtap="chooseImages">选择照片</button>
-        <button class="upload-button" bindtap="takeImages">拍照</button>
+      <view class="form-field">
+        <text class="form-label">发货图片</text>
+        <view class="upload-row">
+          <button class="btn btn-ghost btn-sm" bindtap="chooseImages">选择照片</button>
+          <button class="btn btn-ghost btn-sm" bindtap="takeImages">拍照</button>
+        </view>
       </view>
     </view>
 
     <view wx:elif="{{type === 'receive'}}">
-      <text class="label">收货图片</text>
-      <view class="upload-row">
-        <button class="upload-button" bindtap="chooseImages">选择照片</button>
-        <button class="upload-button" bindtap="takeImages">拍照</button>
+      <view class="form-field">
+        <text class="form-label">收货图片</text>
+        <view class="upload-row">
+          <button class="btn btn-ghost btn-sm" bindtap="chooseImages">选择照片</button>
+          <button class="btn btn-ghost btn-sm" bindtap="takeImages">拍照</button>
+        </view>
       </view>
     </view>
 
     <view wx:elif="{{type === 'evaluation'}}">
-      <text class="label">评判结果</text>
-      <radio-group bindchange="onResultChange">
-        <label><radio value="通过" checked="{{result === '通过'}}" />通过</label>
-        <label><radio value="不通过" checked="{{result === '不通过'}}" />不通过</label>
-      </radio-group>
-      <text class="label">是否开发完成</text>
-      <radio-group bindchange="onCompleteChange">
-        <label><radio value="是" checked="{{isComplete}}" />是</label>
-        <label><radio value="否" checked="{{!isComplete}}" />否</label>
-      </radio-group>
-      <textarea value="{{reason}}" placeholder="请输入评判理由" bindinput="onReasonInput" />
+      <view class="form-field">
+        <text class="form-label">评判结果</text>
+        <radio-group class="radio-group" bindchange="onResultChange">
+          <label class="radio-item"><radio value="通过" checked="{{result === '通过'}}" color="#1677ff" />通过</label>
+          <label class="radio-item"><radio value="不通过" checked="{{result === '不通过'}}" color="#1677ff" />不通过</label>
+        </radio-group>
+      </view>
+      <view class="form-field">
+        <text class="form-label">是否开发完成</text>
+        <radio-group class="radio-group" bindchange="onCompleteChange">
+          <label class="radio-item"><radio value="是" checked="{{isComplete}}" color="#1677ff" />是</label>
+          <label class="radio-item"><radio value="否" checked="{{!isComplete}}" color="#1677ff" />否</label>
+        </radio-group>
+      </view>
+      <view class="form-field">
+        <text class="form-label">评判理由</text>
+        <textarea class="form-textarea" value="{{reason}}" placeholder="请输入评判理由" placeholder-style="color:#98a2b3" bindinput="onReasonInput" />
+      </view>
     </view>
 
     <view wx:elif="{{type === 'trial' || type === 'batch'}}">
-      <text class="label">填写人</text>
-      <input class="form-input" value="{{operator}}" placeholder="请输入填写人" bindinput="onOperatorInput" />
-      <text class="label">产品图片</text>
-      <view class="upload-row">
-        <button class="upload-button" bindtap="chooseProductImages">选择照片</button>
-        <button class="upload-button" bindtap="takeProductImages">拍照</button>
+      <view class="form-field">
+        <text class="form-label">填写人</text>
+        <input class="form-input" value="{{operator}}" placeholder="请输入填写人" placeholder-style="color:#98a2b3" bindinput="onOperatorInput" />
       </view>
-      <view class="image-list" wx:if="{{productImages.length}}">
-        <image wx:for="{{productImages}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+      <view class="form-field">
+        <text class="form-label">产品图片</text>
+        <view class="upload-row">
+          <button class="btn btn-ghost btn-sm" bindtap="chooseProductImages">选择照片</button>
+          <button class="btn btn-ghost btn-sm" bindtap="takeProductImages">拍照</button>
+        </view>
+        <view class="image-grid" wx:if="{{productImages.length}}">
+          <image wx:for="{{productImages}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+        </view>
       </view>
-      <text class="label">破坏性检测图片</text>
-      <view class="upload-row">
-        <button class="upload-button" bindtap="chooseDestructiveImages">选择照片</button>
-        <button class="upload-button" bindtap="takeDestructiveImages">拍照</button>
-      </view>
-      <view class="image-list" wx:if="{{destructiveImages.length}}">
-        <image wx:for="{{destructiveImages}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+      <view class="form-field">
+        <text class="form-label">破坏性检测图片</text>
+        <view class="upload-row">
+          <button class="btn btn-ghost btn-sm" bindtap="chooseDestructiveImages">选择照片</button>
+          <button class="btn btn-ghost btn-sm" bindtap="takeDestructiveImages">拍照</button>
+        </view>
+        <view class="image-grid" wx:if="{{destructiveImages.length}}">
+          <image wx:for="{{destructiveImages}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+        </view>
       </view>
     </view>
 
-    <view class="image-list" wx:if="{{(type === 'shipping' || type === 'receive') && images.length}}">
-      <image wx:for="{{images}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+    <view class="form-field" wx:if="{{(type === 'shipping' || type === 'receive') && images.length}}">
+      <text class="form-label">已上传图片</text>
+      <view class="image-grid">
+        <image wx:for="{{images}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
+      </view>
     </view>
 
-    <button class="primary-button submit-button" loading="{{submitting}}" bindtap="submit">提交</button>
+    <view class="btn btn-primary btn-block submit-button" hover-class="submit-button-hover" bindtap="submit">提交</view>
   </view>
 </view>

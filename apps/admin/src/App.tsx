@@ -32,6 +32,14 @@ import { WorkOrderWorkbenchPage } from './pages/production/WorkOrderWorkbenchPag
 import { CoreInventoryPage } from './pages/production/CoreInventoryPage'
 import { CoreTaskDetailPage } from './pages/production/CoreTaskDetailPage'
 import { CoreTaskListPage } from './pages/production/CoreTaskListPage'
+import { MoldingTaskDetailPage } from './pages/production/MoldingTaskDetailPage'
+import { MoldingTaskListPage } from './pages/production/MoldingTaskListPage'
+import { PouringTaskDetailPage } from './pages/production/PouringTaskDetailPage'
+import { PouringTaskListPage } from './pages/production/PouringTaskListPage'
+import { ShakeCleanTaskDetailPage } from './pages/production/ShakeCleanTaskDetailPage'
+import { ShakeCleanTaskListPage } from './pages/production/ShakeCleanTaskListPage'
+import { FinalInspectionTaskDetailPage } from './pages/production/FinalInspectionTaskDetailPage'
+import { FinalInspectionTaskListPage } from './pages/production/FinalInspectionTaskListPage'
 import { apiRequest } from './services/api'
 import { hasPermission } from './utils/roles'
 
@@ -160,6 +168,14 @@ export default function App() {
         <Route path="production/core-tasks" element={protectedPage('production.core_task.view', <CoreTaskListPage />)} />
         <Route path="production/core-tasks/:id" element={protectedPage('production.core_task.view', <CoreTaskDetailPage />)} />
         <Route path="production/core-inventory" element={protectedPage('production.core_inventory.view', <CoreInventoryPage />)} />
+        <Route path="production/molding-tasks" element={protectedPage('production.molding.view', <MoldingTaskListPage />)} />
+        <Route path="production/molding-tasks/:id" element={protectedPage('production.molding.view', <MoldingTaskDetailPage />)} />
+        <Route path="production/pouring-tasks" element={protectedPage('production.pouring.view', <PouringTaskListPage />)} />
+        <Route path="production/pouring-tasks/:id" element={protectedPage('production.pouring.view', <PouringTaskDetailPage />)} />
+        <Route path="production/shake-clean-tasks" element={protectedPage('production.shake_clean.view', <ShakeCleanTaskListPage />)} />
+        <Route path="production/shake-clean-tasks/:id" element={protectedPage('production.shake_clean.view', <ShakeCleanTaskDetailPage />)} />
+        <Route path="production/inspection-tasks" element={protectedPage('production.inspection.view', <FinalInspectionTaskListPage />)} />
+        <Route path="production/inspection-tasks/:id" element={protectedPage('production.inspection.view', <FinalInspectionTaskDetailPage />)} />
         <Route path="production/melt-scheduling" element={protectedPage('production.schedule.view', <MeltSchedulingPage />)} />
         <Route path="production/heat-orders" element={protectedPage('production.heat.view', <HeatOrderListPage />)} />
         <Route path="production/heat-orders/:id" element={protectedPage('production.heat.view', <HeatOrderDetailPage />)} />

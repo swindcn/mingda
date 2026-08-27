@@ -1,23 +1,62 @@
 <view class="detail-page {{showBottomActions ? 'has-bottom-actions' : ''}}">
   <view class="detail-content" wx:if="{{mold}}">
-    <view class="card info-card">
-      <view class="card-title">开发信息</view>
-      <view class="divider"></view>
-      <view wx:if="{{!isSupplierEmployee}}" class="info-row"><text class="label">客户名称：</text><text>{{mold.customerName}}</text></view>
-      <view wx:if="{{!isSupplierEmployee}}" class="info-row"><text class="label">产品编号：</text><text>{{mold.productCode}}</text></view>
-      <view class="info-row"><text class="label">产品名称：</text><text>{{mold.productName}}</text></view>
-      <view class="info-row"><text class="label">客户告知时间：</text><text>{{mold.notifiedDate}}</text></view>
-      <view class="info-row"><text class="label">模具类型：</text><text>{{mold.moldType}}</text></view>
-      <view class="info-row"><text class="label">模具供应商：</text><text>{{mold.supplierName}}</text></view>
-      <view class="info-row"><text class="label">期望完成时间：</text><text>{{mold.expectedDate}}</text></view>
-      <view class="info-row"><text class="label">开发状态：</text><text class="state-text">{{mold.status}}</text></view>
-      <view class="info-row"><text class="label">下达时间：</text><text>{{mold.issuedDate}}</text></view>
-      <view class="info-row"><text class="label">备注：</text><text>{{mold.remark}}</text></view>
+    <!-- 开发信息 -->
+    <view class="card">
+      <view class="card-section-head">
+        <view class="section-bar"></view>
+        <text class="section-title">开发信息</text>
+      </view>
+      <view class="info-list">
+        <view wx:if="{{!isSupplierEmployee}}" class="info-row">
+          <text class="field-label">客户名称</text>
+          <text class="field-value">{{mold.customerName}}</text>
+        </view>
+        <view wx:if="{{!isSupplierEmployee}}" class="info-row">
+          <text class="field-label">产品编号</text>
+          <text class="field-value">{{mold.productCode}}</text>
+        </view>
+        <view class="info-row">
+          <text class="field-label">产品名称</text>
+          <text class="field-value">{{mold.productName}}</text>
+        </view>
+        <view class="info-row">
+          <text class="field-label">客户告知时间</text>
+          <text class="field-value">{{mold.notifiedDate}}</text>
+        </view>
+        <view class="info-row">
+          <text class="field-label">模具类型</text>
+          <text class="field-value">{{mold.moldType}}</text>
+        </view>
+        <view class="info-row">
+          <text class="field-label">模具供应商</text>
+          <text class="field-value">{{mold.supplierName}}</text>
+        </view>
+        <view class="info-row">
+          <text class="field-label">期望完成时间</text>
+          <text class="field-value">{{mold.expectedDate}}</text>
+        </view>
+        <view class="info-row">
+          <text class="field-label">开发状态</text>
+          <text class="badge badge-{{mold.statusTone === 'pending' ? 'pending' : mold.statusTone === 'done' ? 'done' : 'active'}}">{{mold.status}}</text>
+        </view>
+        <view class="info-row">
+          <text class="field-label">下达时间</text>
+          <text class="field-value">{{mold.issuedDate}}</text>
+        </view>
+        <view wx:if="{{mold.remark}}" class="info-row">
+          <text class="field-label">备注</text>
+          <text class="field-value">{{mold.remark}}</text>
+        </view>
+      </view>
     </view>
 
-    <view class="card image-card">
-      <view class="card-title">模具图片</view>
-      <view class="image-list">
+    <!-- 模具图片 -->
+    <view wx:if="{{mold.images && mold.images.length}}" class="card">
+      <view class="card-section-head">
+        <view class="section-bar"></view>
+        <text class="section-title">模具图片</text>
+      </view>
+      <view class="thumb-list">
         <image
           wx:for="{{mold.images}}"
           wx:key="*this"
@@ -31,117 +70,133 @@
       </view>
     </view>
 
-    <view class="card flow-card">
-      <view class="card-title">开发进度流程</view>
-      <view class="divider"></view>
-      <view class="flow-item {{item.done ? 'flow-done' : ''}}" wx:for="{{mold.flowRecords}}" wx:key="key">
-        <view class="flow-dot"></view>
-        <view class="flow-body">
-          <view class="flow-head">
-            <text class="flow-title">{{item.title}}</text>
-            <button wx:if="{{item.key === 'confirm' && canConfirmDrawing}}" class="node-button" bindtap="confirmDrawing">图纸确认</button>
-            <button wx:if="{{item.key === 'shipping' && canShip}}" class="node-button" bindtap="openShipping">发货</button>
-            <button wx:if="{{item.key === 'receive' && canReceive}}" class="node-button" bindtap="openReceive">收货</button>
+    <!-- 流程 -->
+    <view class="card">
+      <view class="card-section-head">
+        <view class="section-bar"></view>
+        <text class="section-title">开发进度</text>
+      </view>
+      <view class="timeline">
+        <view
+          class="timeline-item {{item.done ? 'is-done' : ''}}"
+          wx:for="{{mold.flowRecords}}"
+          wx:key="key"
+        >
+          <view class="timeline-dot">
+            <image wx:if="{{item.done}}" class="check-icon" src="/assets/icons/check.svg" />
           </view>
-          <view wx:if="{{item.done}}" class="flow-record">
-            <view wx:if="{{item.time}}">时间：{{item.time}}</view>
-            <view wx:if="{{item.operator}}">操作人：{{item.operator}}</view>
-            <view wx:if="{{item.trackingNumber}}">快递单号：{{item.trackingNumber}}</view>
-            <view wx:if="{{item.images && item.images.length}}" class="flow-images">
-              <image
-                wx:for="{{item.images}}"
-                wx:for-item="flowImage"
-                wx:key="*this"
-                class="flow-thumb"
-                src="{{flowImage}}"
-                mode="aspectFill"
-                data-src="{{flowImage}}"
-                data-urls="{{item.images}}"
-                bindtap="previewImage"
-              />
+          <view class="timeline-body">
+            <view class="timeline-head">
+              <text class="timeline-title">{{item.title}}</text>
+              <button wx:if="{{item.key === 'confirm' && canConfirmDrawing}}" class="btn-node" bindtap="confirmDrawing">图纸确认</button>
+              <button wx:if="{{item.key === 'shipping' && canShip}}" class="btn-node" bindtap="openShipping">发货</button>
+              <button wx:if="{{item.key === 'receive' && canReceive}}" class="btn-node" bindtap="openReceive">收货</button>
+            </view>
+            <view wx:if="{{item.done}}" class="timeline-detail">
+              <view wx:if="{{item.time}}">时间：{{item.time}}</view>
+              <view wx:if="{{item.operator}}">操作人：{{item.operator}}</view>
+              <view wx:if="{{item.trackingNumber}}">快递单号：{{item.trackingNumber}}</view>
+              <view wx:if="{{item.images && item.images.length}}" class="timeline-images">
+                <image
+                  wx:for="{{item.images}}"
+                  wx:for-item="flowImage"
+                  wx:key="*this"
+                  class="thumb-sm"
+                  src="{{flowImage}}"
+                  mode="aspectFill"
+                  data-src="{{flowImage}}"
+                  data-urls="{{item.images}}"
+                  bindtap="previewImage"
+                />
+              </view>
             </view>
           </view>
         </view>
       </view>
     </view>
 
-    <view wx:if="{{showInternalRecords && hasDevelopmentRecords}}" class="card records-card">
-      <view class="card-title">开发记录</view>
-      <view class="divider"></view>
-
-      <view class="record-item" wx:for="{{mold.productionRecords}}" wx:key="id">
-        <view class="record-title">{{item.title}}</view>
-        <view wx:if="{{item.operator}}" class="record-line">填写人：{{item.operator}}</view>
-        <view wx:if="{{item.time}}" class="record-line">提交时间：{{item.time}}</view>
-        <view wx:if="{{item.type === 'evaluation'}}">
-          <view wx:if="{{item.result}}" class="record-line">评判结果：{{item.result}}</view>
-          <view class="record-line">是否开发完成：{{item.isComplete ? '是' : '否'}}</view>
-          <view wx:if="{{item.reason}}" class="record-line">评判理由：{{item.reason}}</view>
-        </view>
-        <view wx:if="{{item.type !== 'evaluation'}}">
-          <view wx:if="{{item.productImages && item.productImages.length}}" class="record-section">
-            <view class="record-subtitle">产品图片</view>
-            <view class="record-images">
-              <image
-                wx:for="{{item.productImages}}"
-                wx:for-item="recordImage"
-                wx:key="*this"
-                class="flow-thumb"
-                src="{{recordImage}}"
-                mode="aspectFill"
-                data-src="{{recordImage}}"
-                data-urls="{{item.productImages}}"
-                bindtap="previewImage"
-              />
-            </view>
-          </view>
-          <view wx:if="{{item.destructiveImages && item.destructiveImages.length}}" class="record-section">
-            <view class="record-subtitle">破坏性检测图片</view>
-            <view class="record-images">
-              <image
-                wx:for="{{item.destructiveImages}}"
-                wx:for-item="recordImage"
-                wx:key="*this"
-                class="flow-thumb"
-                src="{{recordImage}}"
-                mode="aspectFill"
-                data-src="{{recordImage}}"
-                data-urls="{{item.destructiveImages}}"
-                bindtap="previewImage"
-              />
-            </view>
-          </view>
-          <view wx:if="{{(!item.productImages || !item.productImages.length) && item.images && item.images.length}}" class="record-section">
-            <view class="record-subtitle">图片</view>
-            <view class="record-images">
-              <image
-                wx:for="{{item.images}}"
-                wx:for-item="recordImage"
-                wx:key="*this"
-                class="flow-thumb"
-                src="{{recordImage}}"
-                mode="aspectFill"
-                data-src="{{recordImage}}"
-                data-urls="{{item.images}}"
-                bindtap="previewImage"
-              />
-            </view>
-          </view>
-        </view>
+    <!-- 开发记录 -->
+    <view wx:if="{{showInternalRecords && hasDevelopmentRecords}}" class="card">
+      <view class="card-section-head">
+        <view class="section-bar"></view>
+        <text class="section-title">开发记录</text>
       </view>
 
-      <view wx:if="{{mold.terminationRecord}}" class="record-item">
-        <view class="record-title">开发中止记录</view>
-        <view wx:if="{{mold.terminationRecord.operator}}" class="record-line">中止人：{{mold.terminationRecord.operator}}</view>
-        <view wx:if="{{mold.terminationRecord.time}}" class="record-line">中止时间：{{mold.terminationRecord.time}}</view>
-        <view wx:if="{{mold.terminationRecord.reason}}" class="record-line">中止理由：{{mold.terminationRecord.reason}}</view>
+      <view class="record-list">
+        <view class="record-item" wx:for="{{mold.productionRecords}}" wx:key="id">
+          <view class="record-title">{{item.title}}</view>
+          <view wx:if="{{item.operator}}" class="record-line">填写人：{{item.operator}}</view>
+          <view wx:if="{{item.time}}" class="record-line">提交时间：{{item.time}}</view>
+          <view wx:if="{{item.type === 'evaluation'}}">
+            <view wx:if="{{item.result}}" class="record-line">评判结果：{{item.result}}</view>
+            <view class="record-line">是否开发完成：{{item.isComplete ? '是' : '否'}}</view>
+            <view wx:if="{{item.reason}}" class="record-line">评判理由：{{item.reason}}</view>
+          </view>
+          <view wx:if="{{item.type !== 'evaluation'}}">
+            <view wx:if="{{item.productImages && item.productImages.length}}" class="record-section">
+              <view class="record-subtitle">产品图片</view>
+              <view class="record-images">
+                <image
+                  wx:for="{{item.productImages}}"
+                  wx:for-item="recordImage"
+                  wx:key="*this"
+                  class="thumb-sm"
+                  src="{{recordImage}}"
+                  mode="aspectFill"
+                  data-src="{{recordImage}}"
+                  data-urls="{{item.productImages}}"
+                  bindtap="previewImage"
+                />
+              </view>
+            </view>
+            <view wx:if="{{item.destructiveImages && item.destructiveImages.length}}" class="record-section">
+              <view class="record-subtitle">破坏性检测图片</view>
+              <view class="record-images">
+                <image
+                  wx:for="{{item.destructiveImages}}"
+                  wx:for-item="recordImage"
+                  wx:key="*this"
+                  class="thumb-sm"
+                  src="{{recordImage}}"
+                  mode="aspectFill"
+                  data-src="{{recordImage}}"
+                  data-urls="{{item.destructiveImages}}"
+                  bindtap="previewImage"
+                />
+              </view>
+            </view>
+            <view wx:if="{{(!item.productImages || !item.productImages.length) && item.images && item.images.length}}" class="record-section">
+              <view class="record-subtitle">图片</view>
+              <view class="record-images">
+                <image
+                  wx:for="{{item.images}}"
+                  wx:for-item="recordImage"
+                  wx:key="*this"
+                  class="thumb-sm"
+                  src="{{recordImage}}"
+                  mode="aspectFill"
+                  data-src="{{recordImage}}"
+                  data-urls="{{item.images}}"
+                  bindtap="previewImage"
+                />
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view wx:if="{{mold.terminationRecord}}" class="record-item">
+          <view class="record-title">开发中止记录</view>
+          <view wx:if="{{mold.terminationRecord.operator}}" class="record-line">中止人：{{mold.terminationRecord.operator}}</view>
+          <view wx:if="{{mold.terminationRecord.time}}" class="record-line">中止时间：{{mold.terminationRecord.time}}</view>
+          <view wx:if="{{mold.terminationRecord.reason}}" class="record-line">中止理由：{{mold.terminationRecord.reason}}</view>
+        </view>
       </view>
     </view>
   </view>
 
-  <view wx:if="{{showBottomActions}}" class="bottom-actions">
-    <button wx:if="{{mold.permissions && mold.permissions.canTrial}}" class="bottom-button trial" bindtap="openTrial">试模生产</button>
-    <button wx:if="{{mold.permissions && mold.permissions.canBatch}}" class="bottom-button batch" bindtap="openBatch">批量生产</button>
-    <button wx:if="{{mold.permissions && mold.permissions.canEvaluate}}" class="bottom-button eval" bindtap="openEvaluation">模具测评</button>
+  <view wx:if="{{showBottomActions}}" class="fixed-bottom-bar-grid">
+    <button wx:if="{{mold.permissions && mold.permissions.canTrial}}" class="btn btn-primary" bindtap="openTrial">试模</button>
+    <button wx:if="{{mold.permissions && mold.permissions.canBatch}}" class="btn btn-primary" bindtap="openBatch">批量生产</button>
+    <button wx:if="{{mold.permissions && mold.permissions.canEvaluate}}" class="btn btn-primary" bindtap="openEvaluation">模具评判</button>
   </view>
 </view>

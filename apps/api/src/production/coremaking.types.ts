@@ -37,10 +37,12 @@ export interface ReportCoreTaskBody {
   versionNo?: number
   qualifiedQuantity?: number
   scrapQuantity?: number
+  teamCode?: string
   shiftCode?: string
   sandBatchCode?: string
   dryingRequired?: boolean
   defectReason?: string
+  defects?: Array<{ defectCode?: string; quantity?: number; remark?: string }>
   remark?: string
 }
 
@@ -54,6 +56,11 @@ export interface CoreInventoryQuery {
 export interface DryCoreBatchBody {
   versionNo?: number
   equipmentCode?: string
+}
+
+export interface DryCoreBatchesBody {
+  equipmentCode?: string
+  batches?: Array<{ id?: string; versionNo?: number }>
 }
 
 export interface LockCoreBatchBody {
@@ -83,6 +90,8 @@ export interface MobileCoreDryingEquipmentOption extends MobileCoreExecutionOpti
 }
 
 export interface MobileCoreExecutionOptionsDto {
+  teams: MobileCoreExecutionOption[]
   shifts: MobileCoreExecutionOption[]
   dryingEquipment: MobileCoreDryingEquipmentOption[]
+  defects: Array<{ code: string; name: string; category: string }>
 }

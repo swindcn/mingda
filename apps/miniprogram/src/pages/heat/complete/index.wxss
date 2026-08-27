@@ -1,11 +1,47 @@
-.complete-page { min-height: 100vh; padding: 28rpx; background: #f5f6f8; box-sizing: border-box; }
-.form-card { padding: 30rpx; background: #fff; border: 1rpx solid #e5e7eb; border-radius: 18rpx; }
-.target-row { display: flex; justify-content: space-between; padding-bottom: 24rpx; color: #111827; font-size: 29rpx; font-weight: 600; border-bottom: 1rpx solid #eef0f4; }
-.transfer-total { padding-top: 24rpx; }
-.field-label { margin: 28rpx 0 12rpx; color: #344054; font-size: 27rpx; font-weight: 600; }
-.weight-input { display: flex; align-items: center; height: 88rpx; padding: 0 22rpx; background: #fff; border: 1rpx solid #d0d5dd; border-radius: 12rpx; box-sizing: border-box; }
-.weight-input input { flex: 1; height: 86rpx; font-size: 30rpx; }
-.weight-input text { color: #667085; font-size: 27rpx; }
-textarea { width: 100%; height: 180rpx; padding: 20rpx; font-size: 28rpx; border: 1rpx solid #d0d5dd; border-radius: 12rpx; box-sizing: border-box; }
-.submit-button { height: 88rpx; margin-top: 30rpx; color: #fff; font-size: 30rpx; line-height: 88rpx; background: #1677ff; border-radius: 12rpx; }
-.submit-button::after { border: 0; }
+.complete-page {
+  min-height: 100vh;
+  padding: 24rpx 28rpx 56rpx;
+  background: var(--color-bg);
+  box-sizing: border-box;
+}
+
+.form-card {
+  padding: 12rpx 28rpx;
+  background: var(--color-surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.target-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  border-bottom: 1rpx solid var(--color-divider);
+}
+.target-row:first-child { padding-top: 8rpx; }
+.transfer-total { border-bottom: 0; }
+.summary-label { color: var(--color-text-muted); font-size: 26rpx; }
+.summary-value { color: var(--color-text); font-size: 32rpx; font-weight: 700; }
+
+.weight-input {
+  display: flex;
+  align-items: center;
+  height: 96rpx;
+  padding: 0 24rpx;
+  background: var(--color-bg-input);
+  border: 1rpx solid transparent;
+  border-radius: var(--r-md);
+  box-sizing: border-box;
+}
+.weight-input input {
+  flex: 1;
+  height: 90rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.weight-unit {
+  color: var(--color-text-muted);
+  font-size: 28rpx;
+}

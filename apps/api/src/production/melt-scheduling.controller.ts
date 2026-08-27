@@ -11,8 +11,8 @@ export class MeltSchedulingController {
   constructor(private readonly production: ProductionService) {}
 
   @Get()
-  list(@Req() request: RequestWithAdmin) {
-    return this.production.meltPool(request)
+  list(@Req() request: RequestWithAdmin, @Query('workOrderId') workOrderId?: string) {
+    return this.production.meltPool(request, workOrderId?.trim())
   }
 
   @Get('options')
