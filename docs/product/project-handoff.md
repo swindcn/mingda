@@ -433,10 +433,13 @@ apps/api/prisma/migrations/20260812090000_process_routing_v2/migration.sql
 当前测试服务器：
 
 ```text
-管理端：http://124.223.2.193
-API：http://124.223.2.193/api
+正式管理端：https://www.mindajixie.cn/mes/
+正式 API：https://www.mindajixie.cn/mes/api
+IP 回退管理端：http://124.223.2.193
+IP 回退 API：http://124.223.2.193/api
 项目目录：/opt/mingda-casting
-静态目录：/var/www/mingda/admin
+根路径静态目录：/var/www/mingda/admin
+官网二级路径静态目录：/var/www/mingda/mes
 API 服务：mingda-api.service
 ```
 

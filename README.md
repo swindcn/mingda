@@ -290,9 +290,11 @@ API：http://localhost:3000/api
 本地 Docker 地址由主环境验收使用：管理端 `http://localhost:8080`，API 健康检查 `http://localhost:3000/api/health`。
 
 ```text
-管理端：http://124.223.2.193
-API：http://124.223.2.193/api
-健康检查：http://124.223.2.193/api/health
+正式管理端：https://www.mindajixie.cn/mes/
+正式 API：https://www.mindajixie.cn/mes/api
+正式健康检查：https://www.mindajixie.cn/mes/api/health
+IP 回退管理端：http://124.223.2.193
+IP 回退 API：http://124.223.2.193/api
 服务器项目目录：/opt/mingda-casting
 管理端静态目录：/var/www/mingda/admin
 API 服务：mingda-api.service

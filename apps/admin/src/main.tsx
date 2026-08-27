@@ -6,6 +6,9 @@ import zhCN from 'antd/locale/zh_CN'
 import './index.css'
 import App from './App.tsx'
 
+const configuredBasePath = import.meta.env.VITE_APP_BASE_PATH || '/'
+const routerBasename = `/${configuredBasePath.replace(/^\/+|\/+$/g, '')}`.replace(/^\/$/, '/')
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ConfigProvider
@@ -87,7 +90,7 @@ createRoot(document.getElementById('root')!).render(
         },
       }}
     >
-      <BrowserRouter>
+      <BrowserRouter basename={routerBasename}>
         <App />
       </BrowserRouter>
     </ConfigProvider>

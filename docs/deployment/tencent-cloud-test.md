@@ -160,6 +160,42 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+### 官网二级路径部署
+
+正式管理端挂载在 `https://www.mindajixie.cn/mes/` 时，不能直接复用根路径构建产物。必须使用以下环境变量单独构建：
+
+```bash
+VITE_APP_BASE_PATH=/mes/ VITE_API_BASE_URL=/mes/api npm --prefix apps/admin run build
+```
+
+- 静态文件部署到 `/var/www/mingda/mes`，不得覆盖官网目录 `/var/www/mindamech`。
+- React Router 使用与 Vite 相同的 `/mes` 基础路径，直接访问 `/mes/dashboard/...` 时由 Nginx 回退到 `/mes/index.html`。
+- Nginx 将 `/mes/api/` 反向代理到 `127.0.0.1:3000/api/`。
+- 后端上传文件历史地址为 `/api/uploads/...`，官网虚拟主机需要单独代理 `/api/uploads/`，否则图片无法显示。
+- API 的 `CORS_ORIGIN` 需要包含 `https://www.mindajixie.cn`。
+- `https://www.mindajixie.cn/` 官网、`/kids/` 和 `http://124.223.2.193` 管理端回退入口保持不变。
+
+关键 Nginx 规则：
+
+```nginx
+location = /mes {
+  return 301 /mes/;
+}
+
+location ^~ /mes/api/ {
+  proxy_pass http://127.0.0.1:3000/api/;
+}
+
+location ^~ /api/uploads/ {
+  proxy_pass http://127.0.0.1:3000/api/uploads/;
+}
+
+location ^~ /mes/ {
+  root /var/www/mingda;
+  try_files $uri $uri/ /mes/index.html;
+}
+```
+
 ## 小程序测试地址
 
 模拟器测试可以继续使用本地接口。真机预览需要把 `apps/miniprogram/src/app.ts` 的 `apiBaseUrl` 改为：
