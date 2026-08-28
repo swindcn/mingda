@@ -150,6 +150,15 @@ https://www.mindajixie.cn
 
 合法域名不包含 `/mes/api` 路径。上传前检查 `apps/miniprogram/dist/app.js`，确认其中没有 `127.0.0.1`、`localhost` 或 `__MINGDA_API_BASE_URL__`，并确认 `apiBaseUrl` 为生产 API 地址。
 
+完成检查后，不再运行其他构建命令，直接按以下步骤上传：
+
+1. 在微信开发者工具中导入或打开小程序项目根目录 `apps/miniprogram`。
+2. 确认 AppID 与 `project.config.json` 及计划发布的小程序账号一致。
+3. 点击“上传”，填写版本号和发布说明。
+4. 在微信公众平台“版本管理”中选择刚上传的版本，提交审核；审核通过后再发布。
+
+平台提交审核和发布必须在微信公众平台完成，Codex 不执行这些操作。
+
 打开微信开发者工具：
 
 ```text
@@ -162,7 +171,8 @@ https://www.mindajixie.cn
 - 微信开发者工具导入小程序项目根目录 `apps/miniprogram`，实际读取 `dist/`
 - 微信开发者工具不会直接读取 `src/*.ts`
 - 每次修改 `src` 后本地开发或体验评审先运行对应的 `build:dev` 或 `build:prod`
-- 测试在隔离临时目录中构建，不会修改共享的 `dist` 包
+- `npm --prefix apps/miniprogram test` 会先运行 `build:dev`，因此会更新共享的 `dist`
+- 只有环境构建回归测试使用隔离临时目录，不会修改共享的 `dist` 包
 - 如果提示 `app.json 未找到 pages/login/index.js`，说明没有构建或 `dist` 缺文件
 
 ## 已初始化页面
