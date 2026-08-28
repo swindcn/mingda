@@ -1,9 +1,12 @@
 import { cp, mkdir, readdir } from 'node:fs/promises'
-import { dirname, extname, join, relative } from 'node:path'
+import { dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url))
-const distRoot = fileURLToPath(new URL('../dist/', import.meta.url))
+const appRoot = fileURLToPath(new URL('../', import.meta.url))
+const distRoot = process.env.MINGDA_MINIPROGRAM_DIST_DIR
+  ? resolve(appRoot, process.env.MINGDA_MINIPROGRAM_DIST_DIR)
+  : join(appRoot, 'dist')
 const staticExtensions = new Set(['.json', '.wxml', '.wxss', '.svg', '.png', '.jpg', '.jpeg', '.webp'])
 
 async function copyStaticFiles(directoryPath) {

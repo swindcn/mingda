@@ -4,27 +4,31 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const appRoot = fileURLToPath(new URL('../', import.meta.url))
-const distRoot = join(appRoot, 'dist')
+const distRoot = process.env.MINGDA_MINIPROGRAM_DIST_DIR
+  ? resolve(appRoot, process.env.MINGDA_MINIPROGRAM_DIST_DIR)
+  : join(appRoot, 'dist')
 const apiBaseUrls = {
   dev: 'http://127.0.0.1:3000/api',
   prod: 'https://www.mindajixie.cn/mes/api',
 }
 const placeholder = '__MINGDA_API_BASE_URL__'
-const textualExtensions = new Set(['.js', '.json', '.wxml', '.wxss', '.svg', '.html', '.txt'])
+const binaryAssetExtensions = new Set([
+  '.avif', '.bmp', '.eot', '.gif', '.ico', '.jpeg', '.jpg', '.otf', '.png', '.ttf', '.webp', '.woff', '.woff2',
+])
 
-async function findTextualArtifacts(directoryPath, rootPath = directoryPath) {
+async function findScannableArtifacts(directoryPath, rootPath = directoryPath) {
   const artifacts = []
   const entries = await readdir(directoryPath, { withFileTypes: true })
 
   for (const entry of entries) {
     const artifactPath = join(directoryPath, entry.name)
     if (entry.isDirectory()) {
-      artifacts.push(...await findTextualArtifacts(artifactPath, rootPath))
+      artifacts.push(...await findScannableArtifacts(artifactPath, rootPath))
       continue
     }
 
     const extension = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase()
-    if (textualExtensions.has(extension)) {
+    if (entry.isFile() && !binaryAssetExtensions.has(extension)) {
       artifacts.push({ path: artifactPath, relativePath: relative(rootPath, artifactPath) })
     }
   }
@@ -51,7 +55,7 @@ export async function validateBuildArtifacts(directoryPath, mode) {
   }
 
   const violations = []
-  for (const artifact of await findTextualArtifacts(directoryPath)) {
+  for (const artifact of await findScannableArtifacts(directoryPath)) {
     const contents = await readFile(artifact.path, 'utf8')
     for (const [pattern, label] of forbiddenPatterns) {
       if (contents.includes(pattern)) {
@@ -90,7 +94,13 @@ async function build(buildMode) {
   }
 
   await rm(distRoot, { recursive: true, force: true })
-  run(process.execPath, [join(appRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.json'])
+  run(process.execPath, [
+    join(appRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
+    '-p',
+    'tsconfig.json',
+    '--outDir',
+    distRoot,
+  ])
   run(process.execPath, [join(appRoot, 'scripts', 'copy-static.mjs')])
 
   const appBundlePath = join(distRoot, 'app.js')
