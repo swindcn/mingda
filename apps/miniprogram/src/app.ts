@@ -1,6 +1,6 @@
 App<IAppOption>({
   globalData: {
-    apiBaseUrl: 'http://127.0.0.1:3000/api',
+    apiBaseUrl: '__MINGDA_API_BASE_URL__',
     token: '',
     userType: '',
     isSupplierEmployee: false,
