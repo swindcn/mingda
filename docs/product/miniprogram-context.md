@@ -128,7 +128,7 @@ npm --prefix apps/miniprogram run typecheck
 npm --prefix apps/miniprogram run build:dev
 ```
 
-体验、评审和生产构建：
+体验版、审核版和正式版构建：
 
 ```bash
 npm --prefix apps/miniprogram run build:prod
@@ -362,5 +362,5 @@ https://www.mindajixie.cn/mes/api
 - 不要手动编辑 `dist`，只改 `src`。
 - 不要删除 `scripts/copy-static.mjs`，它负责把 WXML/WXSS/JSON 复制到 `dist`。
 - `project.config.json` 已经把 `miniprogramRoot` 指向 `dist/`。
-- 微信开发者工具报页面 `.js` 不存在时，先运行 `npm run build:miniprogram`。
+- 微信开发者工具报页面 `.js` 不存在时，先运行 `npm --prefix apps/miniprogram run build:dev`。
 - 当前 `appid` 可在 `project.config.json` 替换为真实 AppID。
