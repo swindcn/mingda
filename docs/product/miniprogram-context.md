@@ -108,7 +108,7 @@ apps/miniprogram
   src/pages/mold/edit/index.*
 ```
 
-## 构建与验证
+## 构建环境与正式上传
 
 安装依赖：
 
@@ -119,14 +119,36 @@ npm --prefix apps/miniprogram install
 类型检查：
 
 ```bash
-npm run typecheck:miniprogram
+npm --prefix apps/miniprogram run typecheck
 ```
 
-构建到 `dist`：
+本地开发构建：
 
 ```bash
-npm run build:miniprogram
+npm --prefix apps/miniprogram run build:dev
 ```
+
+体验、评审和生产构建：
+
+```bash
+npm --prefix apps/miniprogram run build:prod
+```
+
+默认 `build` 仍然使用开发构建，不能把默认构建命令作为正式上传命令。正式上传前必须以 `build:prod` 作为最后一条构建命令。
+
+生产 API 地址：
+
+```text
+https://www.mindajixie.cn/mes/api
+```
+
+微信合法域名填写：
+
+```text
+https://www.mindajixie.cn
+```
+
+合法域名不包含 `/mes/api` 路径。上传前检查 `apps/miniprogram/dist/app.js`，确认其中没有 `127.0.0.1`、`localhost` 或 `__MINGDA_API_BASE_URL__`，并确认 `apiBaseUrl` 为生产 API 地址。
 
 打开微信开发者工具：
 
@@ -137,8 +159,10 @@ npm run build:miniprogram
 重要注意：
 
 - `project.config.json` 的 `miniprogramRoot` 是 `dist/`
+- 微信开发者工具导入小程序项目根目录 `apps/miniprogram`，实际读取 `dist/`
 - 微信开发者工具不会直接读取 `src/*.ts`
-- 每次修改 `src` 后必须先运行 `npm run build:miniprogram`
+- 每次修改 `src` 后本地开发或体验评审先运行对应的 `build:dev` 或 `build:prod`
+- 测试在隔离临时目录中构建，不会修改共享的 `dist` 包
 - 如果提示 `app.json 未找到 pages/login/index.js`，说明没有构建或 `dist` 缺文件
 
 ## 已初始化页面
@@ -295,10 +319,10 @@ apps/miniprogram/src/utils/request.ts
 }
 ```
 
-默认 API 地址：
+生产 API 地址：
 
 ```text
-http://127.0.0.1:3000/api
+https://www.mindajixie.cn/mes/api
 ```
 
 ## 与管理端一致的业务规则
