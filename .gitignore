@@ -36,5 +36,6 @@ apps/miniprogram/project.private.config.json
 # Local browser/test artifacts
 .playwright-cli/
 .superpowers/
+.worktrees/
 .workbuddy/
 output/
